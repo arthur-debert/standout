@@ -42,10 +42,10 @@ fn test_help_topic_resolution() {
         vec!["myapp", "help", "guidelines"]
     );
     
-    if let TopicHelpResult::PrintedHelp(h) = res {
+    if let TopicHelpResult::Help(h) = res {
         assert!(h.contains("Follow these guidelines..."));
     } else {
-        panic!("Expected PrintedHelp for topic, got {:?}", res);
+        panic!("Expected Help for topic, got {:?}", res);
     }
 }
 
@@ -61,13 +61,13 @@ fn test_help_command_shadows_topic() {
         vec!["myapp", "help", "init"]
     );
 
-    if let TopicHelpResult::PrintedHelp(h) = res {
+    if let TopicHelpResult::Help(h) = res {
         // It should be clap help for init command
         assert!(h.contains("Initialize the app"));
         // It should NOT contain the topic content
         assert!(!h.contains("This topic is named init but command should shadow it"));
     } else {
-        panic!("Expected PrintedHelp for command, got {:?}", res);
+        panic!("Expected Help for command, got {:?}", res);
     }
 }
 

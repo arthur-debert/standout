@@ -62,8 +62,8 @@ pub struct TopicHelper {
 pub enum TopicHelpResult {
     /// Normal matches found (no help requested).
     Matches(clap::ArgMatches),
-    /// Help was printed for a topic or command.
-    PrintedHelp(String),
+    /// Help was rendered for a topic or command. Caller should print or display as needed.
+    Help(String),
     /// Error: Subcommand or topic not found.
     /// We return the clap Error so caller can exit or handle it.
     Error(clap::Error),
@@ -123,10 +123,9 @@ impl TopicHelper {
                          return self.handle_help_request(&mut app, &keywords);
                      }
                 }
-                // If "help" is called without args, we print the root help
+                // If "help" is called without args, return the root help
                 if let Ok(h) = render_help(&app, None) {
-                    println!("{}", h);
-                    return TopicHelpResult::PrintedHelp(h);
+                    return TopicHelpResult::Help(h);
                 }
             }
         }
@@ -142,21 +141,19 @@ impl TopicHelper {
         if find_subcommand(cmd, sub_name).is_some() {
              if let Some(target) = find_subcommand_recursive(cmd, keywords) {
                  if let Ok(h) = render_help(target, None) {
-                     println!("{}", h);
-                     return TopicHelpResult::PrintedHelp(h);
+                     return TopicHelpResult::Help(h);
                  }
-             } 
+             }
              // If recursive find fails but top level existed, maybe print top level help?
              // Or let it be an error?
              // Fallthrough to topic check? No, standard clap behavior forbids ambiguity?
              // If a command exists, we favor it.
         }
-        
+
         // 2. Check if it is a topic
         if let Some(topic) = self.registry.get_topic(sub_name) {
              if let Ok(h) = render_topic(topic, None) {
-                 println!("{}", h);
-                 return TopicHelpResult::PrintedHelp(h);
+                 return TopicHelpResult::Help(h);
              }
         }
         
