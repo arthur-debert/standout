@@ -41,12 +41,17 @@ impl Topic {
 
     fn generate_slug(title: &str) -> String {
         let transliterated = deunicode(title);
-        transliterated
+        let mut slug: String = transliterated
             .to_lowercase()
             .replace(' ', "-")
             .chars()
             .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
-            .collect()
+            .collect();
+        // Collapse consecutive dashes
+        while slug.contains("--") {
+            slug = slug.replace("--", "-");
+        }
+        slug
     }
 }
 
@@ -180,8 +185,7 @@ mod tests {
     #[test]
     fn test_slug_generation() {
         assert_eq!(Topic::generate_slug("Hello World"), "hello-world");
-        assert_eq!(Topic::generate_slug("Testing  123"), "testing--123"); // Simple replace creates double dash, maybe user wants dedupe? 
-        // "spaces to dashes" -> strictly interpreted.
+        assert_eq!(Topic::generate_slug("Testing  123"), "testing-123"); // Consecutive dashes are collapsed
         assert_eq!(Topic::generate_slug("Olá Mundo"), "ola-mundo");
         assert_eq!(Topic::generate_slug("Café"), "cafe");
     }
