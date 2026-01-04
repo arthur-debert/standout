@@ -24,11 +24,165 @@
 //! println!("{}", help);
 //! ```
 
+//!
+//! # Topics Support
+//! 
+//! This module also supports a "Topics" system, where you can register valid help topics (like "syntax", "environment", etc.)
+//! and have them be resolvable via `help <topic>`.
+//! 
+//! ```rust
+//! # use clap::Command;
+//! # use outstanding_clap::TopicHelper;
+//! # use outstanding::topics::{Topic, TopicRegistry, TopicType};
+//! 
+//! let mut topics = TopicRegistry::new();
+//! topics.add_topic(Topic::new("syntax", "Syntax Guide...", TopicType::Text, None));
+//! 
+//! let helper = TopicHelper::new(topics);
+//! let cmd = Command::new("my-app");
+//! 
+//! // In your main loop:
+//! // match helper.get_matches(cmd) { ... }
+//! ```
+
+use outstanding::topics::TopicRegistry;
 use outstanding::{render_with_color, Theme, ThemeChoice};
-use clap::Command;
+use clap::{Command, Arg, ArgAction};
 use console::Style;
 use serde::Serialize;
 use std::collections::BTreeMap;
+
+/// Helper to integrate Clap with Outstanding Topics.
+pub struct TopicHelper {
+    registry: TopicRegistry,
+}
+
+/// Result of the topic help interception.
+#[derive(Debug)]
+pub enum TopicHelpResult {
+    /// Normal matches found (no help requested).
+    Matches(clap::ArgMatches),
+    /// Help was printed for a topic or command.
+    PrintedHelp(String),
+    /// Error: Subcommand or topic not found.
+    /// We return the clap Error so caller can exit or handle it.
+    Error(clap::Error),
+}
+
+impl TopicHelper {
+    pub fn new(registry: TopicRegistry) -> Self {
+        Self { registry }
+    }
+
+    /// Prepares the command for topic support.
+    /// It disables the default help subcommand so we can capture `help <arg>` manually.
+    pub fn augment_command(&self, cmd: Command) -> Command {
+        cmd.disable_help_subcommand(true)
+            .subcommand(
+                Command::new("help")
+                    .about("Print this message or the help of the given subcommand(s)")
+                    // We allow ignoring errors here because when we run augment_command
+                    // inside get_matches we might be deep cloning or similar.
+                    // Actually, disable_help_subcommand just sets a flag.
+                    .arg(
+                        Arg::new("topic")
+                            .action(ArgAction::Set)
+                            .num_args(1..)
+                            .help("The subcommand or topic to print help for"),
+                    )
+            )
+    }
+
+    /// Attempts to get matches from the command line, intercepting `help` requests.
+    /// Returns a `TopicHelpResult`.
+    pub fn get_matches(&self, cmd: Command) -> TopicHelpResult {
+        self.get_matches_from(cmd, std::env::args())
+    }
+
+    /// Attempts to get matches from the given arguments, intercepting `help` requests.
+    pub fn get_matches_from<I, T>(&self, cmd: Command, itr: I) -> TopicHelpResult 
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<std::ffi::OsString> + Clone,
+    {
+        let cmd = self.augment_command(cmd);
+        
+        // We clone cmd because we might need it for rendering help
+        let mut app = cmd.clone(); 
+        
+        let matches = match cmd.try_get_matches_from(itr) {
+            Ok(m) => m,
+            Err(e) => return TopicHelpResult::Error(e),
+        };
+
+        if let Some((name, sub_matches)) = matches.subcommand() {
+            if name == "help" {
+                if let Some(topic_args) = sub_matches.get_many::<String>("topic") {
+                    let keywords: Vec<_> = topic_args.map(|s| s.as_str()).collect();
+                     if !keywords.is_empty() {
+                         return self.handle_help_request(&mut app, &keywords);
+                     }
+                }
+                // If "help" is called without args, we print the root help
+                if let Ok(h) = render_help(&app, None) {
+                    println!("{}", h);
+                    return TopicHelpResult::PrintedHelp(h);
+                }
+            }
+        }
+
+        TopicHelpResult::Matches(matches)
+    }
+
+    /// Handles a request for specific help e.g. `help foo`
+    fn handle_help_request(&self, cmd: &mut Command, keywords: &[&str]) -> TopicHelpResult {
+        let sub_name = keywords[0];
+        
+        // 1. Check if it's a real command
+        if find_subcommand(cmd, sub_name).is_some() {
+             if let Some(target) = find_subcommand_recursive(cmd, keywords) {
+                 if let Ok(h) = render_help(target, None) {
+                     println!("{}", h);
+                     return TopicHelpResult::PrintedHelp(h);
+                 }
+             } 
+             // If recursive find fails but top level existed, maybe print top level help?
+             // Or let it be an error?
+             // Fallthrough to topic check? No, standard clap behavior forbids ambiguity?
+             // If a command exists, we favor it.
+        }
+        
+        // 2. Check if it is a topic
+        if let Some(topic) = self.registry.get_topic(sub_name) {
+             let out = format!("{}\n{}", topic.title, topic.content);
+             println!("{}", out);
+             return TopicHelpResult::PrintedHelp(out);
+        }
+        
+        // 3. Not found
+        let err = cmd.error(
+            clap::error::ErrorKind::InvalidSubcommand, 
+            format!("The subcommand or topic '{}' wasn't recognized", sub_name)
+        );
+        TopicHelpResult::Error(err)
+    }
+}
+
+fn find_subcommand_recursive<'a>(cmd: &'a Command, keywords: &[&str]) -> Option<&'a Command> {
+    let mut current = cmd;
+    for k in keywords {
+        if let Some(sub) = find_subcommand(current, k) {
+            current = sub;
+        } else {
+            return None;
+        }
+    }
+    Some(current)
+}
+
+fn find_subcommand<'a>(cmd: &'a Command, name: &str) -> Option<&'a Command> {
+    cmd.get_subcommands().find(|s| s.get_name() == name || s.get_aliases().any(|a| a == name))
+}
 
 /// Configuration for the help renderer
 #[derive(Debug, Clone, Default)]
