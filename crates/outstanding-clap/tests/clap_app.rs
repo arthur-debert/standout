@@ -1,4 +1,4 @@
-use clap::{Command, Arg, Subcommand};
+use clap::Command;
 use outstanding::topics::{Topic, TopicRegistry, TopicType};
 use outstanding_clap::{TopicHelper, TopicHelpResult};
 
