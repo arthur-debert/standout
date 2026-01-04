@@ -79,6 +79,16 @@ impl TopicHelper {
         TopicHelperBuilder::new()
     }
 
+    /// Returns a reference to the topic registry.
+    pub fn registry(&self) -> &TopicRegistry {
+        &self.registry
+    }
+
+    /// Returns a mutable reference to the topic registry.
+    pub fn registry_mut(&mut self) -> &mut TopicRegistry {
+        &mut self.registry
+    }
+
     /// Prepares the command for topic support.
     /// It disables the default help subcommand so we can capture `help <arg>` manually.
     pub fn augment_command(&self, cmd: Command) -> Command {
