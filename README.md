@@ -1,23 +1,19 @@
 # outstanding
 
-Styled CLI template rendering with automatic terminal detection.
+Outstanding is shell rendering library that allows your to deveop your application to be shell agnostic, being unit tested and easier to write and maintain. Likewise it decouples the rendetring from the model, giving you a interface that is easier to fine tune and update.
 
-Outstanding lets you render rich CLI output from templates while keeping all
-presentation details (colors, bold, underline, layout) outside of your
-application logic. It layers [minijinja](https://docs.rs/minijinja) (templates)
-with the [console](https://docs.rs/console) crate (terminal styling) and handles:
+We've been pretty good at not mixing arg parsing and application logic for a while, with greate libs like clasp. Thankfully, you
+won't see a logic three modules later thatn program execution parsing an ad hoc option from the input string.  That can't be said about the output, commonly integrmingled with logic, with prints to std out or std mid program and premature convertion of data types to strings.  This makes programs hard to test, maintain and design.
 
-- Clean templates: no inline `\x1b` escape codes
-- Shared style definitions across multiple templates
-- Automatic detection of terminal capabilities (TTY vs. pipes, `CLICOLOR`, etc.)
-- Optional light/dark mode via `AdaptiveTheme`
-- RGB helpers that convert `#rrggbb` values to the nearest ANSI color
+**Outstanding** is a library for rendering your application into terminal, be ir plain tech, richer formatting or textual or binary data that helps isolate logic and presentation. It support templates strings, template files and style sheets and is smart about gracefully degrading output to plain text when needed.
+
+![alt text](assets/architecture.svg)
 
 ## Installation
 
 ```toml
 [dependencies]
-outstanding = "0.2"
+outstanding = "0.2.2"
 ```
 
 ## Quick Start
