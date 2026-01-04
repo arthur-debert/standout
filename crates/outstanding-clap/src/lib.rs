@@ -350,11 +350,8 @@ fn extract_help_data(cmd: &Command) -> HelpData {
     let mut max_width = 0;
 
     let mut subs: Vec<_> = cmd.get_subcommands().filter(|s| !s.is_hide_set()).collect();
-    subs.sort_by(|a, b| {
-        a.get_display_order()
-            .cmp(&b.get_display_order())
-            .then_with(|| a.get_name().cmp(b.get_name()))
-    });
+    // Stable sort by display_order only - preserves declaration order for equal display_orders
+    subs.sort_by_key(|s| s.get_display_order());
 
     for sub in subs {
         let name = sub.get_name().to_string();
@@ -390,11 +387,8 @@ fn extract_help_data(cmd: &Command) -> HelpData {
 
     // Clap args are also not sorted by display order by default in iterator
     let mut args: Vec<_> = cmd.get_arguments().filter(|a| !a.is_hide_set()).collect();
-    args.sort_by(|a, b| {
-        a.get_display_order()
-            .cmp(&b.get_display_order())
-            .then_with(|| a.get_id().cmp(b.get_id()))
-    });
+    // Stable sort by display_order only - preserves declaration order for equal display_orders
+    args.sort_by_key(|a| a.get_display_order());
 
     for arg in args {
         let mut name = String::new();
@@ -483,36 +477,13 @@ mod tests {
 
     #[test]
     fn test_ordering_declaration() {
-        // "Zoo" declared first, "Air" second.
-        // By default clap (and our extraction) should preserve declaration order unless sorted.
-        // We explicitly sort by display_order (0 default) then Name.
-        // Wait, current implementation sorts by DisplayOrder THEN Name.
-        // So "Air" (A) should come before "Zoo" (Z) if display_order is equal.
-        // If we want "Zoo" first (declaration order), we must set display_order manually or rely on index?
-        // Clap's `get_subcommands()` returns in declaration order.
-        // My implementation:
-        // `subs.sort_by(|a, b| a.get_display_order().cmp(...).then_with(|| a.get_name().cmp(b.get_name())))`
-        // THIS MEANS I FORCE ALPHABETICAL ORDER if display_order is 0.
-        // User request: "ensureing that ordering workds correctly by declaration order"
-        // This implies user WANTS declaration order to be preserved by default?
-        // OR user wants me to VERIFY that "first declared group being lexografically later" (Zoo, Air) -> Zoo comes first?
-        // If I strictly sort by Name when display_order is 0, then "Air" comes first.
-        // Clap's default behavior: "By default, the help message will display the arguments in the order they were declared, unless derived..."
-        // Wait, clap builder API preserves declaration order.
-        // My sorting key: `display_order` THEN `name`.
-        // If I want to match clap default (declaration order), I should NOT sort by name as primary secondary.
-        // I should sort by DisplayOrder, then... Declaration Order?
-        // `Command` doesn't strictly expose "index" of declaration publicly on `get_subcommands()` iterator directly?
-        // Actually `get_subcommands()` returns them in order of insertion.
-        // So if I use `sort_by` (which is stable), and only sort by `display_order`, I preserve declaration order for equal display_orders.
-        // FIX: Remove `then_with name` to respect declaration order for equal priorities.
-
+        // Declaration order should be preserved when display_order is equal.
+        // "Zoo" is declared first, "Air" second - they should appear in that order.
         let cmd = Command::new("root")
             .subcommand(Command::new("Zoo"))
             .subcommand(Command::new("Air"));
 
         let data = extract_help_data(&cmd);
-        // With corrected sorting (stable sort by display_order only), "Zoo" should be first.
         assert_eq!(data.subcommands[0].commands[0].name, "Zoo");
         assert_eq!(data.subcommands[0].commands[1].name, "Air");
     }
