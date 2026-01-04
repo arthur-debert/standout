@@ -108,3 +108,50 @@ fn test_normal_execution() {
         panic!("Expected Matches for normal command, got {:?}", res);
     }
 }
+
+#[test]
+fn test_help_without_args() {
+    let registry = setup_registry();
+    let helper = TopicHelper::new(registry);
+    let cmd = setup_command();
+
+    // "help" without args -> Should return root help
+    let res = helper.get_matches_from(
+        cmd.clone(),
+        vec!["myapp", "help"]
+    );
+
+    if let TopicHelpResult::Help(h) = res {
+        // Should contain info about the app
+        assert!(h.contains("myapp"));
+    } else {
+        panic!("Expected Help for root help, got {:?}", res);
+    }
+}
+
+#[test]
+fn test_nested_subcommand_help() {
+    let registry = TopicRegistry::new();
+    let helper = TopicHelper::new(registry);
+
+    // Create a command with nested subcommands
+    let cmd = Command::new("myapp")
+        .subcommand(
+            Command::new("config")
+                .about("Configuration commands")
+                .subcommand(Command::new("get").about("Get a config value"))
+                .subcommand(Command::new("set").about("Set a config value"))
+        );
+
+    // "help config get" -> Should return help for nested subcommand
+    let res = helper.get_matches_from(
+        cmd.clone(),
+        vec!["myapp", "help", "config", "get"]
+    );
+
+    if let TopicHelpResult::Help(h) = res {
+        assert!(h.contains("Get a config value"));
+    } else {
+        panic!("Expected Help for nested subcommand, got {:?}", res);
+    }
+}

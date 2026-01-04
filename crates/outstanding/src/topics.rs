@@ -247,4 +247,41 @@ mod tests {
         assert!(registry.get_topic("short").is_none());
         assert!(registry.get_topic("empty_body").is_none());
     }
+
+    #[test]
+    fn test_add_from_nonexistent_directory() {
+        let mut registry = TopicRegistry::new();
+        let result = registry.add_from_directory("/nonexistent/path/that/does/not/exist");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn test_add_from_directory_if_exists_nonexistent() {
+        let mut registry = TopicRegistry::new();
+        // Should succeed silently for non-existent directory
+        let result = registry.add_from_directory_if_exists("/nonexistent/path");
+        assert!(result.is_ok());
+        assert_eq!(registry.list_topics().len(), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "Topic collision")]
+    fn test_directory_collision() {
+        let dir1 = tempdir().unwrap();
+        let dir2 = tempdir().unwrap();
+
+        // Same filename in both directories
+        let p1 = dir1.path().join("shared.txt");
+        let mut f1 = File::create(&p1).unwrap();
+        writeln!(f1, "Title 1\nContent 1").unwrap();
+
+        let p2 = dir2.path().join("shared.txt");
+        let mut f2 = File::create(&p2).unwrap();
+        writeln!(f2, "Title 2\nContent 2").unwrap();
+
+        let mut registry = TopicRegistry::new();
+        registry.add_from_directory(dir1.path()).unwrap();
+        registry.add_from_directory(dir2.path()).unwrap(); // Should panic
+    }
 }
