@@ -24,11 +24,216 @@
 //! println!("{}", help);
 //! ```
 
+//!
+//! # Topics Support
+//! 
+//! This module also supports a "Topics" system, where you can register valid help topics (like "syntax", "environment", etc.)
+//! and have them be resolvable via `help <topic>`.
+//! 
+//! ```rust
+//! # use clap::Command;
+//! # use outstanding_clap::TopicHelper;
+//! # use outstanding::topics::{Topic, TopicRegistry, TopicType};
+//! 
+//! let mut topics = TopicRegistry::new();
+//! topics.add_topic(Topic::new("syntax", "Syntax Guide...", TopicType::Text, None));
+//! 
+//! let helper = TopicHelper::new(topics);
+//! let cmd = Command::new("my-app");
+//! 
+//! // In your main loop:
+//! // match helper.get_matches(cmd) { ... }
+//! ```
+
+use outstanding::topics::{Topic, TopicRegistry};
 use outstanding::{render_with_color, Theme, ThemeChoice};
-use clap::Command;
+use clap::{Command, Arg, ArgAction};
 use console::Style;
 use serde::Serialize;
 use std::collections::BTreeMap;
+
+/// Helper to integrate Clap with Outstanding Topics.
+pub struct TopicHelper {
+    registry: TopicRegistry,
+}
+
+/// Result of the topic help interception.
+#[derive(Debug)]
+pub enum TopicHelpResult {
+    /// Normal matches found (no help requested).
+    Matches(clap::ArgMatches),
+    /// Help was rendered for a topic or command. Caller should print or display as needed.
+    Help(String),
+    /// Error: Subcommand or topic not found.
+    /// We return the clap Error so caller can exit or handle it.
+    Error(clap::Error),
+}
+
+impl TopicHelper {
+    pub fn new(registry: TopicRegistry) -> Self {
+        Self { registry }
+    }
+
+    /// Creates a new builder for constructing a TopicHelper.
+    pub fn builder() -> TopicHelperBuilder {
+        TopicHelperBuilder::new()
+    }
+
+    /// Returns a reference to the topic registry.
+    pub fn registry(&self) -> &TopicRegistry {
+        &self.registry
+    }
+
+    /// Returns a mutable reference to the topic registry.
+    pub fn registry_mut(&mut self) -> &mut TopicRegistry {
+        &mut self.registry
+    }
+
+    /// Prepares the command for topic support.
+    /// It disables the default help subcommand so we can capture `help <arg>` manually.
+    pub fn augment_command(&self, cmd: Command) -> Command {
+        cmd.disable_help_subcommand(true)
+            .subcommand(
+                Command::new("help")
+                    .about("Print this message or the help of the given subcommand(s)")
+                    // We allow ignoring errors here because when we run augment_command
+                    // inside get_matches we might be deep cloning or similar.
+                    // Actually, disable_help_subcommand just sets a flag.
+                    .arg(
+                        Arg::new("topic")
+                            .action(ArgAction::Set)
+                            .num_args(1..)
+                            .help("The subcommand or topic to print help for"),
+                    )
+            )
+    }
+
+    /// Attempts to get matches from the command line, intercepting `help` requests.
+    /// Returns a `TopicHelpResult`.
+    pub fn get_matches(&self, cmd: Command) -> TopicHelpResult {
+        self.get_matches_from(cmd, std::env::args())
+    }
+
+    /// Attempts to get matches from the given arguments, intercepting `help` requests.
+    pub fn get_matches_from<I, T>(&self, cmd: Command, itr: I) -> TopicHelpResult
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<std::ffi::OsString> + Clone,
+    {
+        let mut cmd = self.augment_command(cmd);
+
+        let matches = match cmd.clone().try_get_matches_from(itr) {
+            Ok(m) => m,
+            Err(e) => return TopicHelpResult::Error(e),
+        };
+
+        if let Some((name, sub_matches)) = matches.subcommand() {
+            if name == "help" {
+                if let Some(topic_args) = sub_matches.get_many::<String>("topic") {
+                    let keywords: Vec<_> = topic_args.map(|s| s.as_str()).collect();
+                     if !keywords.is_empty() {
+                         return self.handle_help_request(&mut cmd, &keywords);
+                     }
+                }
+                // If "help" is called without args, return the root help
+                if let Ok(h) = render_help(&cmd, None) {
+                    return TopicHelpResult::Help(h);
+                }
+            }
+        }
+
+        TopicHelpResult::Matches(matches)
+    }
+
+    /// Handles a request for specific help e.g. `help foo`
+    fn handle_help_request(&self, cmd: &mut Command, keywords: &[&str]) -> TopicHelpResult {
+        let sub_name = keywords[0];
+        
+        // 1. Check if it's a real command
+        if find_subcommand(cmd, sub_name).is_some() {
+             if let Some(target) = find_subcommand_recursive(cmd, keywords) {
+                 if let Ok(h) = render_help(target, None) {
+                     return TopicHelpResult::Help(h);
+                 }
+             }
+             // If recursive find fails but top level existed, maybe print top level help?
+             // Or let it be an error?
+             // Fallthrough to topic check? No, standard clap behavior forbids ambiguity?
+             // If a command exists, we favor it.
+        }
+
+        // 2. Check if it is a topic
+        if let Some(topic) = self.registry.get_topic(sub_name) {
+             if let Ok(h) = render_topic(topic, None) {
+                 return TopicHelpResult::Help(h);
+             }
+        }
+        
+        // 3. Not found
+        let err = cmd.error(
+            clap::error::ErrorKind::InvalidSubcommand, 
+            format!("The subcommand or topic '{}' wasn't recognized", sub_name)
+        );
+        TopicHelpResult::Error(err)
+    }
+}
+
+/// Builder for constructing a TopicHelper with topics and directories.
+///
+/// # Example
+/// ```rust
+/// # use outstanding_clap::TopicHelper;
+/// let helper = TopicHelper::builder()
+///     .add_directory("docs/topics")
+///     .build();
+/// ```
+#[derive(Default)]
+pub struct TopicHelperBuilder {
+    registry: TopicRegistry,
+}
+
+impl TopicHelperBuilder {
+    /// Creates a new builder.
+    pub fn new() -> Self {
+        Self {
+            registry: TopicRegistry::new(),
+        }
+    }
+
+    /// Adds a topic to the helper.
+    pub fn add_topic(mut self, topic: Topic) -> Self {
+        self.registry.add_topic(topic);
+        self
+    }
+
+    /// Adds topics from a directory. Only .txt and .md files are processed.
+    /// Silently ignores non-existent directories.
+    pub fn add_directory(mut self, path: impl AsRef<std::path::Path>) -> Self {
+        let _ = self.registry.add_from_directory_if_exists(path);
+        self
+    }
+
+    /// Builds the TopicHelper with all configured topics.
+    pub fn build(self) -> TopicHelper {
+        TopicHelper::new(self.registry)
+    }
+}
+
+fn find_subcommand_recursive<'a>(cmd: &'a Command, keywords: &[&str]) -> Option<&'a Command> {
+    let mut current = cmd;
+    for k in keywords {
+        if let Some(sub) = find_subcommand(current, k) {
+            current = sub;
+        } else {
+            return None;
+        }
+    }
+    Some(current)
+}
+
+fn find_subcommand<'a>(cmd: &'a Command, name: &str) -> Option<&'a Command> {
+    cmd.get_subcommands().find(|s| s.get_name() == name || s.get_aliases().any(|a| a == name))
+}
 
 /// Configuration for the help renderer
 #[derive(Debug, Clone, Default)]
@@ -57,6 +262,33 @@ pub fn render_help(cmd: &Command, config: Option<Config>) -> Result<String, outs
     let data = extract_help_data(cmd);
 
     render_with_color(template, &data, ThemeChoice::from(&theme), use_color)
+}
+
+/// Renders a topic using outstanding templating.
+pub fn render_topic(topic: &Topic, config: Option<Config>) -> Result<String, outstanding::Error> {
+    let config = config.unwrap_or_default();
+    let template = config
+        .template
+        .as_deref()
+        .unwrap_or(include_str!("topic_template.txt"));
+
+    let theme = config.theme.unwrap_or_else(default_theme);
+    let use_color = config
+        .use_color
+        .unwrap_or_else(|| console::Term::stdout().features().colors_supported());
+
+    let data = TopicData {
+        title: topic.title.clone(),
+        content: topic.content.clone(),
+    };
+
+    render_with_color(template, &data, ThemeChoice::from(&theme), use_color)
+}
+
+#[derive(Serialize)]
+struct TopicData {
+    title: String,
+    content: String,
 }
 
 fn default_theme() -> Theme {
@@ -115,11 +347,8 @@ fn extract_help_data(cmd: &Command) -> HelpData {
     let mut max_width = 0;
 
     let mut subs: Vec<_> = cmd.get_subcommands().filter(|s| !s.is_hide_set()).collect();
-    subs.sort_by(|a, b| {
-        a.get_display_order()
-            .cmp(&b.get_display_order())
-            .then_with(|| a.get_name().cmp(b.get_name()))
-    });
+    // Stable sort by display_order only - preserves declaration order for equal display_orders
+    subs.sort_by_key(|s| s.get_display_order());
 
     for sub in subs {
         let name = sub.get_name().to_string();
@@ -155,11 +384,8 @@ fn extract_help_data(cmd: &Command) -> HelpData {
 
     // Clap args are also not sorted by display order by default in iterator
     let mut args: Vec<_> = cmd.get_arguments().filter(|a| !a.is_hide_set()).collect();
-    args.sort_by(|a, b| {
-        a.get_display_order()
-            .cmp(&b.get_display_order())
-            .then_with(|| a.get_id().cmp(b.get_id()))
-    });
+    // Stable sort by display_order only - preserves declaration order for equal display_orders
+    args.sort_by_key(|a| a.get_display_order());
 
     for arg in args {
         let mut name = String::new();
@@ -248,36 +474,13 @@ mod tests {
 
     #[test]
     fn test_ordering_declaration() {
-        // "Zoo" declared first, "Air" second.
-        // By default clap (and our extraction) should preserve declaration order unless sorted.
-        // We explicitly sort by display_order (0 default) then Name.
-        // Wait, current implementation sorts by DisplayOrder THEN Name.
-        // So "Air" (A) should come before "Zoo" (Z) if display_order is equal.
-        // If we want "Zoo" first (declaration order), we must set display_order manually or rely on index?
-        // Clap's `get_subcommands()` returns in declaration order.
-        // My implementation:
-        // `subs.sort_by(|a, b| a.get_display_order().cmp(...).then_with(|| a.get_name().cmp(b.get_name())))`
-        // THIS MEANS I FORCE ALPHABETICAL ORDER if display_order is 0.
-        // User request: "ensureing that ordering workds correctly by declaration order"
-        // This implies user WANTS declaration order to be preserved by default?
-        // OR user wants me to VERIFY that "first declared group being lexografically later" (Zoo, Air) -> Zoo comes first?
-        // If I strictly sort by Name when display_order is 0, then "Air" comes first.
-        // Clap's default behavior: "By default, the help message will display the arguments in the order they were declared, unless derived..."
-        // Wait, clap builder API preserves declaration order.
-        // My sorting key: `display_order` THEN `name`.
-        // If I want to match clap default (declaration order), I should NOT sort by name as primary secondary.
-        // I should sort by DisplayOrder, then... Declaration Order?
-        // `Command` doesn't strictly expose "index" of declaration publicly on `get_subcommands()` iterator directly?
-        // Actually `get_subcommands()` returns them in order of insertion.
-        // So if I use `sort_by` (which is stable), and only sort by `display_order`, I preserve declaration order for equal display_orders.
-        // FIX: Remove `then_with name` to respect declaration order for equal priorities.
-
+        // Declaration order should be preserved when display_order is equal.
+        // "Zoo" is declared first, "Air" second - they should appear in that order.
         let cmd = Command::new("root")
             .subcommand(Command::new("Zoo"))
             .subcommand(Command::new("Air"));
 
         let data = extract_help_data(&cmd);
-        // With corrected sorting (stable sort by display_order only), "Zoo" should be first.
         assert_eq!(data.subcommands[0].commands[0].name, "Zoo");
         assert_eq!(data.subcommands[0].commands[1].name, "Air");
     }

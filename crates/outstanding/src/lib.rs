@@ -118,6 +118,8 @@
 //! ).unwrap();
 //! ```
 
+pub mod topics;
+
 use console::{Style, Term};
 use dark_light::{detect as detect_os_theme, Mode as OsThemeMode};
 use minijinja::{Environment, Value};
