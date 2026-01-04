@@ -148,25 +148,24 @@ impl TopicRegistry {
             let title_idx = lines.iter().position(|l| !l.trim().is_empty());
             if let Some(idx) = title_idx {
                 let title = lines[idx].trim().to_string();
-                
-                // Content is everything from the next line onwards
-                // We join back with explicit newlines
-                let body = lines[idx + 1..].join("\n").trim().to_string();
+
+                // Content starts after title, skipping any leading blank lines
+                let content_lines = &lines[idx + 1..];
+                let content_start = content_lines
+                    .iter()
+                    .position(|l| !l.trim().is_empty())
+                    .unwrap_or(content_lines.len());
+
+                let body = content_lines[content_start..].join("\n").trim_end().to_string();
                 if body.is_empty() {
                     continue;
                 }
-                
+
                 // Name is filename sans extension
                 let name = path.file_stem()
                     .and_then(|s| s.to_str())
                     .map(|s| s.to_string());
 
-                // If name is from file, we use it directly? 
-                // "The name is the file name (sans extension). The title is the first non blank line..."
-                // "If the name is not set, we will generate it from title..." -> This applies to manual creation?
-                // Re-reading user request: "For templates: the name is the file name (sans extension)..."
-                // So we pass the filename as the name.
-                
                 let topic = Topic::new(title, body, topic_type, name);
                 self.add_topic(topic);
             }
