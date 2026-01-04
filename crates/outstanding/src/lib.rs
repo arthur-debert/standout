@@ -120,13 +120,12 @@
 
 use console::{Style, Term};
 use dark_light::{detect as detect_os_theme, Mode as OsThemeMode};
-use minijinja::{Environment, Error, Value};
+use minijinja::{Environment, Value};
+pub use minijinja::Error;
 use once_cell::sync::Lazy;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Mutex;
-
-pub mod contrib;
 
 /// Default prefix shown when a style name is not found.
 pub const DEFAULT_MISSING_STYLE_INDICATOR: &str = "(!?)";

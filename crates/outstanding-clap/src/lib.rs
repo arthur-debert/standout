@@ -18,13 +18,13 @@
 //!
 //! ```rust
 //! # use clap::Command;
-//! # use outstanding::contrib::clap::{render_help, Config};
+//! # use outstanding_clap::{render_help, Config};
 //! let cmd = Command::new("my-app").about("My Application");
 //! let help = render_help(&cmd, None).unwrap();
 //! println!("{}", help);
 //! ```
 
-use crate::{render_with_color, Theme, ThemeChoice};
+use outstanding::{render_with_color, Theme, ThemeChoice};
 use clap::Command;
 use console::Style;
 use serde::Serialize;
@@ -42,7 +42,7 @@ pub struct Config {
 }
 
 /// Renders the help for a clap command using outstanding.
-pub fn render_help(cmd: &Command, config: Option<Config>) -> Result<String, crate::Error> {
+pub fn render_help(cmd: &Command, config: Option<Config>) -> Result<String, outstanding::Error> {
     let config = config.unwrap_or_default();
     let template = config
         .template

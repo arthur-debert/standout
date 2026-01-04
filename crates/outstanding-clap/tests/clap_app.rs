@@ -1,7 +1,7 @@
-#![cfg(feature = "clap")]
+
 
 use clap::{error::ErrorKind, Command};
-use outstanding::contrib::clap::render_help;
+use outstanding_clap::render_help;
 
 #[test]
 fn test_clap_integration_flow() {
