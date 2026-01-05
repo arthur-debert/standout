@@ -1,0 +1,7 @@
+{{ "Available Topics" | style("about") | nl }}
+{{ "Usage:" | style("header") }} {{ usage | style("usage") | nl }}
+
+{{ "Topics:" | style("header") }}
+{% for topic in topics %}
+  {{ topic.name | style("item") }}{{ topic.padding }}{{ topic.title | style("desc") }}
+{% endfor %}

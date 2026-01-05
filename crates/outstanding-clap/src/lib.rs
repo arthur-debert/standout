@@ -162,6 +162,17 @@ impl TopicHelper {
     fn handle_help_request(&self, cmd: &mut Command, keywords: &[&str], use_pager: bool) -> TopicHelpResult {
         let sub_name = keywords[0];
 
+        // 0. Check for "topics" - list all available topics
+        if sub_name == "topics" {
+            if let Ok(h) = render_topics_list(&self.registry, cmd, None) {
+                return if use_pager {
+                    TopicHelpResult::PagedHelp(h)
+                } else {
+                    TopicHelpResult::Help(h)
+                };
+            }
+        }
+
         // 1. Check if it's a real command
         if find_subcommand(cmd, sub_name).is_some() {
              if let Some(target) = find_subcommand_recursive(cmd, keywords) {
@@ -365,6 +376,57 @@ pub fn render_topic(topic: &Topic, config: Option<Config>) -> Result<String, out
 struct TopicData {
     title: String,
     content: String,
+}
+
+/// Renders a list of all available topics.
+pub fn render_topics_list(registry: &TopicRegistry, cmd: &Command, config: Option<Config>) -> Result<String, outstanding::Error> {
+    let config = config.unwrap_or_default();
+    let template = config
+        .template
+        .as_deref()
+        .unwrap_or(include_str!("topics_list_template.txt"));
+
+    let theme = config.theme.unwrap_or_else(default_theme);
+    let use_color = config
+        .use_color
+        .unwrap_or_else(|| console::Term::stdout().features().colors_supported());
+
+    let topics = registry.list_topics();
+
+    // Calculate max width for padding
+    let max_width = topics.iter().map(|t| t.name.len()).max().unwrap_or(0);
+
+    let topic_items: Vec<TopicListItem> = topics
+        .iter()
+        .map(|t| {
+            let pad = max_width.saturating_sub(t.name.len()) + 2;
+            TopicListItem {
+                name: t.name.clone(),
+                title: t.title.clone(),
+                padding: " ".repeat(pad),
+            }
+        })
+        .collect();
+
+    let data = TopicsListData {
+        usage: format!("{} help <topic>", cmd.get_name()),
+        topics: topic_items,
+    };
+
+    render_with_color(template, &data, ThemeChoice::from(&theme), use_color)
+}
+
+#[derive(Serialize)]
+struct TopicsListData {
+    usage: String,
+    topics: Vec<TopicListItem>,
+}
+
+#[derive(Serialize)]
+struct TopicListItem {
+    name: String,
+    title: String,
+    padding: String,
 }
 
 fn default_theme() -> Theme {

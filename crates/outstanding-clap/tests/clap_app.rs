@@ -265,3 +265,66 @@ fn test_display_with_pager_import() {
     // but we can verify the function exists and is public
     let _ = display_with_pager as fn(&str) -> std::io::Result<()>;
 }
+
+#[test]
+fn test_help_topics_lists_all_topics() {
+    let registry = setup_registry();
+    let helper = TopicHelper::new(registry);
+    let cmd = setup_command();
+
+    // "help topics" -> Should list all available topics
+    let res = helper.get_matches_from(
+        cmd.clone(),
+        vec!["myapp", "help", "topics"]
+    );
+
+    if let TopicHelpResult::Help(h) = res {
+        // Should contain "Available Topics" header
+        assert!(h.contains("Available Topics"), "Should have 'Available Topics' header");
+        // Should list our topics
+        assert!(h.contains("guidelines"), "Should list 'guidelines' topic");
+        assert!(h.contains("init"), "Should list 'init' topic");
+    } else {
+        panic!("Expected Help for topics list, got {:?}", res);
+    }
+}
+
+#[test]
+fn test_help_topics_with_pager() {
+    let registry = setup_registry();
+    let helper = TopicHelper::new(registry);
+    let cmd = setup_command();
+
+    // "help --page topics" -> Should return PagedHelp with topics list
+    let res = helper.get_matches_from(
+        cmd.clone(),
+        vec!["myapp", "help", "--page", "topics"]
+    );
+
+    if let TopicHelpResult::PagedHelp(h) = res {
+        assert!(h.contains("Available Topics"));
+        assert!(h.contains("guidelines"));
+    } else {
+        panic!("Expected PagedHelp for topics with --page, got {:?}", res);
+    }
+}
+
+#[test]
+fn test_help_topics_empty_registry() {
+    let registry = TopicRegistry::new(); // Empty registry
+    let helper = TopicHelper::new(registry);
+    let cmd = setup_command();
+
+    // "help topics" with empty registry -> Should still work, just show empty list
+    let res = helper.get_matches_from(
+        cmd.clone(),
+        vec!["myapp", "help", "topics"]
+    );
+
+    if let TopicHelpResult::Help(h) = res {
+        assert!(h.contains("Available Topics"));
+        assert!(h.contains("Topics:"));
+    } else {
+        panic!("Expected Help for empty topics list, got {:?}", res);
+    }
+}
