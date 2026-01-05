@@ -54,6 +54,9 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::process::{Command as ProcessCommand, Stdio};
 
+/// Fixed width for the name column in help output (commands, options, topics).
+const NAME_COLUMN_WIDTH: usize = 14;
+
 /// Helper to integrate Clap with Outstanding Topics.
 pub struct TopicHelper {
     registry: TopicRegistry,
@@ -411,13 +414,11 @@ pub fn render_topics_list(registry: &TopicRegistry, cmd: &Command, config: Optio
 
     let topics = registry.list_topics();
 
-    // Calculate max width for padding
-    let max_width = topics.iter().map(|t| t.name.len()).max().unwrap_or(0);
-
     let topic_items: Vec<TopicListItem> = topics
         .iter()
         .map(|t| {
-            let pad = max_width.saturating_sub(t.name.len()) + 2;
+            // +1 accounts for the colon added in the template
+            let pad = NAME_COLUMN_WIDTH.saturating_sub(t.name.len() + 1);
             TopicListItem {
                 name: t.name.clone(),
                 title: t.title.clone(),
@@ -503,7 +504,6 @@ fn extract_help_data(cmd: &Command) -> HelpData {
 
     // Group Subcommands
     let mut sub_cmds = Vec::new();
-    let mut max_width = 0;
 
     let mut subs: Vec<_> = cmd.get_subcommands().filter(|s| !s.is_hide_set()).collect();
     // Stable sort by display_order only - preserves declaration order for equal display_orders
@@ -511,14 +511,13 @@ fn extract_help_data(cmd: &Command) -> HelpData {
 
     for sub in subs {
         let name = sub.get_name().to_string();
-        if name.len() > max_width {
-            max_width = name.len();
-        }
+        // +1 accounts for the colon added in the template
+        let pad = NAME_COLUMN_WIDTH.saturating_sub(name.len() + 1);
 
         let sub_data = Subcommand {
             name,
             about: sub.get_about().map(|s| s.to_string()).unwrap_or_default(),
-            padding: String::new(), // Calculated later
+            padding: " ".repeat(pad),
         };
         sub_cmds.push(sub_data);
     }
@@ -526,10 +525,6 @@ fn extract_help_data(cmd: &Command) -> HelpData {
     let subcommands = if sub_cmds.is_empty() {
         vec![]
     } else {
-        for cmd in &mut sub_cmds {
-            let pad = max_width.saturating_sub(cmd.name.len()) + 2;
-            cmd.padding = " ".repeat(pad);
-        }
         vec![Group {
             title: Some("Commands".to_string()),
             commands: sub_cmds,
@@ -539,7 +534,6 @@ fn extract_help_data(cmd: &Command) -> HelpData {
 
     // Group Options
     let mut opt_groups: BTreeMap<Option<String>, Vec<OptionData>> = BTreeMap::new();
-    let mut opt_max_width = 0;
 
     // Clap args are also not sorted by display order by default in iterator
     let mut args: Vec<_> = cmd.get_arguments().filter(|a| !a.is_hide_set()).collect();
@@ -561,15 +555,12 @@ fn extract_help_data(cmd: &Command) -> HelpData {
             name = arg.get_id().to_string(); // Positional
         }
 
-        if name.len() > opt_max_width {
-            opt_max_width = name.len();
-        }
-
+        let pad = NAME_COLUMN_WIDTH.saturating_sub(name.len());
         let heading = arg.get_help_heading().map(|s| s.to_string());
         let opt_data = OptionData {
             name,
             help: arg.get_help().map(|s| s.to_string()).unwrap_or_default(),
-            padding: String::new(),
+            padding: " ".repeat(pad),
             short: arg.get_short(),
             long: arg.get_long().map(|s| s.to_string()),
         };
@@ -577,18 +568,9 @@ fn extract_help_data(cmd: &Command) -> HelpData {
         opt_groups.entry(heading).or_default().push(opt_data);
     }
 
-    // Sort groups? Clap usually puts 'Arguments'/Generic groups last?
-    // BTreeMap sorts by key (Option<String>). None is first.
-    // Clap puts "Options" (None heading?) or custom headings.
-    // We'll leave BTreeMap order for now (None first, then alphabetical headings).
-
     let options = opt_groups
         .into_iter()
-        .map(|(title, mut opts)| {
-            for opt in &mut opts {
-                let pad = opt_max_width.saturating_sub(opt.name.len()) + 2;
-                opt.padding = " ".repeat(pad);
-            }
+        .map(|(title, opts)| {
             Group {
                 title,
                 commands: vec![],
@@ -613,20 +595,11 @@ fn extract_help_data_with_topics(cmd: &Command, registry: &TopicRegistry) -> Hel
 
     let topics = registry.list_topics();
     if !topics.is_empty() {
-        // Calculate max width for padding (consider both subcommands and topics)
-        let topic_max_width = topics.iter().map(|t| t.name.len()).max().unwrap_or(0);
-
-        // Also consider subcommand widths for consistent alignment
-        let cmd_max_width = data.subcommands.first()
-            .map(|g| g.commands.iter().map(|c| c.name.len()).max().unwrap_or(0))
-            .unwrap_or(0);
-
-        let max_width = topic_max_width.max(cmd_max_width);
-
         data.learn_more = topics
             .iter()
             .map(|t| {
-                let pad = max_width.saturating_sub(t.name.len()) + 2;
+                // +1 accounts for the colon added in the template
+                let pad = NAME_COLUMN_WIDTH.saturating_sub(t.name.len() + 1);
                 TopicListItem {
                     name: t.name.clone(),
                     title: t.title.clone(),
