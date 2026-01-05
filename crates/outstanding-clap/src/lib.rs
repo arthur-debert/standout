@@ -144,8 +144,8 @@ impl TopicHelper {
                          return self.handle_help_request(&mut cmd, &keywords, use_pager);
                      }
                 }
-                // If "help" is called without args, return the root help
-                if let Ok(h) = render_help(&cmd, None) {
+                // If "help" is called without args, return the root help with topics
+                if let Ok(h) = render_help_with_topics(&cmd, &self.registry, None) {
                     return if use_pager {
                         TopicHelpResult::PagedHelp(h)
                     } else {
@@ -351,6 +351,24 @@ pub fn render_help(cmd: &Command, config: Option<Config>) -> Result<String, outs
     render_with_color(template, &data, ThemeChoice::from(&theme), use_color)
 }
 
+/// Renders the help for a clap command with topics in a "Learn More" section.
+pub fn render_help_with_topics(cmd: &Command, registry: &TopicRegistry, config: Option<Config>) -> Result<String, outstanding::Error> {
+    let config = config.unwrap_or_default();
+    let template = config
+        .template
+        .as_deref()
+        .unwrap_or(include_str!("help_template.txt"));
+
+    let theme = config.theme.unwrap_or_else(default_theme);
+    let use_color = config
+        .use_color
+        .unwrap_or_else(|| console::Term::stdout().features().colors_supported());
+
+    let data = extract_help_data_with_topics(cmd, registry);
+
+    render_with_color(template, &data, ThemeChoice::from(&theme), use_color)
+}
+
 /// Renders a topic using outstanding templating.
 pub fn render_topic(topic: &Topic, config: Option<Config>) -> Result<String, outstanding::Error> {
     let config = config.unwrap_or_default();
@@ -450,6 +468,7 @@ struct HelpData {
     subcommands: Vec<Group<Subcommand>>,
     options: Vec<Group<OptionData>>,
     examples: String,
+    learn_more: Vec<TopicListItem>,
 }
 
 #[derive(Serialize)]
@@ -583,7 +602,39 @@ fn extract_help_data(cmd: &Command) -> HelpData {
         subcommands,
         options,
         examples: String::new(), // Clap extraction of examples is tricky via public API
+        learn_more: vec![],
     }
+}
+
+fn extract_help_data_with_topics(cmd: &Command, registry: &TopicRegistry) -> HelpData {
+    let mut data = extract_help_data(cmd);
+
+    let topics = registry.list_topics();
+    if !topics.is_empty() {
+        // Calculate max width for padding (consider both subcommands and topics)
+        let topic_max_width = topics.iter().map(|t| t.name.len()).max().unwrap_or(0);
+
+        // Also consider subcommand widths for consistent alignment
+        let cmd_max_width = data.subcommands.first()
+            .map(|g| g.commands.iter().map(|c| c.name.len()).max().unwrap_or(0))
+            .unwrap_or(0);
+
+        let max_width = topic_max_width.max(cmd_max_width);
+
+        data.learn_more = topics
+            .iter()
+            .map(|t| {
+                let pad = max_width.saturating_sub(t.name.len()) + 2;
+                TopicListItem {
+                    name: t.name.clone(),
+                    title: t.title.clone(),
+                    padding: " ".repeat(pad),
+                }
+            })
+            .collect();
+    }
+
+    data
 }
 
 #[cfg(test)]

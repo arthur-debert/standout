@@ -328,3 +328,46 @@ fn test_help_topics_empty_registry() {
         panic!("Expected Help for empty topics list, got {:?}", res);
     }
 }
+
+#[test]
+fn test_root_help_shows_learn_more_section() {
+    let registry = setup_registry();
+    let helper = TopicHelper::new(registry);
+    let cmd = setup_command();
+
+    // "help" without args -> Should show root help with Learn More section
+    let res = helper.get_matches_from(
+        cmd.clone(),
+        vec!["myapp", "help"]
+    );
+
+    if let TopicHelpResult::Help(h) = res {
+        // Should contain the Learn More section
+        assert!(h.contains("Learn More:"), "Should have 'Learn More:' header");
+        // Should list our topics
+        assert!(h.contains("guidelines"), "Should list 'guidelines' topic in Learn More");
+        assert!(h.contains("init"), "Should list 'init' topic in Learn More");
+    } else {
+        panic!("Expected Help for root help, got {:?}", res);
+    }
+}
+
+#[test]
+fn test_root_help_no_learn_more_when_empty_registry() {
+    let registry = TopicRegistry::new(); // Empty registry
+    let helper = TopicHelper::new(registry);
+    let cmd = setup_command();
+
+    // "help" with empty registry -> Should NOT show Learn More section
+    let res = helper.get_matches_from(
+        cmd.clone(),
+        vec!["myapp", "help"]
+    );
+
+    if let TopicHelpResult::Help(h) = res {
+        // Should NOT contain the Learn More section when there are no topics
+        assert!(!h.contains("Learn More:"), "Should NOT have 'Learn More:' header when no topics");
+    } else {
+        panic!("Expected Help for root help, got {:?}", res);
+    }
+}

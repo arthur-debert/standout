@@ -29,3 +29,10 @@
 {{ "Examples:" | style("header") }}
 {{ examples | style("example") }}
 {% endif %}
+
+{% if learn_more %}
+{{ "Learn More:" | style("header") }}
+{% for topic in learn_more %}
+  {{ topic.name | style("item") }}{{ topic.padding }}{{ topic.title | style("desc") }}
+{% endfor %}
+{% endif %}
