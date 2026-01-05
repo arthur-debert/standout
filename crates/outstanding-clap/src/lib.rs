@@ -448,16 +448,14 @@ struct TopicListItem {
 }
 
 fn default_theme() -> Theme {
-    // In a real implementation we might parse the YAML, but for now we construct it
-    // to match help_theme.yaml effectively.
     Theme::new()
         .add("header", Style::new().bold())
-        .add("section_title", Style::new().bold().yellow())
-        .add("item", Style::new().green())
-        .add("desc", Style::new().dim())
-        .add("usage", Style::new().cyan())
-        .add("example", Style::new().dim().italic())
-        .add("about", Style::new().bold())
+        .add("section_title", Style::new().bold())
+        .add("item", Style::new().bold())
+        .add("desc", Style::new())
+        .add("usage", Style::new())
+        .add("example", Style::new())
+        .add("about", Style::new())
 }
 
 #[derive(Serialize)]
