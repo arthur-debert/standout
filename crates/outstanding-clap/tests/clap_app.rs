@@ -1,6 +1,6 @@
 use clap::Command;
 use outstanding::topics::{Topic, TopicRegistry, TopicType};
-use outstanding_clap::{TopicHelper, TopicHelpResult};
+use outstanding_clap::{TopicHelper, TopicHelpResult, display_with_pager};
 
 fn setup_registry() -> TopicRegistry {
     let mut registry = TopicRegistry::new();
@@ -154,4 +154,114 @@ fn test_nested_subcommand_help() {
     } else {
         panic!("Expected Help for nested subcommand, got {:?}", res);
     }
+}
+
+#[test]
+fn test_page_flag_with_topic() {
+    let registry = setup_registry();
+    let helper = TopicHelper::new(registry);
+    let cmd = setup_command();
+
+    // "help --page guidelines" -> Should return PagedHelp
+    let res = helper.get_matches_from(
+        cmd.clone(),
+        vec!["myapp", "help", "--page", "guidelines"]
+    );
+
+    if let TopicHelpResult::PagedHelp(h) = res {
+        assert!(h.contains("Follow these guidelines..."));
+    } else {
+        panic!("Expected PagedHelp for topic with --page, got {:?}", res);
+    }
+}
+
+#[test]
+fn test_page_flag_with_command() {
+    let registry = setup_registry();
+    let helper = TopicHelper::new(registry);
+    let cmd = setup_command();
+
+    // "help --page init" -> Should return PagedHelp for command
+    let res = helper.get_matches_from(
+        cmd.clone(),
+        vec!["myapp", "help", "--page", "init"]
+    );
+
+    if let TopicHelpResult::PagedHelp(h) = res {
+        assert!(h.contains("Initialize the app"));
+    } else {
+        panic!("Expected PagedHelp for command with --page, got {:?}", res);
+    }
+}
+
+#[test]
+fn test_page_flag_without_topic() {
+    let registry = setup_registry();
+    let helper = TopicHelper::new(registry);
+    let cmd = setup_command();
+
+    // "help --page" without topic -> Should return PagedHelp for root
+    let res = helper.get_matches_from(
+        cmd.clone(),
+        vec!["myapp", "help", "--page"]
+    );
+
+    if let TopicHelpResult::PagedHelp(h) = res {
+        assert!(h.contains("myapp"));
+    } else {
+        panic!("Expected PagedHelp for root help with --page, got {:?}", res);
+    }
+}
+
+#[test]
+fn test_page_flag_position_after_topic() {
+    let registry = setup_registry();
+    let helper = TopicHelper::new(registry);
+    let cmd = setup_command();
+
+    // "help guidelines --page" -> Should also work with flag after topic
+    let res = helper.get_matches_from(
+        cmd.clone(),
+        vec!["myapp", "help", "guidelines", "--page"]
+    );
+
+    if let TopicHelpResult::PagedHelp(h) = res {
+        assert!(h.contains("Follow these guidelines..."));
+    } else {
+        panic!("Expected PagedHelp for topic with --page after topic, got {:?}", res);
+    }
+}
+
+#[test]
+fn test_no_page_flag_returns_help() {
+    let registry = setup_registry();
+    let helper = TopicHelper::new(registry);
+    let cmd = setup_command();
+
+    // "help guidelines" without --page -> Should return Help (not PagedHelp)
+    let res = helper.get_matches_from(
+        cmd.clone(),
+        vec!["myapp", "help", "guidelines"]
+    );
+
+    // Should be regular Help, not PagedHelp
+    match res {
+        TopicHelpResult::Help(h) => {
+            assert!(h.contains("Follow these guidelines..."));
+        }
+        TopicHelpResult::PagedHelp(_) => {
+            panic!("Expected Help without --page, got PagedHelp");
+        }
+        _ => {
+            panic!("Expected Help for topic without --page, got {:?}", res);
+        }
+    }
+}
+
+#[test]
+fn test_display_with_pager_import() {
+    // Just verify that display_with_pager is exported and callable
+    // We can't easily test actual pager behavior in unit tests
+    // but we can verify the function exists and is public
+    let _ = display_with_pager as fn(&str) -> std::io::Result<()>;
 }

@@ -51,6 +51,8 @@ use clap::{Command, Arg, ArgAction};
 use console::Style;
 use serde::Serialize;
 use std::collections::BTreeMap;
+use std::io::Write;
+use std::process::{Command as ProcessCommand, Stdio};
 
 /// Helper to integrate Clap with Outstanding Topics.
 pub struct TopicHelper {
@@ -64,6 +66,8 @@ pub enum TopicHelpResult {
     Matches(clap::ArgMatches),
     /// Help was rendered for a topic or command. Caller should print or display as needed.
     Help(String),
+    /// Help was rendered and should be displayed through a pager.
+    PagedHelp(String),
     /// Error: Subcommand or topic not found.
     /// We return the clap Error so caller can exit or handle it.
     Error(clap::Error),
@@ -96,14 +100,17 @@ impl TopicHelper {
             .subcommand(
                 Command::new("help")
                     .about("Print this message or the help of the given subcommand(s)")
-                    // We allow ignoring errors here because when we run augment_command
-                    // inside get_matches we might be deep cloning or similar.
-                    // Actually, disable_help_subcommand just sets a flag.
                     .arg(
                         Arg::new("topic")
                             .action(ArgAction::Set)
                             .num_args(1..)
                             .help("The subcommand or topic to print help for"),
+                    )
+                    .arg(
+                        Arg::new("page")
+                            .long("page")
+                            .action(ArgAction::SetTrue)
+                            .help("Display help through a pager"),
                     )
             )
     }
@@ -129,15 +136,21 @@ impl TopicHelper {
 
         if let Some((name, sub_matches)) = matches.subcommand() {
             if name == "help" {
+                let use_pager = sub_matches.get_flag("page");
+
                 if let Some(topic_args) = sub_matches.get_many::<String>("topic") {
                     let keywords: Vec<_> = topic_args.map(|s| s.as_str()).collect();
                      if !keywords.is_empty() {
-                         return self.handle_help_request(&mut cmd, &keywords);
+                         return self.handle_help_request(&mut cmd, &keywords, use_pager);
                      }
                 }
                 // If "help" is called without args, return the root help
                 if let Ok(h) = render_help(&cmd, None) {
-                    return TopicHelpResult::Help(h);
+                    return if use_pager {
+                        TopicHelpResult::PagedHelp(h)
+                    } else {
+                        TopicHelpResult::Help(h)
+                    };
                 }
             }
         }
@@ -146,35 +159,98 @@ impl TopicHelper {
     }
 
     /// Handles a request for specific help e.g. `help foo`
-    fn handle_help_request(&self, cmd: &mut Command, keywords: &[&str]) -> TopicHelpResult {
+    fn handle_help_request(&self, cmd: &mut Command, keywords: &[&str], use_pager: bool) -> TopicHelpResult {
         let sub_name = keywords[0];
-        
+
         // 1. Check if it's a real command
         if find_subcommand(cmd, sub_name).is_some() {
              if let Some(target) = find_subcommand_recursive(cmd, keywords) {
                  if let Ok(h) = render_help(target, None) {
-                     return TopicHelpResult::Help(h);
+                     return if use_pager {
+                         TopicHelpResult::PagedHelp(h)
+                     } else {
+                         TopicHelpResult::Help(h)
+                     };
                  }
              }
-             // If recursive find fails but top level existed, maybe print top level help?
-             // Or let it be an error?
-             // Fallthrough to topic check? No, standard clap behavior forbids ambiguity?
-             // If a command exists, we favor it.
         }
 
         // 2. Check if it is a topic
         if let Some(topic) = self.registry.get_topic(sub_name) {
              if let Ok(h) = render_topic(topic, None) {
-                 return TopicHelpResult::Help(h);
+                 return if use_pager {
+                     TopicHelpResult::PagedHelp(h)
+                 } else {
+                     TopicHelpResult::Help(h)
+                 };
              }
         }
-        
+
         // 3. Not found
         let err = cmd.error(
-            clap::error::ErrorKind::InvalidSubcommand, 
+            clap::error::ErrorKind::InvalidSubcommand,
             format!("The subcommand or topic '{}' wasn't recognized", sub_name)
         );
         TopicHelpResult::Error(err)
+    }
+}
+
+/// Displays content through a pager.
+///
+/// Tries pagers in this order:
+/// 1. $PAGER environment variable
+/// 2. `less`
+/// 3. `more`
+///
+/// If all pagers fail, falls back to printing directly to stdout.
+pub fn display_with_pager(content: &str) -> std::io::Result<()> {
+    let pagers = get_pager_candidates();
+
+    for pager in pagers {
+        if let Ok(()) = try_pager(&pager, content) {
+            return Ok(());
+        }
+    }
+
+    // Fallback: print directly
+    print!("{}", content);
+    std::io::stdout().flush()
+}
+
+/// Returns the list of pager candidates to try.
+fn get_pager_candidates() -> Vec<String> {
+    let mut pagers = Vec::new();
+
+    if let Ok(pager) = std::env::var("PAGER") {
+        if !pager.is_empty() {
+            pagers.push(pager);
+        }
+    }
+
+    pagers.push("less".to_string());
+    pagers.push("more".to_string());
+
+    pagers
+}
+
+/// Attempts to run content through a specific pager.
+fn try_pager(pager: &str, content: &str) -> std::io::Result<()> {
+    let mut child = ProcessCommand::new(pager)
+        .stdin(Stdio::piped())
+        .spawn()?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(content.as_bytes())?;
+    }
+
+    let status = child.wait()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "pager exited with error",
+        ))
     }
 }
 
@@ -540,5 +616,31 @@ mod tests {
         // "Second" has lower order (1), should appear before "First" (2).
         assert_eq!(data.subcommands[0].commands[0].name, "second");
         assert_eq!(data.subcommands[0].commands[1].name, "first");
+    }
+
+    #[test]
+    fn test_get_pager_candidates_default() {
+        // Clear PAGER to test default behavior
+        std::env::remove_var("PAGER");
+        let candidates = get_pager_candidates();
+        assert_eq!(candidates, vec!["less", "more"]);
+    }
+
+    #[test]
+    fn test_get_pager_candidates_with_pager_env() {
+        std::env::set_var("PAGER", "bat");
+        let candidates = get_pager_candidates();
+        assert_eq!(candidates[0], "bat");
+        assert_eq!(candidates[1], "less");
+        assert_eq!(candidates[2], "more");
+        std::env::remove_var("PAGER");
+    }
+
+    #[test]
+    fn test_get_pager_candidates_empty_pager() {
+        std::env::set_var("PAGER", "");
+        let candidates = get_pager_candidates();
+        assert_eq!(candidates, vec!["less", "more"]);
+        std::env::remove_var("PAGER");
     }
 }
