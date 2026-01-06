@@ -451,7 +451,6 @@ struct TopicListItem {
 fn default_theme() -> Theme {
     Theme::new()
         .add("header", Style::new().bold())
-        .add("section_title", Style::new().bold())
         .add("item", Style::new().bold())
         .add("desc", Style::new())
         .add("usage", Style::new())
