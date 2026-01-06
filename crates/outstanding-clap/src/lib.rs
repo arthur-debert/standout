@@ -1,49 +1,26 @@
-//! # Outstanding Clap Integration
+//! # Outstanding Clap
 //!
-//! This module provides a drop-in replacement for `clap`'s default help generation, leveraging
-//! `outstanding`'s powerful templating and styling capabilities.
+//! Styled help output for clap. Just pass your command:
 //!
-//! Instead of relying on `clap`'s internal hardcoded help generation, this module extracts the
-//! structure of your CLI (commands, arguments, groups) and renders it using a customizable
-//! template engine. This allows for:
+//! ```rust,no_run
+//! use clap::Command;
 //!
-//! - **Complete Visual Control**: Use `minijinja` templates to define exactly how your help looks.
-//! - **Separation of Style and Content**: Define styles (colors, bold, etc.) in a theme, separate from the layout.
-//! - **Future-Proofing**: Positioned to leverage future `outstanding` features like adaptive layouts.
-//!
-//! It is designed to be a "drop-in" helper: you continue defining your `clap::Command` as usual,
-//! and simply call `render_help` when you want to display the help message.
-//!
-//! # Example
-//!
-//! ```rust
-//! # use clap::Command;
-//! # use outstanding_clap::{render_help, Config};
-//! let cmd = Command::new("my-app").about("My Application");
-//! let help = render_help(&cmd, None).unwrap();
-//! println!("{}", help);
+//! let matches = outstanding_clap::run(Command::new("my-app"));
 //! ```
-
 //!
-//! # Topics Support
-//! 
-//! This module also supports a "Topics" system, where you can register valid help topics (like "syntax", "environment", etc.)
-//! and have them be resolvable via `help <topic>`.
-//! 
-//! ```rust
-//! # use clap::Command;
-//! # use outstanding_clap::TopicHelper;
-//! # use outstanding::topics::{Topic, TopicRegistry, TopicType};
-//! 
-//! let mut topics = TopicRegistry::new();
-//! topics.add_topic(Topic::new("syntax", "Syntax Guide...", TopicType::Text, None));
-//! 
-//! let helper = TopicHelper::new(topics);
-//! let cmd = Command::new("my-app");
-//! 
-//! // In your main loop:
-//! // match helper.get_matches(cmd) { ... }
+//! With help topics from a directory:
+//!
+//! ```rust,no_run
+//! use clap::Command;
+//! use outstanding_clap::TopicHelper;
+//!
+//! let matches = TopicHelper::builder()
+//!     .add_directory("docs/topics")
+//!     .build()
+//!     .run(Command::new("my-app"));
 //! ```
+//!
+//! Help display, pager support, and errors are handled automatically.
 
 use outstanding::topics::{Topic, TopicRegistry};
 use outstanding::{render_with_color, Theme, ThemeChoice};
@@ -118,8 +95,55 @@ impl TopicHelper {
             )
     }
 
+    /// Runs the CLI, handling help display automatically.
+    ///
+    /// This is the recommended entry point. It:
+    /// - Intercepts `help` subcommand and displays styled help
+    /// - Handles pager display when `--page` is used
+    /// - Exits on errors
+    /// - Returns `ArgMatches` only for actual commands
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// # use clap::Command;
+    /// # use outstanding_clap::TopicHelper;
+    /// let helper = TopicHelper::builder()
+    ///     .add_directory("docs/topics")
+    ///     .build();
+    ///
+    /// let matches = helper.run(Command::new("my-app"));
+    /// // Handle your actual commands here
+    /// ```
+    pub fn run(&self, cmd: Command) -> clap::ArgMatches {
+        self.run_from(cmd, std::env::args())
+    }
+
+    /// Like `run`, but takes arguments from an iterator.
+    pub fn run_from<I, T>(&self, cmd: Command, itr: I) -> clap::ArgMatches
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<std::ffi::OsString> + Clone,
+    {
+        match self.get_matches_from(cmd, itr) {
+            TopicHelpResult::Matches(m) => m,
+            TopicHelpResult::Help(h) => {
+                println!("{}", h);
+                std::process::exit(0);
+            }
+            TopicHelpResult::PagedHelp(h) => {
+                if let Err(_) = display_with_pager(&h) {
+                    println!("{}", h);
+                }
+                std::process::exit(0);
+            }
+            TopicHelpResult::Error(e) => e.exit(),
+        }
+    }
+
     /// Attempts to get matches from the command line, intercepting `help` requests.
     /// Returns a `TopicHelpResult`.
+    ///
+    /// For most use cases, prefer `run()` which handles help display automatically.
     pub fn get_matches(&self, cmd: Command) -> TopicHelpResult {
         self.get_matches_from(cmd, std::env::args())
     }
@@ -323,6 +347,36 @@ fn find_subcommand_recursive<'a>(cmd: &'a Command, keywords: &[&str]) -> Option<
 
 fn find_subcommand<'a>(cmd: &'a Command, name: &str) -> Option<&'a Command> {
     cmd.get_subcommands().find(|s| s.get_name() == name || s.get_aliases().any(|a| a == name))
+}
+
+/// Runs a clap command with styled help output.
+///
+/// This is the simplest entry point for basic CLIs without topics.
+/// It handles help display automatically and returns `ArgMatches` for actual commands.
+///
+/// # Example
+/// ```rust,no_run
+/// use clap::Command;
+/// use outstanding_clap::run;
+///
+/// let cmd = Command::new("my-app")
+///     .about("My Application")
+///     .subcommand(Command::new("test"));
+///
+/// let matches = run(cmd);
+/// // Handle your commands here
+/// ```
+pub fn run(cmd: Command) -> clap::ArgMatches {
+    run_from(cmd, std::env::args())
+}
+
+/// Like `run`, but takes arguments from an iterator.
+pub fn run_from<I, T>(cmd: Command, itr: I) -> clap::ArgMatches
+where
+    I: IntoIterator<Item = T>,
+    T: Into<std::ffi::OsString> + Clone,
+{
+    TopicHelper::builder().build().run_from(cmd, itr)
 }
 
 /// Configuration for the help renderer

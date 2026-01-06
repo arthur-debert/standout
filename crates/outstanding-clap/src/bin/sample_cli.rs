@@ -9,7 +9,7 @@ use clap::{Parser, Subcommand, Args, CommandFactory};
 use console::Style;
 use outstanding::{render_with_color, Theme, ThemeChoice};
 use outstanding::topics::{Topic, TopicType};
-use outstanding_clap::{TopicHelper, TopicHelpResult, display_with_pager};
+use outstanding_clap::TopicHelper;
 use serde::Serialize;
 
 const ECHO_TEMPLATE: &str = r#"{{ "Command Executed" | style("header") | nl }}
@@ -263,25 +263,8 @@ fn build_command() -> clap::Command {
 
 fn main() {
     let helper = setup_topics();
-    let cmd = build_command();
-
-    match helper.get_matches(cmd) {
-        TopicHelpResult::Help(h) => {
-            println!("{}", h);
-        }
-        TopicHelpResult::PagedHelp(h) => {
-            if let Err(e) = display_with_pager(&h) {
-                eprintln!("Pager error: {}, falling back to stdout", e);
-                println!("{}", h);
-            }
-        }
-        TopicHelpResult::Error(e) => {
-            e.exit();
-        }
-        TopicHelpResult::Matches(matches) => {
-            handle_matches(&matches);
-        }
-    }
+    let matches = helper.run(build_command());
+    handle_matches(&matches);
 }
 
 fn handle_matches(matches: &clap::ArgMatches) {
