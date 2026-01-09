@@ -1,19 +1,27 @@
 # outstanding
 
-Outstanding is shell rendering library that allows your to deveop your application to be shell agnostic, being unit tested and easier to write and maintain. Likewise it decouples the rendetring from the model, giving you a interface that is easier to fine tune and update.
+Outstanding is a non-interactive CLI output framework that decouples your application logic from terminal presentation.
 
-We've been pretty good at not mixing arg parsing and application logic for a while, with greate libs like clasp. Thankfully, you
-won't see a logic three modules later thatn program execution parsing an ad hoc option from the input string.  That can't be said about the output, commonly integrmingled with logic, with prints to std out or std mid program and premature convertion of data types to strings.  This makes programs hard to test, maintain and design.
+## Features
 
-**Outstanding** is a library for rendering your application into terminal, be ir plain tech, richer formatting or textual or binary data that helps isolate logic and presentation. It support templates strings, template files and style sheets and is smart about gracefully degrading output to plain text when needed.
+- **Template rendering** with MiniJinja + styled output
+- **Themes** for named style definitions (colors, bold, etc.)
+- **Automatic terminal capability detection** (TTY, CLICOLOR, etc.)
+- **Output mode control** (Auto/Term/Text/TermDebug)
+- **Help topics system** for extended documentation
+- **Pager support** for long content
 
-![alt text](assets/architecture.svg)
+This crate is **CLI-agnostic** - it doesn't care how you parse arguments.
+For easy integration with clap, see the `outstanding-clap` crate.
 
 ## Installation
 
 ```toml
 [dependencies]
-outstanding = "0.2.2"
+outstanding = "0.3"
+
+# For clap integration:
+outstanding-clap = "0.3"
 ```
 
 ## Quick Start
@@ -47,73 +55,64 @@ let output = render(
 println!("{}", output);
 ```
 
-## Concepts
+## Output Modes
 
-- **Theme**: Named collection of `console::Style` values (e.g., `"header"` → bold cyan)
-- **AdaptiveTheme**: Pair of themes (light/dark) with OS detection (powered by `dark-light`)
-- **ThemeChoice**: Pass either a theme or an adaptive theme to `render`
-- **style filter**: `{{ value | style("name") }}` inside templates applies the registered style
-- **Renderer**: Compile templates ahead of time if you render them repeatedly
+Control how output is rendered with `OutputMode`:
 
-## Adaptive Themes (Light & Dark)
+- `Auto` - Detect terminal capabilities (default)
+- `Term` - Always use ANSI colors/styles
+- `Text` - Plain text, no ANSI codes
+- `TermDebug` - Render styles as `[name]text[/name]` for debugging
 
 ```rust
-use outstanding::{AdaptiveTheme, Theme, ThemeChoice};
-use console::Style;
+use outstanding::{render_with_output, OutputMode};
 
-let light = Theme::new().add("tone", Style::new().green());
-let dark  = Theme::new().add("tone", Style::new().yellow().italic());
-let adaptive = AdaptiveTheme::new(light, dark);
-
-// Automatically renders with the user's OS theme
-let banner = outstanding::render_with_color(
-    r#"Mode: {{ "active" | style("tone") }}"#,
-    &serde_json::json!({}),
-    ThemeChoice::Adaptive(&adaptive),
-    true,
-).unwrap();
+let output = render_with_output(template, &data, theme, OutputMode::Text).unwrap();
 ```
 
-## Pre-compiled Templates with Renderer
+## Help Topics
+
+The topics module provides extended documentation for CLI apps:
 
 ```rust
-use outstanding::{Renderer, Theme};
-use console::Style;
-use serde::Serialize;
+use outstanding::topics::{Topic, TopicRegistry, TopicType, render_topic};
 
-#[derive(Serialize)]
-struct Entry { label: String, value: i32 }
+let mut registry = TopicRegistry::new();
+registry.add_topic(Topic::new(
+    "Storage",
+    "Notes are stored in ~/.notes/",
+    TopicType::Text,
+    Some("storage".to_string()),
+));
 
-let theme = Theme::new()
-    .add("label", Style::new().bold())
-    .add("value", Style::new().green());
+// Load topics from files
+registry.add_from_directory_if_exists("docs/topics").ok();
 
-let mut renderer = Renderer::new(theme);
-renderer.add_template("row", r#"{{ label | style("label") }}: {{ value | style("value") }}"#).unwrap();
-
-let rendered = renderer.render("row", &Entry { label: "Count".into(), value: 42 }).unwrap();
-```
-
-## Honoring --no-color Flags
-
-```rust
-use clap::Parser;
-use outstanding::{render_with_color, Theme, ThemeChoice};
-
-#[derive(Parser)]
-struct Cli {
-    #[arg(long)]
-    no_color: bool,
+// Render a topic
+if let Some(topic) = registry.get_topic("storage") {
+    let output = render_topic(topic, None).unwrap();
+    println!("{}", output);
 }
-
-let cli = Cli::parse();
-let output = render_with_color(
-    template,
-    &data,
-    ThemeChoice::from(&theme),
-    !cli.no_color,  // explicit color control
-).unwrap();
 ```
+
+## Clap Integration
+
+For clap-based CLIs, use `outstanding-clap`:
+
+```rust
+use clap::Command;
+use outstanding_clap::Outstanding;
+
+// Simplest usage - all features enabled
+let matches = Outstanding::run(Command::new("my-app"));
+
+// With topics
+let matches = Outstanding::builder()
+    .topics_dir("docs/topics")
+    .run(Command::new("my-app"));
+```
+
+See the [outstanding-clap README](crates/outstanding-clap/README.md) for more details.
 
 ## License
 
