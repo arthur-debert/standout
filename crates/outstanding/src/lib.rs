@@ -1,24 +1,26 @@
-//! # Outstanding - Styled CLI Template Rendering
+//! # Outstanding - Non-Interactive CLI Framework
 //!
-//! Outstanding lets you render rich CLI output from templates while keeping all
-//! presentation details (colors, bold, underline, layout) outside of your
-//! application logic. It layers [`minijinja`] (templates) with the [`console`]
-//! crate (terminal styling) and handles:
+//! Outstanding is a CLI output framework that decouples your application logic from
+//! terminal presentation. It provides:
 //!
-//! - Clean templates: no inline `\x1b` escape codes
-//! - Shared style definitions across multiple templates
-//! - Automatic detection of terminal capabilities (TTY vs. pipes, `CLICOLOR`, etc.)
-//! - Optional light/dark mode via [`AdaptiveTheme`]
-//! - RGB helpers that convert `#rrggbb` values to the nearest ANSI color
+//! - **Template rendering** with MiniJinja + styled output
+//! - **Themes** for named style definitions (colors, bold, etc.)
+//! - **Automatic terminal capability detection** (TTY, CLICOLOR, etc.)
+//! - **Output mode control** (Auto/Term/Text/TermDebug)
+//! - **Help topics system** for extended documentation
+//! - **Pager support** for long content
 //!
-//! ## Concepts at a Glance
+//! This crate is **CLI-agnostic** - it doesn't care how you parse arguments.
+//! For easy integration with clap, see the `outstanding-clap` crate.
+//!
+//! ## Core Concepts
 //!
 //! - [`Theme`]: Named collection of `console::Style` values (e.g., `"header"` → bold cyan)
-//! - [`AdaptiveTheme`]: Pair of themes (light/dark) with OS detection (powered by `dark-light`)
-//! - [`ThemeChoice`]: Pass either a theme or an adaptive theme to `render`
-//! - `style` filter: `{{ value | style("name") }}` inside templates applies the registered style
-//! - `Renderer`: Compile templates ahead of time if you render them repeatedly
-//! - `rgb_to_ansi256`: Helper for turning `#rrggbb` into the closest ANSI palette entry
+//! - [`AdaptiveTheme`]: Light/dark theme pair with OS detection
+//! - [`OutputMode`]: Control output formatting (Auto/Term/Text/TermDebug)
+//! - [`topics`]: Help topics system for extended documentation
+//! - `style` filter: `{{ value | style("name") }}` applies registered styles in templates
+//! - [`Renderer`]: Pre-compile templates for repeated rendering
 //!
 //! ## Quick Start
 //!
@@ -100,28 +102,45 @@
 //! assert_eq!(rendered, "Count: 42");
 //! ```
 //!
-//! ```rust,ignore
-//! use clap::Parser;
-//! use outstanding::OutputMode;
+//! ## Help Topics System
 //!
-//! #[derive(Parser)]
-//! struct Cli {
-//!     #[arg(long, default_value = "auto")]
-//!     output: String,
+//! The [`topics`] module provides a help topics system for extended documentation:
+//!
+//! ```rust
+//! use outstanding::topics::{Topic, TopicRegistry, TopicType, render_topic};
+//!
+//! // Create and populate a registry
+//! let mut registry = TopicRegistry::new();
+//! registry.add_topic(Topic::new(
+//!     "Storage",
+//!     "Notes are stored in ~/.notes/\n\nEach note is a separate file.",
+//!     TopicType::Text,
+//!     Some("storage".to_string()),
+//! ));
+//!
+//! // Render a topic
+//! if let Some(topic) = registry.get_topic("storage") {
+//!     let output = render_topic(topic, None).unwrap();
+//!     println!("{}", output);
 //! }
 //!
-//! let cli = Cli::parse();
-//! let mode = match cli.output.as_str() {
-//!     "term" => OutputMode::Term,
-//!     "text" => OutputMode::Text,
-//!     _ => OutputMode::Auto,
-//! };
-//! let output = outstanding::render_with_output(
-//!     template,
-//!     &data,
-//!     ThemeChoice::from(&theme),
-//!     mode,
-//! ).unwrap();
+//! // Load topics from a directory
+//! registry.add_from_directory_if_exists("docs/topics").ok();
+//! ```
+//!
+//! ## Integration with Clap
+//!
+//! For clap-based CLIs, use the `outstanding-clap` crate which handles:
+//! - Help command interception (`help`, `help <topic>`, `help topics`)
+//! - Output flag injection (`--output=auto|term|text`)
+//! - Styled help rendering
+//!
+//! ```rust,ignore
+//! use clap::Command;
+//! use outstanding_clap::Outstanding;
+//!
+//! // Simplest usage - all features enabled by default
+//! let matches = Outstanding::run(Command::new("my-app"));
 //! ```
 
 pub mod topics;

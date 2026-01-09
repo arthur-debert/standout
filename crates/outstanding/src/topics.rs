@@ -1,7 +1,17 @@
 use deunicode::deunicode;
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::Path;
+use std::process::{Command as ProcessCommand, Stdio};
 use std::fs;
+
+use console::Style;
+use serde::Serialize;
+
+use crate::{render_with_output, Theme, ThemeChoice, OutputMode, Error};
+
+/// Fixed width for the name column in topic listings.
+const NAME_COLUMN_WIDTH: usize = 14;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TopicType {
@@ -124,7 +134,7 @@ impl TopicRegistry {
         for entry in fs::read_dir(path)? {
             let entry = entry?;
             let path = entry.path();
-            
+
             if !path.is_file() {
                 continue;
             }
@@ -171,6 +181,216 @@ impl TopicRegistry {
             }
         }
         Ok(())
+    }
+}
+
+// ============================================================================
+// TOPIC RENDERING
+// ============================================================================
+
+/// Configuration for topic rendering.
+#[derive(Debug, Clone, Default)]
+pub struct TopicRenderConfig {
+    /// Custom template string for single topic. If None, uses built-in template.
+    pub topic_template: Option<String>,
+    /// Custom template string for topic list. If None, uses built-in template.
+    pub list_template: Option<String>,
+    /// Custom theme. If None, uses the default topic theme.
+    pub theme: Option<Theme>,
+    /// Output mode. If None, uses Auto (auto-detects).
+    pub output_mode: Option<OutputMode>,
+}
+
+/// Returns the default theme for topic rendering.
+pub fn default_topic_theme() -> Theme {
+    Theme::new()
+        .add("header", Style::new().bold())
+        .add("item", Style::new().bold())
+        .add("desc", Style::new())
+        .add("usage", Style::new())
+        .add("about", Style::new())
+}
+
+#[derive(Serialize)]
+struct TopicData {
+    title: String,
+    content: String,
+}
+
+#[derive(Serialize)]
+struct TopicsListData {
+    usage: String,
+    topics: Vec<TopicListItem>,
+}
+
+#[derive(Serialize)]
+struct TopicListItem {
+    name: String,
+    title: String,
+    padding: String,
+}
+
+/// Renders a single topic using outstanding templating.
+///
+/// # Example
+///
+/// ```rust
+/// use outstanding::topics::{Topic, TopicType, render_topic, TopicRenderConfig};
+///
+/// let topic = Topic::new(
+///     "Storage",
+///     "Notes are stored in ~/.notes/\n\nEach note is a separate file.",
+///     TopicType::Text,
+///     Some("storage".to_string()),
+/// );
+///
+/// let output = render_topic(&topic, None).unwrap();
+/// println!("{}", output);
+/// ```
+pub fn render_topic(topic: &Topic, config: Option<TopicRenderConfig>) -> Result<String, Error> {
+    let config = config.unwrap_or_default();
+    let template = config
+        .topic_template
+        .as_deref()
+        .unwrap_or(include_str!("topic_template.txt"));
+
+    let theme = config.theme.unwrap_or_else(default_topic_theme);
+    let mode = config.output_mode.unwrap_or(OutputMode::Auto);
+
+    let data = TopicData {
+        title: topic.title.clone(),
+        content: topic.content.clone(),
+    };
+
+    render_with_output(template, &data, ThemeChoice::from(&theme), mode)
+}
+
+/// Renders a list of all available topics.
+///
+/// # Arguments
+///
+/// * `registry` - The topic registry containing all topics
+/// * `usage_prefix` - The command prefix for usage display (e.g., "myapp help")
+/// * `config` - Optional rendering configuration
+///
+/// # Example
+///
+/// ```rust
+/// use outstanding::topics::{TopicRegistry, Topic, TopicType, render_topics_list};
+///
+/// let mut registry = TopicRegistry::new();
+/// registry.add_topic(Topic::new("Storage", "Where data is stored", TopicType::Text, None));
+/// registry.add_topic(Topic::new("Syntax", "Note syntax reference", TopicType::Text, None));
+///
+/// let output = render_topics_list(&registry, "myapp help", None).unwrap();
+/// println!("{}", output);
+/// ```
+pub fn render_topics_list(
+    registry: &TopicRegistry,
+    usage_prefix: &str,
+    config: Option<TopicRenderConfig>,
+) -> Result<String, Error> {
+    let config = config.unwrap_or_default();
+    let template = config
+        .list_template
+        .as_deref()
+        .unwrap_or(include_str!("topics_list_template.txt"));
+
+    let theme = config.theme.unwrap_or_else(default_topic_theme);
+    let mode = config.output_mode.unwrap_or(OutputMode::Auto);
+
+    let topics = registry.list_topics();
+
+    let topic_items: Vec<TopicListItem> = topics
+        .iter()
+        .map(|t| {
+            // +1 accounts for the colon added in the template
+            let pad = NAME_COLUMN_WIDTH.saturating_sub(t.name.len() + 1);
+            TopicListItem {
+                name: t.name.clone(),
+                title: t.title.clone(),
+                padding: " ".repeat(pad),
+            }
+        })
+        .collect();
+
+    let data = TopicsListData {
+        usage: format!("{} <topic>", usage_prefix),
+        topics: topic_items,
+    };
+
+    render_with_output(template, &data, ThemeChoice::from(&theme), mode)
+}
+
+// ============================================================================
+// PAGER SUPPORT
+// ============================================================================
+
+/// Displays content through a pager.
+///
+/// Tries pagers in this order:
+/// 1. `$PAGER` environment variable
+/// 2. `less`
+/// 3. `more`
+///
+/// If all pagers fail, falls back to printing directly to stdout.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use outstanding::topics::display_with_pager;
+///
+/// let long_content = "Line 1\nLine 2\n...";
+/// display_with_pager(long_content).unwrap();
+/// ```
+pub fn display_with_pager(content: &str) -> std::io::Result<()> {
+    let pagers = get_pager_candidates();
+
+    for pager in pagers {
+        if try_pager(&pager, content).is_ok() {
+            return Ok(());
+        }
+    }
+
+    // Fallback: print directly
+    print!("{}", content);
+    std::io::stdout().flush()
+}
+
+/// Returns the list of pager candidates to try.
+fn get_pager_candidates() -> Vec<String> {
+    let mut pagers = Vec::new();
+
+    if let Ok(pager) = std::env::var("PAGER") {
+        if !pager.is_empty() {
+            pagers.push(pager);
+        }
+    }
+
+    pagers.push("less".to_string());
+    pagers.push("more".to_string());
+
+    pagers
+}
+
+/// Attempts to run content through a specific pager.
+fn try_pager(pager: &str, content: &str) -> std::io::Result<()> {
+    let mut child = ProcessCommand::new(pager)
+        .stdin(Stdio::piped())
+        .spawn()?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(content.as_bytes())?;
+    }
+
+    let status = child.wait()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "pager exited with error",
+        ))
     }
 }
 
@@ -282,5 +502,58 @@ mod tests {
         let mut registry = TopicRegistry::new();
         registry.add_from_directory(dir1.path()).unwrap();
         registry.add_from_directory(dir2.path()).unwrap(); // Should panic
+    }
+
+    #[test]
+    fn test_render_topic_basic() {
+        let topic = Topic::new(
+            "Test Topic",
+            "This is the content.",
+            TopicType::Text,
+            Some("test".to_string()),
+        );
+
+        let config = TopicRenderConfig {
+            output_mode: Some(crate::OutputMode::Text),
+            ..Default::default()
+        };
+
+        let output = render_topic(&topic, Some(config)).unwrap();
+        assert!(output.contains("TEST TOPIC"));
+        assert!(output.contains("This is the content."));
+    }
+
+    #[test]
+    fn test_render_topics_list_basic() {
+        let mut registry = TopicRegistry::new();
+        registry.add_topic(Topic::new("Storage", "Where data lives", TopicType::Text, None));
+        registry.add_topic(Topic::new("Syntax", "Format reference", TopicType::Text, None));
+
+        let config = TopicRenderConfig {
+            output_mode: Some(crate::OutputMode::Text),
+            ..Default::default()
+        };
+
+        let output = render_topics_list(&registry, "myapp help", Some(config)).unwrap();
+        assert!(output.contains("Available Topics"));
+        assert!(output.contains("storage"));
+        assert!(output.contains("syntax"));
+        assert!(output.contains("myapp help <topic>"));
+    }
+
+    #[test]
+    fn test_get_pager_candidates_default() {
+        std::env::remove_var("PAGER");
+        let candidates = get_pager_candidates();
+        assert_eq!(candidates, vec!["less", "more"]);
+    }
+
+    #[test]
+    fn test_get_pager_candidates_with_env() {
+        std::env::set_var("PAGER", "bat");
+        let candidates = get_pager_candidates();
+        assert_eq!(candidates[0], "bat");
+        assert_eq!(candidates[1], "less");
+        std::env::remove_var("PAGER");
     }
 }

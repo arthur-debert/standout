@@ -4,7 +4,7 @@
 //!
 //! This application demonstrates and tests outstanding-clap features:
 //! - Styled help rendering
-//! - Help topics via TopicHelper
+//! - Help topics via Outstanding
 //! - Output mode flag (--output=auto|term|text)
 //! - Pager support
 //!
@@ -14,7 +14,7 @@ use clap::{Parser, Subcommand, Args, CommandFactory};
 use console::Style;
 use outstanding::{render_with_output, Theme, ThemeChoice, OutputMode};
 use outstanding::topics::{Topic, TopicType};
-use outstanding_clap::TopicHelper;
+use outstanding_clap::Outstanding;
 use serde::Serialize;
 
 const ECHO_TEMPLATE: &str = r#"{{ "TEST NOTES APP - Command Echo" | style("header") | nl }}
@@ -279,9 +279,9 @@ enum ConfigAction {
     List,
 }
 
-fn setup_topics() -> TopicHelper {
-    TopicHelper::builder()
-        .output_flag(None) // Add --output flag
+fn setup_outstanding() -> Outstanding {
+    Outstanding::builder()
+        // --output flag is enabled by default
         .add_topic(Topic::new(
             "Scopes",
             "Projects and Global Notes\n\n\
@@ -349,8 +349,8 @@ fn build_command() -> clap::Command {
 }
 
 fn main() {
-    let helper = setup_topics();
-    let matches = helper.run(build_command());
+    let outstanding = setup_outstanding();
+    let matches = outstanding.run_with(build_command());
     handle_matches(&matches);
 }
 

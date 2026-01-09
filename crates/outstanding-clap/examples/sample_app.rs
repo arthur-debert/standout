@@ -4,7 +4,7 @@
 //!
 //! This example demonstrates outstanding-clap features:
 //! - Styled help rendering via `render_help`
-//! - Help topics via `TopicHelper`
+//! - Help topics via `Outstanding`
 //! - Command/subcommand/option/argument handling
 //!
 //! Run with: cargo run --example sample_app -- <command>
@@ -20,7 +20,7 @@
 use clap::{Arg, ArgAction, Command};
 use outstanding::topics::{Topic, TopicType};
 use outstanding::{render_with_output, Theme, ThemeChoice, OutputMode};
-use outstanding_clap::{display_with_pager, TopicHelper, TopicHelpResult};
+use outstanding_clap::{display_with_pager, Outstanding, HelpResult};
 use serde::Serialize;
 use std::process::ExitCode;
 
@@ -218,8 +218,8 @@ fn build_cli() -> Command {
 // TOPICS
 // ============================================================================
 
-fn build_topic_helper() -> TopicHelper {
-    TopicHelper::builder()
+fn build_outstanding() -> Outstanding {
+    Outstanding::builder()
         .add_topic(Topic::new(
             "Storage",
             r#"Where Notes are Stored
@@ -482,25 +482,25 @@ fn handle_config(matches: &clap::ArgMatches, verbose: bool) {
 
 fn main() -> ExitCode {
     let cmd = build_cli();
-    let helper = build_topic_helper();
+    let outstanding = build_outstanding();
 
-    match helper.get_matches(cmd) {
-        TopicHelpResult::Help(help) => {
+    match outstanding.get_matches(cmd) {
+        HelpResult::Help(help) => {
             print!("{}", help);
             ExitCode::SUCCESS
         }
-        TopicHelpResult::PagedHelp(help) => {
+        HelpResult::PagedHelp(help) => {
             if let Err(e) = display_with_pager(&help) {
                 eprintln!("Pager error: {}", e);
                 print!("{}", help);
             }
             ExitCode::SUCCESS
         }
-        TopicHelpResult::Error(e) => {
+        HelpResult::Error(e) => {
             eprintln!("{}", e);
             ExitCode::FAILURE
         }
-        TopicHelpResult::Matches(matches) => {
+        HelpResult::Matches(matches) => {
             let verbose = matches.get_flag("verbose");
 
             match matches.subcommand() {

@@ -1,23 +1,23 @@
 use clap::Command;
 use outstanding::topics::{Topic, TopicRegistry, TopicType};
-use outstanding_clap::{TopicHelper, TopicHelpResult, display_with_pager};
+use outstanding_clap::{Outstanding, HelpResult, display_with_pager};
 
 fn setup_registry() -> TopicRegistry {
     let mut registry = TopicRegistry::new();
-    
+
     // Add a normal topic
     registry.add_topic(Topic::new(
-        "guidelines", 
-        "Follow these guidelines...", 
-        TopicType::Text, 
+        "guidelines",
+        "Follow these guidelines...",
+        TopicType::Text,
         None
     ));
 
     // Add a topic that collides with a command name to test priority
     registry.add_topic(Topic::new(
-        "init", 
-        "This topic is named init but command should shadow it", 
-        TopicType::Text, 
+        "init",
+        "This topic is named init but command should shadow it",
+        TopicType::Text,
         None
     ));
 
@@ -33,16 +33,16 @@ fn setup_command() -> Command {
 #[test]
 fn test_help_topic_resolution() {
     let registry = setup_registry();
-    let helper = TopicHelper::new(registry);
+    let outstanding = Outstanding::with_registry(registry);
     let cmd = setup_command();
 
     // 1. "help guidelines" -> Should find the topic
-    let res = helper.get_matches_from(
+    let res = outstanding.get_matches_from(
         cmd.clone(),
         vec!["myapp", "help", "guidelines"]
     );
-    
-    if let TopicHelpResult::Help(h) = res {
+
+    if let HelpResult::Help(h) = res {
         assert!(h.contains("Follow these guidelines..."));
     } else {
         panic!("Expected Help for topic, got {:?}", res);
@@ -52,16 +52,16 @@ fn test_help_topic_resolution() {
 #[test]
 fn test_help_command_shadows_topic() {
     let registry = setup_registry();
-    let helper = TopicHelper::new(registry);
+    let outstanding = Outstanding::with_registry(registry);
     let cmd = setup_command();
 
     // 2. "help init" -> Should find command help, NOT topic content
-    let res = helper.get_matches_from(
+    let res = outstanding.get_matches_from(
         cmd.clone(),
         vec!["myapp", "help", "init"]
     );
 
-    if let TopicHelpResult::Help(h) = res {
+    if let HelpResult::Help(h) = res {
         // It should be clap help for init command
         assert!(h.contains("Initialize the app"));
         // It should NOT contain the topic content
@@ -74,16 +74,16 @@ fn test_help_command_shadows_topic() {
 #[test]
 fn test_help_unknown() {
     let registry = setup_registry();
-    let helper = TopicHelper::new(registry);
+    let outstanding = Outstanding::with_registry(registry);
     let cmd = setup_command();
 
     // 3. "help whatever" -> Should be Error
-    let res = helper.get_matches_from(
+    let res = outstanding.get_matches_from(
         cmd.clone(),
         vec!["myapp", "help", "whatever"]
     );
 
-    if let TopicHelpResult::Error(e) = res {
+    if let HelpResult::Error(e) = res {
         assert_eq!(e.kind(), clap::error::ErrorKind::InvalidSubcommand);
     } else {
         panic!("Expected Error for unknown topic, got {:?}", res);
@@ -93,16 +93,16 @@ fn test_help_unknown() {
 #[test]
 fn test_normal_execution() {
     let registry = setup_registry();
-    let helper = TopicHelper::new(registry);
+    let outstanding = Outstanding::with_registry(registry);
     let cmd = setup_command();
 
     // 4. "run" -> Should be normal matches
-    let res = helper.get_matches_from(
+    let res = outstanding.get_matches_from(
         cmd.clone(),
         vec!["myapp", "run"]
     );
 
-    if let TopicHelpResult::Matches(m) = res {
+    if let HelpResult::Matches(m) = res {
         assert_eq!(m.subcommand_name(), Some("run"));
     } else {
         panic!("Expected Matches for normal command, got {:?}", res);
@@ -112,16 +112,16 @@ fn test_normal_execution() {
 #[test]
 fn test_help_without_args() {
     let registry = setup_registry();
-    let helper = TopicHelper::new(registry);
+    let outstanding = Outstanding::with_registry(registry);
     let cmd = setup_command();
 
     // "help" without args -> Should return root help
-    let res = helper.get_matches_from(
+    let res = outstanding.get_matches_from(
         cmd.clone(),
         vec!["myapp", "help"]
     );
 
-    if let TopicHelpResult::Help(h) = res {
+    if let HelpResult::Help(h) = res {
         // Should contain info about the app
         assert!(h.contains("myapp"));
     } else {
@@ -131,8 +131,7 @@ fn test_help_without_args() {
 
 #[test]
 fn test_nested_subcommand_help() {
-    let registry = TopicRegistry::new();
-    let helper = TopicHelper::new(registry);
+    let outstanding = Outstanding::new();
 
     // Create a command with nested subcommands
     let cmd = Command::new("myapp")
@@ -144,12 +143,12 @@ fn test_nested_subcommand_help() {
         );
 
     // "help config get" -> Should return help for nested subcommand
-    let res = helper.get_matches_from(
+    let res = outstanding.get_matches_from(
         cmd.clone(),
         vec!["myapp", "help", "config", "get"]
     );
 
-    if let TopicHelpResult::Help(h) = res {
+    if let HelpResult::Help(h) = res {
         assert!(h.contains("Get a config value"));
     } else {
         panic!("Expected Help for nested subcommand, got {:?}", res);
@@ -159,16 +158,16 @@ fn test_nested_subcommand_help() {
 #[test]
 fn test_page_flag_with_topic() {
     let registry = setup_registry();
-    let helper = TopicHelper::new(registry);
+    let outstanding = Outstanding::with_registry(registry);
     let cmd = setup_command();
 
     // "help --page guidelines" -> Should return PagedHelp
-    let res = helper.get_matches_from(
+    let res = outstanding.get_matches_from(
         cmd.clone(),
         vec!["myapp", "help", "--page", "guidelines"]
     );
 
-    if let TopicHelpResult::PagedHelp(h) = res {
+    if let HelpResult::PagedHelp(h) = res {
         assert!(h.contains("Follow these guidelines..."));
     } else {
         panic!("Expected PagedHelp for topic with --page, got {:?}", res);
@@ -178,16 +177,16 @@ fn test_page_flag_with_topic() {
 #[test]
 fn test_page_flag_with_command() {
     let registry = setup_registry();
-    let helper = TopicHelper::new(registry);
+    let outstanding = Outstanding::with_registry(registry);
     let cmd = setup_command();
 
     // "help --page init" -> Should return PagedHelp for command
-    let res = helper.get_matches_from(
+    let res = outstanding.get_matches_from(
         cmd.clone(),
         vec!["myapp", "help", "--page", "init"]
     );
 
-    if let TopicHelpResult::PagedHelp(h) = res {
+    if let HelpResult::PagedHelp(h) = res {
         assert!(h.contains("Initialize the app"));
     } else {
         panic!("Expected PagedHelp for command with --page, got {:?}", res);
@@ -197,16 +196,16 @@ fn test_page_flag_with_command() {
 #[test]
 fn test_page_flag_without_topic() {
     let registry = setup_registry();
-    let helper = TopicHelper::new(registry);
+    let outstanding = Outstanding::with_registry(registry);
     let cmd = setup_command();
 
     // "help --page" without topic -> Should return PagedHelp for root
-    let res = helper.get_matches_from(
+    let res = outstanding.get_matches_from(
         cmd.clone(),
         vec!["myapp", "help", "--page"]
     );
 
-    if let TopicHelpResult::PagedHelp(h) = res {
+    if let HelpResult::PagedHelp(h) = res {
         assert!(h.contains("myapp"));
     } else {
         panic!("Expected PagedHelp for root help with --page, got {:?}", res);
@@ -216,16 +215,16 @@ fn test_page_flag_without_topic() {
 #[test]
 fn test_page_flag_position_after_topic() {
     let registry = setup_registry();
-    let helper = TopicHelper::new(registry);
+    let outstanding = Outstanding::with_registry(registry);
     let cmd = setup_command();
 
     // "help guidelines --page" -> Should also work with flag after topic
-    let res = helper.get_matches_from(
+    let res = outstanding.get_matches_from(
         cmd.clone(),
         vec!["myapp", "help", "guidelines", "--page"]
     );
 
-    if let TopicHelpResult::PagedHelp(h) = res {
+    if let HelpResult::PagedHelp(h) = res {
         assert!(h.contains("Follow these guidelines..."));
     } else {
         panic!("Expected PagedHelp for topic with --page after topic, got {:?}", res);
@@ -235,21 +234,21 @@ fn test_page_flag_position_after_topic() {
 #[test]
 fn test_no_page_flag_returns_help() {
     let registry = setup_registry();
-    let helper = TopicHelper::new(registry);
+    let outstanding = Outstanding::with_registry(registry);
     let cmd = setup_command();
 
     // "help guidelines" without --page -> Should return Help (not PagedHelp)
-    let res = helper.get_matches_from(
+    let res = outstanding.get_matches_from(
         cmd.clone(),
         vec!["myapp", "help", "guidelines"]
     );
 
     // Should be regular Help, not PagedHelp
     match res {
-        TopicHelpResult::Help(h) => {
+        HelpResult::Help(h) => {
             assert!(h.contains("Follow these guidelines..."));
         }
-        TopicHelpResult::PagedHelp(_) => {
+        HelpResult::PagedHelp(_) => {
             panic!("Expected Help without --page, got PagedHelp");
         }
         _ => {
@@ -269,16 +268,16 @@ fn test_display_with_pager_import() {
 #[test]
 fn test_help_topics_lists_all_topics() {
     let registry = setup_registry();
-    let helper = TopicHelper::new(registry);
+    let outstanding = Outstanding::with_registry(registry);
     let cmd = setup_command();
 
     // "help topics" -> Should list all available topics
-    let res = helper.get_matches_from(
+    let res = outstanding.get_matches_from(
         cmd.clone(),
         vec!["myapp", "help", "topics"]
     );
 
-    if let TopicHelpResult::Help(h) = res {
+    if let HelpResult::Help(h) = res {
         // Should contain "Available Topics" header
         assert!(h.contains("Available Topics"), "Should have 'Available Topics' header");
         // Should list our topics
@@ -292,16 +291,16 @@ fn test_help_topics_lists_all_topics() {
 #[test]
 fn test_help_topics_with_pager() {
     let registry = setup_registry();
-    let helper = TopicHelper::new(registry);
+    let outstanding = Outstanding::with_registry(registry);
     let cmd = setup_command();
 
     // "help --page topics" -> Should return PagedHelp with topics list
-    let res = helper.get_matches_from(
+    let res = outstanding.get_matches_from(
         cmd.clone(),
         vec!["myapp", "help", "--page", "topics"]
     );
 
-    if let TopicHelpResult::PagedHelp(h) = res {
+    if let HelpResult::PagedHelp(h) = res {
         assert!(h.contains("Available Topics"));
         assert!(h.contains("guidelines"));
     } else {
@@ -311,17 +310,16 @@ fn test_help_topics_with_pager() {
 
 #[test]
 fn test_help_topics_empty_registry() {
-    let registry = TopicRegistry::new(); // Empty registry
-    let helper = TopicHelper::new(registry);
+    let outstanding = Outstanding::new(); // Empty registry
     let cmd = setup_command();
 
     // "help topics" with empty registry -> Should still work, just show empty list
-    let res = helper.get_matches_from(
+    let res = outstanding.get_matches_from(
         cmd.clone(),
         vec!["myapp", "help", "topics"]
     );
 
-    if let TopicHelpResult::Help(h) = res {
+    if let HelpResult::Help(h) = res {
         assert!(h.contains("Available Topics"));
         assert!(h.contains("TOPICS"));
     } else {
@@ -332,16 +330,16 @@ fn test_help_topics_empty_registry() {
 #[test]
 fn test_root_help_shows_learn_more_section() {
     let registry = setup_registry();
-    let helper = TopicHelper::new(registry);
+    let outstanding = Outstanding::with_registry(registry);
     let cmd = setup_command();
 
     // "help" without args -> Should show root help with Learn More section
-    let res = helper.get_matches_from(
+    let res = outstanding.get_matches_from(
         cmd.clone(),
         vec!["myapp", "help"]
     );
 
-    if let TopicHelpResult::Help(h) = res {
+    if let HelpResult::Help(h) = res {
         // Should contain the Learn More section
         assert!(h.contains("LEARN MORE"), "Should have 'LEARN MORE' header");
         // Should list our topics
@@ -354,17 +352,16 @@ fn test_root_help_shows_learn_more_section() {
 
 #[test]
 fn test_root_help_no_learn_more_when_empty_registry() {
-    let registry = TopicRegistry::new(); // Empty registry
-    let helper = TopicHelper::new(registry);
+    let outstanding = Outstanding::new(); // Empty registry
     let cmd = setup_command();
 
     // "help" with empty registry -> Should NOT show Learn More section
-    let res = helper.get_matches_from(
+    let res = outstanding.get_matches_from(
         cmd.clone(),
         vec!["myapp", "help"]
     );
 
-    if let TopicHelpResult::Help(h) = res {
+    if let HelpResult::Help(h) = res {
         // Should NOT contain the Learn More section when there are no topics
         assert!(!h.contains("LEARN MORE"), "Should NOT have 'LEARN MORE' header when no topics");
     } else {
