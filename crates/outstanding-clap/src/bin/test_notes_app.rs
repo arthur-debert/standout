@@ -358,6 +358,7 @@ fn get_output_mode(matches: &clap::ArgMatches) -> OutputMode {
     match matches.get_one::<String>("_output_mode").map(|s| s.as_str()) {
         Some("term") => OutputMode::Term,
         Some("text") => OutputMode::Text,
+        Some("term-debug") => OutputMode::TermDebug,
         _ => OutputMode::Auto,
     }
 }

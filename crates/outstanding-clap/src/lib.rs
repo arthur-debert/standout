@@ -116,9 +116,9 @@ impl TopicHelper {
                     .long(flag)
                     .value_name("MODE")
                     .global(true)
-                    .value_parser(["auto", "term", "text"])
+                    .value_parser(["auto", "term", "text", "term-debug"])
                     .default_value("auto")
-                    .help("Output mode: auto (detect), term (always styled), text (plain)")
+                    .help("Output mode: auto, term, text, or term-debug")
             );
         }
 
@@ -196,6 +196,7 @@ impl TopicHelper {
             match matches.get_one::<String>("_output_mode").map(|s| s.as_str()) {
                 Some("term") => OutputMode::Term,
                 Some("text") => OutputMode::Text,
+                Some("term-debug") => OutputMode::TermDebug,
                 _ => OutputMode::Auto,
             }
         } else {
