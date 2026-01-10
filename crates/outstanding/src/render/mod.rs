@@ -14,5 +14,8 @@ mod filters;
 mod functions;
 mod renderer;
 
-pub use functions::{render, render_or_serialize, render_with_output};
+pub use functions::{
+    render, render_or_serialize, render_or_serialize_with_context, render_with_context,
+    render_with_output,
+};
 pub use renderer::Renderer;

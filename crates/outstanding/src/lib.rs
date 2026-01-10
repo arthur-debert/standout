@@ -151,6 +151,7 @@ mod theme;
 mod util;
 
 // Public submodules
+pub mod context;
 pub mod table;
 pub mod topics;
 
@@ -167,7 +168,10 @@ pub use theme::{set_theme_detector, AdaptiveTheme, ColorMode, Theme, ThemeChoice
 pub use output::OutputMode;
 
 // Render module exports
-pub use render::{render, render_or_serialize, render_with_output, Renderer};
+pub use render::{
+    render, render_or_serialize, render_or_serialize_with_context, render_with_context,
+    render_with_output, Renderer,
+};
 
 // Utility exports
 pub use util::{rgb_to_ansi256, rgb_to_truecolor, truncate_to_width};
