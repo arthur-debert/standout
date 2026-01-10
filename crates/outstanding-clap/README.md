@@ -1,141 +1,153 @@
 # outstanding-clap
 
-Batteries-included integration of `outstanding` with `clap`.
+Batteries-included integration of `outstanding` with `clap`. This crate provides a complete solution for CLI output management:
 
-This crate handles the boilerplate of connecting outstanding's styled output to your clap-based CLI:
+- **Command handlers** - Map commands to handlers with automatic rendering
+- **Styled help** - Beautiful help output using outstanding templates
+- **Output modes** - `--output=<auto|term|text|json>` flag on all commands
+- **Help topics** - Extended documentation system (`help <topic>`, `help topics`)
+- **Pager support** - Automatic paging for long content
 
-- Styled help output using outstanding templates
-- Help topics system (`help <topic>`, `help topics`)
-- `--output` flag for user output control (enabled by default)
-- Pager support for long help content
+## Installation
+
+```toml
+[dependencies]
+outstanding-clap = "0.5"
+clap = "4"
+serde = { version = "1", features = ["derive"] }
+```
 
 ## Quick Start
 
+### Simplest Usage
+
 ```rust
 use clap::Command;
 use outstanding_clap::Outstanding;
 
-// Simplest usage - styled help with --output flag
 let matches = Outstanding::run(Command::new("my-app"));
 ```
 
-That's it. Your CLI now has:
+Your CLI now has styled help and an `--output` flag.
 
-- Styled help output
-- `--output=<auto|term|text|term-debug>` flag on all commands
-- `help` subcommand with topic support
-
-## Adding Help Topics
+### With Command Handlers
 
 ```rust
 use clap::Command;
-use outstanding_clap::Outstanding;
+use outstanding_clap::{Outstanding, CommandResult};
+use serde::Serialize;
 
-let matches = Outstanding::builder()
-    .topics_dir("docs/topics")  // Load .txt and .md files as topics
-    .run(Command::new("my-app"));
+#[derive(Serialize)]
+struct ListOutput {
+    items: Vec<String>,
+}
 
-// Users can now run:
-//   my-app help topics     - list all topics
-//   my-app help <topic>    - view specific topic
+fn main() {
+    let cmd = Command::new("my-app")
+        .subcommand(Command::new("list").about("List all items"));
+
+    Outstanding::builder()
+        .command("list", |_matches, _ctx| {
+            CommandResult::Ok(ListOutput {
+                items: vec!["apple".into(), "banana".into()],
+            })
+        }, "{% for item in items %}- {{ item }}\n{% endfor %}")
+        .run_and_print(cmd, std::env::args());
+}
 ```
 
-Topic files should have the title on the first line, followed by content:
-
-```text
-Storage Guide
-=============
-
-Notes are stored in ~/.notes/
-
-Each note is a separate file with a UUID-based filename.
+Now your CLI supports:
+```bash
+my-app list              # Rendered template output
+my-app list --output=json # JSON output
 ```
 
-## Configuration Options
+## Adoption Models
+
+Outstanding supports three adoption levels:
+
+### Full Adoption
+Register all commands with handlers. Outstanding manages rendering.
+
+### Partial Adoption
+Register some commands, handle others manually:
 
 ```rust
-use clap::Command;
-use outstanding::Theme;
-use outstanding_clap::Outstanding;
-
-let my_theme = Theme::new();  // Customize as needed
-
-let matches = Outstanding::builder()
-    .topics_dir("docs/topics")    // Load topics from directory
-    .theme(my_theme)              // Custom theme
-    .output_flag(Some("format"))  // Custom flag name (default: "output")
-    .no_output_flag()             // Or disable the flag entirely
-    .run(Command::new("my-app"));
+match builder.dispatch_from(cmd, args) {
+    RunResult::Handled(output) => println!("{}", output),
+    RunResult::Unhandled(matches) => {
+        // Handle legacy commands manually
+    }
+}
 ```
 
-## What This Crate Does
+### Output-Only
+Use Outstanding just for rendering in your existing code:
 
-The `outstanding` crate provides the core framework:
+```rust
+use outstanding::{render_or_serialize, OutputMode};
 
-- Template rendering with MiniJinja
-- Themes and styles
-- Output mode control
-- Topic system (data structures, rendering, pager)
+let output = render_or_serialize(template, &data, theme, mode)?;
+```
 
-This crate provides the **clap integration**:
+## Help Topics
 
-- Intercepts `help`, `help <topic>`, `help topics` subcommands
-- Injects `--output` flag to all commands
-- Renders clap command help using outstanding templates
-- Calls outstanding's topic rendering for topic help
+Add extended documentation:
 
-For non-clap applications, use `outstanding` directly and write your own argument parsing glue.
+```rust
+Outstanding::builder()
+    .topics_dir("docs/topics")  // Load .txt and .md files
+    .run(cmd);
+```
+
+Users access via:
+```bash
+my-app help topics     # List all topics
+my-app help <topic>    # View specific topic
+```
+
+## Documentation
+
+For comprehensive documentation, see:
+
+- **[Using Outstanding with Clap](docs/using-with-clap.md)** - Complete guide covering:
+  - All adoption models with examples
+  - Command handlers and templates
+  - Output modes and themes
+  - Help topics configuration
+  - Best practices
+
+- **[Architecture & Design](../../docs/proposals/fullapi-consolidated.md)** - Technical deep dive for contributors
 
 ## API Overview
 
-### Outstanding
-
-Main entry point. Use `Outstanding::run()` for the simplest case or `Outstanding::builder()` for configuration.
-
-```rust
-// Static method - quick setup
-let matches = Outstanding::run(cmd);
-
-// Builder pattern - full control
-let matches = Outstanding::builder()
-    .topics_dir("docs/topics")
-    .theme(my_theme)
-    .build()
-    .run_with(cmd);
-```
-
 ### OutstandingBuilder
 
-Builder for configuring Outstanding:
-
 | Method | Description |
-| -------- | ------------- |
-| `topics_dir(path)` | Load topics from a directory |
-| `add_topic(topic)` | Add a single topic |
-| `theme(theme)` | Set custom theme |
-| `output_flag(Some("name"))` | Custom output flag name |
-| `no_output_flag()` | Disable output flag |
-| `build()` | Build the Outstanding instance |
-| `run(cmd)` | Build and run in one step |
+|--------|-------------|
+| `.command(path, handler, template)` | Register command with closure |
+| `.command_handler(path, handler, template)` | Register command with struct handler |
+| `.topics_dir(path)` | Load help topics from directory |
+| `.theme(theme)` | Set custom theme |
+| `.output_flag(Some("format"))` | Rename `--output` flag |
+| `.no_output_flag()` | Disable output flag |
 
-### HelpResult
+### Dispatch Methods
 
-Result of `get_matches()`:
+| Method | Returns | Use Case |
+|--------|---------|----------|
+| `.run_and_print(cmd, args)` | `bool` | Complete flow: parse, dispatch, print |
+| `.dispatch_from(cmd, args)` | `RunResult` | Parse and dispatch, you handle output |
+| `.dispatch(matches, mode)` | `RunResult` | You provide parsed matches |
+
+### CommandResult Variants
 
 | Variant | Description |
-   | --------- | ------------- |
-| `Matches(ArgMatches)` | Normal command execution |
-| `Help(String)` | Help content to print |
-| `PagedHelp(String)` | Help content for pager |
-| `Error(clap::Error)` | Parse or lookup error |
-
-## Defaults
-
-By default:
-
-- `--output` flag is **enabled** (use `no_output_flag()` to disable)
-- Help topics are **enabled** but empty (add with `topics_dir()` or `add_topic()`)
-- Pager support via `help --page <topic>`
+|---------|-------------|
+| `Ok(data)` | Success with serializable data |
+| `Err(error)` | Error to display |
+| `Silent` | No output |
+| `Archive(bytes, filename)` | Binary file output |
 
 ## License
 

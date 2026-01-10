@@ -1,208 +1,317 @@
-# Consolidated Design: Outstanding Declarative API
+# Outstanding Architecture & Design
 
-## Executive Summary
+This document describes the architecture, design decisions, and core primitives of the Outstanding framework. It is intended for developers evaluating the framework for adoption, contributors, and advanced users who need to understand the lower-level primitives.
 
-This proposal merges the **Type-Driven** approach (Proposal 1) and the **Runtime Router** approach (Proposal 2) into a layered architecture.
+## Overview
 
-1. **Core Layer (Runtime Router)**: A flexible, zero-magic router that allows mapping command strings (paths) to handlers and templates. This enables partial adoption, middleware, and dependency injection.
-2. **Sugar Layer (Derive Macros)**: An optional, high-level API using `#[derive(Outstanding)]` that generates the router configuration automatically from Clap structs.
+Outstanding is a CLI output framework that decouples application logic from terminal presentation. The architecture follows a clear separation:
 
-This hybrid approach satisfies all requirements:
+```
+Command Logic → Structured Data → Template + Theme → Terminal Output
+                     ↓
+              (OutputMode::Json)
+                     ↓
+              Structured Output (JSON)
+```
 
-- **Zero Boilerplate**: Use the macro for 90% of cases.
-- **Maximum Flexibility**: Drop down to the router for complex cases (dependency injection, dynamic templates).
-- **Partial Adoption**: The router naturally supports "falling through" to manual handling.
+The framework consists of two crates:
+- **`outstanding`**: Core rendering engine (CLI-agnostic)
+- **`outstanding-clap`**: Clap integration with command dispatch
 
 ---
 
-## 1. Shared Concepts
+## Design Principles
 
-### Output Modes
+### 1. Logic/Presentation Separation
 
-We extend `OutputMode` to support structured data exports.
+Commands produce structured data. Templates handle presentation. This enables:
+- **Testability**: Logic returns data, not strings with ANSI codes
+- **Multiple output modes**: Same data renders as terminal, plain text, or JSON
+- **Maintainability**: Change styling without touching logic
+
+### 2. Partial Adoption
+
+The framework doesn't force all-or-nothing adoption:
+- Register only specific commands with handlers
+- Unregistered commands fall through for manual handling
+- Use only the features you need (themes, topics, dispatch, etc.)
+
+### 3. CLI-Agnostic Core
+
+The `outstanding` crate has no opinion about argument parsing. It provides:
+- Template rendering with style injection
+- Theme management
+- Output mode control
+- Help topics system
+
+The `outstanding-clap` crate adds argument parsing integration.
+
+---
+
+## Core Primitives
+
+### OutputMode
+
+Controls how output is rendered:
 
 ```rust
 pub enum OutputMode {
-    Auto,       // Detect based on TTY
-    Term,       // Force ANSI
-    Text,       // Force plain text
-    TermDebug,  // [style]tags[/style]
-    Json,       // Serialize output using serde_json
-    Yaml,       // Serialize output using serde_yaml
+    Auto,       // Detect terminal capabilities
+    Term,       // Force ANSI escape codes
+    Text,       // Force plain text (no ANSI)
+    TermDebug,  // Bracket tags: [style]text[/style]
+    Json,       // Serialize data directly (skip template)
 }
 ```
 
-### Command Context
+**Key methods:**
+- `should_use_color()`: Resolves mode to concrete color decision
+- `is_structured()`: Returns `true` for JSON (and future formats like YAML)
+- `is_debug()`: Returns `true` for TermDebug
 
-A context object passed to every handler, providing environment details.
+**Design decision**: JSON mode bypasses template rendering entirely. The template is ignored and data is serialized directly. This ensures machine-readable output is always valid JSON, not a template that happens to output JSON-like text.
+
+### Theme & Styles
+
+Themes are named collections of `console::Style` values:
 
 ```rust
-pub struct CommandContext {
-    pub output_mode: OutputMode,
-    pub path: Vec<String>, // e.g. ["config", "get"]
-}
+let theme = Theme::new()
+    .add("title", Style::new().bold())
+    .add("error", Style::new().red());
 ```
+
+**Style Aliasing**: Styles can reference other styles, enabling layered architecture:
+
+```rust
+let theme = Theme::new()
+    // Visual layer (concrete styles)
+    .add("muted", Style::new().dim())
+    .add("accent", Style::new().cyan().bold())
+    // Presentation layer (aliases)
+    .add("disabled", "muted")
+    // Semantic layer (aliases to presentation)
+    .add("timestamp", "disabled");
+```
+
+**Validation**: Aliases are validated at render time. Dangling references and cycles cause errors before any output is produced.
+
+### AdaptiveTheme
+
+Pairs light and dark themes with automatic OS detection:
+
+```rust
+let adaptive = AdaptiveTheme::new(light_theme, dark_theme);
+// Uses dark-light crate to detect OS preference
+```
+
+### Rendering Functions
+
+Three levels of rendering:
+
+```rust
+// 1. Simple: auto-detect colors
+render(template, data, theme) -> Result<String>
+
+// 2. Explicit mode control
+render_with_output(template, data, theme, mode) -> Result<String>
+
+// 3. Structured output support
+render_or_serialize(template, data, theme, mode) -> Result<String>
+```
+
+**`render_or_serialize`** is the recommended function for command handlers. It:
+- Uses the template for terminal modes
+- Serializes directly for structured modes (JSON)
+
+### Renderer
+
+Pre-compiles templates for repeated use:
+
+```rust
+let mut renderer = Renderer::new(theme)?;
+renderer.add_template("list", "{% for item in items %}...")?;
+renderer.render("list", &data)?;
+```
+
+**Validation**: The `Renderer::new()` constructor validates all style aliases upfront. Invalid themes fail early, not at render time.
 
 ---
 
-## 2. The Core Layer: Runtime Router
+## Clap Integration Architecture
 
-This layer manages the dispatch lifecycle: `Logic -> Data -> Template -> Output`. It usually consumes `clap` constructs but doesn't require owning them.
+### Command Handler System
 
-### Key Types
-
-**`CommandResult`**: The standardized return type for all handlers.
+The clap adapter provides a declarative command registration system:
 
 ```rust
-pub enum CommandResult<T: Serialize> {
-    Ok(T),
-    Err(anyhow::Error), // Or String
-    Archive(Vec<u8>, String), // For file exports
-}
+Outstanding::builder()
+    .command("list", handler_fn, "{{ items | join(', ') }}")
+    .command("config.get", handler_fn, "{{ key }}: {{ value }}")
+    .run_and_print(cmd, args);
 ```
 
-**`Handler` Trait**: The interface for logic.
+**Dot notation**: Command paths use dots for nesting. `"config.get"` matches `app config get`.
+
+### Handler Trait
 
 ```rust
 pub trait Handler: Send + Sync {
     type Output: Serialize;
-    fn handle(&self, matches: &ArgMatches, ctx: &CommandContext) -> CommandResult<Self::Output>;
+    fn handle(&self, matches: &ArgMatches, ctx: &CommandContext)
+        -> CommandResult<Self::Output>;
 }
 ```
 
-### The Router API
-
-The declarative builder allows mapping paths (dot-notation) to handlers.
+**Closures**: A `FnHandler` wrapper enables closure syntax:
 
 ```rust
-let app = Outstanding::builder()
-    // Explicit mapping
-    .command("list", list_handler, "templates/list.j2")
-    
-    // Closure support
-    .command("add", |m, _| { /* ... */ }, "templates/add.j2")
-    
-    // "Partial Adoption" - if a command isn't matched here, it falls through
-    .run(cmd); 
+.command("list", |matches, ctx| {
+    CommandResult::Ok(ListOutput { items: vec![] })
+}, template)
+```
+
+**Design decision**: We use a wrapper struct (`FnHandler`) instead of a blanket impl for closures. This avoids Higher-Ranked Trait Bound (HRTB) issues with Rust's type system.
+
+### CommandResult
+
+```rust
+pub enum CommandResult<T: Serialize> {
+    Ok(T),                    // Success with data to render
+    Err(anyhow::Error),       // Error (displayed to user)
+    Silent,                   // No output
+    Archive(Vec<u8>, String), // Binary output (bytes, filename)
+}
+```
+
+**Design decision**: `anyhow::Error` provides rich error context with backtraces. The `Archive` variant supports binary exports (PDFs, images, etc.) that should not go through template rendering.
+
+### CommandContext
+
+```rust
+pub struct CommandContext {
+    pub output_mode: OutputMode,
+    pub command_path: Vec<String>,
+}
+```
+
+Passed to every handler, providing execution environment information.
+
+### RunResult
+
+```rust
+pub enum RunResult {
+    Handled(String),           // Command processed, here's the output
+    Binary(Vec<u8>, String),   // Binary output (bytes, filename)
+    Unhandled(ArgMatches),     // No handler matched, manual handling needed
+}
+```
+
+**Fallthrough semantics**: `Unhandled` enables partial adoption. Register some commands, handle others manually.
+
+### Dispatch Methods
+
+Three levels of dispatch:
+
+```rust
+// 1. Low-level: you provide parsed matches and mode
+builder.dispatch(matches, output_mode) -> RunResult
+
+// 2. Convenience: parses args, extracts mode from --output flag
+builder.dispatch_from(cmd, args) -> RunResult
+
+// 3. Complete: parse, dispatch, and print output
+builder.run_and_print(cmd, args) -> bool
 ```
 
 ---
 
-## 3. The Sugar Layer: Derive Macros
+## Output Flag Integration
 
-For users who want the "Framework Experience", macros automate the wiring.
+The `--output` flag is automatically injected:
 
-### `Runnable` Trait
-
-Couples logic and presentation to the Clap struct.
-
-```rust
-pub trait Runnable {
-    type Output: Serialize;
-
-    fn run(&self) -> Result<Self::Output>;
-
-    fn template(&self) -> &str {
-        // Default conventions can span here, e.g.
-        // lowercase_struct_name.j2
-        "default.j2"
-    }
-}
+```
+--output=<auto|term|text|term-debug|json>
 ```
 
-### `#[derive(Outstanding)]`
+- `auto`: Detect terminal capabilities (default)
+- `term`: Force ANSI codes
+- `text`: Plain text (honors `--no-color` conventions)
+- `term-debug`: Bracket tags for debugging templates
+- `json`: Machine-readable JSON output
 
-Generates a `register_handlers` method that populates the Core Router.
+**Design decision**: The flag is enabled by default but can be disabled with `.no_output_flag()` or renamed with `.output_flag(Some("format"))`.
+
+---
+
+## Help Topics System
+
+Extended documentation beyond `--help`:
 
 ```rust
-#[derive(Subcommand, Outstanding)]
-enum Commands {
-    // Automatically registers path "list" mapping to ListCmd::run
-    List(ListCmd),
-    
-    // Customization via attributes
-    #[outstanding(path = "new", template = "create.j2")]
-    Create(CreateCmd),
+Outstanding::builder()
+    .topics_dir("docs/topics")  // Load .txt and .md files
+    .add_topic(Topic::new(...)) // Or add programmatically
+```
 
-    // Skip variant (Partial Adoption)
-    #[outstanding(skip)]
-    Legacy(LegacyCmd),
+Users access via:
+```
+app help topics     # List all topics
+app help <topic>    # View specific topic
+app help --page X   # View with pager
+```
+
+---
+
+## Type-Erased Dispatch
+
+Internally, handlers are stored as type-erased functions:
+
+```rust
+type DispatchFn = Arc<dyn Fn(&ArgMatches, &CommandContext)
+    -> Result<DispatchOutput, String> + Send + Sync>;
+```
+
+This enables storing handlers with different output types in the same `HashMap`. The template and serialization happen inside the closure, producing `DispatchOutput`:
+
+```rust
+enum DispatchOutput {
+    Text(String),
+    Binary(Vec<u8>, String),
+    Silent,
 }
 ```
 
 ---
 
-## 4. Usage Examples
+## Error Handling Strategy
 
-### Scenario A: The "Sugar" Way (Fastest)
+1. **Style validation**: Checked at render time (or `Renderer::new()`). Invalid aliases fail before output.
 
-```rust
-#[derive(Args, Runnable)] 
-#[outstanding(template = "list.j2")]
-struct ListCmd { /* ... */ }
+2. **Template errors**: MiniJinja errors propagate as `minijinja::Error`.
 
-#[derive(Subcommand, Outstanding)]
-enum Commands {
-    List(ListCmd),
-}
+3. **Handler errors**: Return `CommandResult::Err(anyhow::Error)` for rich context.
 
-fn main() {
-    let cli = Cli::parse();
-    
-    // The macro generates the router wiring for us
-    outstanding::execute(&cli.command).unwrap();
-}
-```
-
-### Scenario B: The "Core" Way (Dependency Injection)
-
-When you need to pass database pools or services to handlers.
-
-```rust
-struct ListHandler {
-    db: DatabasePool,
-}
-
-impl Handler for ListHandler { /* ... */ }
-
-fn main() {
-    let cmd = Command::new("app")...;
-
-    Outstanding::builder()
-        .command("list", ListHandler { db: pool }, "list.j2")
-        .run(cmd);
-}
-```
-
-### Scenario C: Mixed / Partial Adoption
-
-```rust
-let result = Outstanding::builder()
-    .command("modern", modern_handler, "modern.j2")
-    .run(cmd); // Returns RunResult
-
-match result {
-    RunResult::Handled => {}, // Outstanding took care of it
-    RunResult::Unhandled(matches) => {
-        // Fallback to legacy spaghetti code
-        if let Some(m) = matches.subcommand_matches("legacy") {
-            legacy_code(m);
-        }
-    }
-}
-```
+4. **Parse errors**: Clap errors are converted to `RunResult::Handled(error_string)`.
 
 ---
 
-## Implementation Roadmap
+## Thread Safety
 
-1. **Phase 1: Common Types**: Implement `OutputMode` extensions (Json) and `CommandContext` in `crates/outstanding`.
-2. **Phase 2: Core Router**: Implement the Builder, `Handler` trait, and Dispatcher in `crates/outstanding-clap`.
-3. **Phase 3: Verify**: Ensure the Core Router works for the "Partial Adoption" use case.
-4. **Phase 4: Macros**: Implement `outstanding-derive` to generate the `.command(...)` calls automatically for `Runnable` structs.
+All core types are `Send + Sync`:
+- `Theme`, `Styles`, `AdaptiveTheme`: Clone + Send + Sync
+- `Handler` trait requires `Send + Sync`
+- Dispatch functions stored as `Arc<dyn ... + Send + Sync>`
 
-## Why This Wins
+This enables use in async contexts and parallel processing.
 
-- **Decoupling**: The Router doesn't *force* you to move logic into Structs (unlike Prop 1).
-- **Ergonomics**: The Macro *allows* you to put logic in Structs if you prefer that style (like Prop 1).
-- **Interop**: You can mix and match. Derive most commands, but manually register the complex ones that need special context.
+---
+
+## Future Considerations
+
+Documented but not yet implemented:
+
+1. **YAML output**: `OutputMode::Yaml` for alternative structured format
+2. **Derive macros**: `#[derive(Outstanding)]` for automatic handler registration
+3. **Binary stdin detection**: Smart handling of piped binary input
+4. **Interactive prompts**: Integration points for user input during execution

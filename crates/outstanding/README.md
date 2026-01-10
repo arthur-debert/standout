@@ -1,19 +1,34 @@
 # outstanding
 
-Outstanding is shell rendering library that allows your to deveop your application to be shell agnostic, being unit tested and easier to write and maintain. Likewise it decouples the rendetring from the model, giving you a interface that is easier to fine tune and update.
+A CLI output framework that decouples application logic from terminal presentation. Outstanding provides template rendering with styled output, automatic terminal detection, and structured output modes.
 
-We've been pretty good at not mixing arg parsing and application logic for a while, with greate libs like clasp. Thankfully, you
-won't see a logic three modules later thatn program execution parsing an ad hoc option from the input string.  That can't be said about the output, commonly integrmingled with logic, with prints to std out or std mid program and premature convertion of data types to strings.  This makes programs hard to test, maintain and design.
+## Why Outstanding?
 
-**Outstanding** is a library for rendering your application into terminal, be ir plain tech, richer formatting or textual or binary data that helps isolate logic and presentation. It support templates strings, template files and style sheets and is smart about gracefully degrading output to plain text when needed.
+Modern CLI applications need to produce output for multiple contexts:
+- Humans reading in terminals (with colors, formatting)
+- Scripts parsing output (plain text or JSON)
+- Piped content (no ANSI codes)
 
-![alt text](assets/architecture.svg)
+Outstanding solves this by separating **what** you output from **how** it's rendered:
+
+```
+Command Logic → Structured Data → Template + Theme → Terminal Output
+                     ↓
+              (OutputMode::Json)
+                     ↓
+              Structured Output (JSON)
+```
 
 ## Installation
 
 ```toml
 [dependencies]
-outstanding = "0.2.2"
+outstanding = "0.5"
+```
+
+For clap integration, also add:
+```toml
+outstanding-clap = "0.5"
 ```
 
 ## Quick Start
@@ -47,80 +62,101 @@ let output = render(
 println!("{}", output);
 ```
 
-## Concepts
+## Core Features
 
-- **Theme**: Named collection of `console::Style` values (e.g., `"header"` → bold cyan)
-- **AdaptiveTheme**: Pair of themes (light/dark) with OS detection (powered by `dark-light`)
-- **ThemeChoice**: Pass either a theme or an adaptive theme to `render`
-- **style filter**: `{{ value | style("name") }}` inside templates applies the registered style
-- **Renderer**: Compile templates ahead of time if you render them repeatedly
+### Output Modes
 
-## Adaptive Themes (Light & Dark)
+Control how output is rendered:
 
 ```rust
-use outstanding::{AdaptiveTheme, Theme, ThemeChoice, OutputMode};
-use console::Style;
+use outstanding::{render_with_output, OutputMode};
 
-let light = Theme::new().add("tone", Style::new().green());
-let dark  = Theme::new().add("tone", Style::new().yellow().italic());
+// Auto-detect terminal capabilities (default)
+render_with_output(template, &data, theme, OutputMode::Auto)?;
+
+// Force ANSI colors
+render_with_output(template, &data, theme, OutputMode::Term)?;
+
+// Plain text, no colors
+render_with_output(template, &data, theme, OutputMode::Text)?;
+
+// Debug mode: [style]text[/style]
+render_with_output(template, &data, theme, OutputMode::TermDebug)?;
+
+// JSON output (skips template, serializes data directly)
+render_or_serialize(template, &data, theme, OutputMode::Json)?;
+```
+
+### Adaptive Themes
+
+Support light and dark terminals with automatic OS detection:
+
+```rust
+use outstanding::{Theme, AdaptiveTheme, ThemeChoice};
+
+let light = Theme::new().add("accent", Style::new().blue());
+let dark = Theme::new().add("accent", Style::new().cyan());
 let adaptive = AdaptiveTheme::new(light, dark);
 
-// Automatically renders with the user's OS theme
-let banner = outstanding::render_with_output(
-    r#"Mode: {{ "active" | style("tone") }}"#,
-    &serde_json::json!({}),
-    ThemeChoice::Adaptive(&adaptive),
-    OutputMode::Term,
-).unwrap();
+render(template, &data, ThemeChoice::Adaptive(&adaptive))?;
 ```
 
-## Pre-compiled Templates with Renderer
+### Style Aliasing
+
+Create maintainable layered styles:
 
 ```rust
-use outstanding::{Renderer, Theme};
-use console::Style;
-use serde::Serialize;
-
-#[derive(Serialize)]
-struct Entry { label: String, value: i32 }
-
 let theme = Theme::new()
-    .add("label", Style::new().bold())
-    .add("value", Style::new().green());
-
-let mut renderer = Renderer::new(theme).unwrap();
-renderer.add_template("row", r#"{{ label | style("label") }}: {{ value | style("value") }}"#).unwrap();
-
-let rendered = renderer.render("row", &Entry { label: "Count".into(), value: 42 }).unwrap();
+    // Visual layer (concrete)
+    .add("muted", Style::new().dim())
+    .add("accent", Style::new().cyan().bold())
+    // Semantic layer (aliases)
+    .add("timestamp", "muted")
+    .add("command_name", "accent");
 ```
 
-## Honoring --no-color Flags
+### Pre-compiled Templates
+
+For repeated rendering:
 
 ```rust
-use clap::Parser;
-use outstanding::{render_with_output, Theme, ThemeChoice, OutputMode};
+use outstanding::Renderer;
 
-#[derive(Parser)]
-struct Cli {
-    #[arg(long)]
-    no_color: bool,
+let mut renderer = Renderer::new(theme)?;
+renderer.add_template("row", r#"{{ label }}: {{ value }}"#)?;
+
+for entry in entries {
+    let output = renderer.render("row", &entry)?;
+    println!("{}", output);
 }
-
-let cli = Cli::parse();
-let mode = if cli.no_color { OutputMode::Text } else { OutputMode::Auto };
-let output = render_with_output(
-    template,
-    &data,
-    ThemeChoice::from(&theme),
-    mode,
-).unwrap();
 ```
+
+## Integration with Clap
+
+For clap-based CLIs, the `outstanding-clap` crate provides:
+
+- Command handler registration with templates
+- Automatic `--output` flag injection
+- Help topics system
+- Pager support
+
+```rust
+use outstanding_clap::{Outstanding, CommandResult};
+
+Outstanding::builder()
+    .command("list", |_m, _ctx| {
+        CommandResult::Ok(serde_json::json!({"items": ["a", "b"]}))
+    }, "{{ items | join(', ') }}")
+    .run_and_print(cmd, std::env::args());
+```
+
+See the [outstanding-clap documentation](../outstanding-clap/docs/using-with-clap.md) for details.
 
 ## Documentation
 
-For detailed guides, see:
-- [Styling Guide](../../docs/styling.md) - Themes, style aliasing, adaptive themes, output modes
+- [Styling Guide](../../docs/styling.md) - Themes, style aliasing, adaptive themes
 - [Templates Guide](../../docs/templates.md) - MiniJinja syntax, filters, data structures
+- [Architecture & Design](../../docs/proposals/fullapi-consolidated.md) - Deep dive for contributors and advanced users
 
 ## License
 
