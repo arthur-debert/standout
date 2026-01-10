@@ -194,9 +194,9 @@ impl Outstanding {
                     .long(flag)
                     .value_name("MODE")
                     .global(true)
-                    .value_parser(["auto", "term", "text", "term-debug"])
+                    .value_parser(["auto", "term", "text", "term-debug", "json"])
                     .default_value("auto")
-                    .help("Output mode: auto, term, text, or term-debug")
+                    .help("Output mode: auto, term, text, term-debug, or json")
             );
         }
 
@@ -267,6 +267,7 @@ impl Outstanding {
                 Some("term") => OutputMode::Term,
                 Some("text") => OutputMode::Text,
                 Some("term-debug") => OutputMode::TermDebug,
+                Some("json") => OutputMode::Json,
                 _ => OutputMode::Auto,
             }
         } else {
@@ -569,6 +570,84 @@ impl OutstandingBuilder {
         } else {
             RunResult::Unhandled(matches)
         }
+    }
+
+    /// Parses arguments and dispatches to registered handlers.
+    ///
+    /// This is the recommended entry point when using the command handler system.
+    /// It augments the command with `--output` flag, parses arguments, and
+    /// dispatches to registered handlers.
+    ///
+    /// # Returns
+    ///
+    /// - `RunResult::Handled(output)` if a registered handler processed the command
+    /// - `RunResult::Unhandled(matches)` if no handler matched (for manual handling)
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use outstanding_clap::{Outstanding, CommandResult, RunResult};
+    ///
+    /// let result = Outstanding::builder()
+    ///     .command("list", |_m, _ctx| CommandResult::Ok(vec!["a", "b"]), "{{ . }}")
+    ///     .dispatch_from(cmd, std::env::args());
+    ///
+    /// match result {
+    ///     RunResult::Handled(output) => println!("{}", output),
+    ///     RunResult::Unhandled(matches) => {
+    ///         // Handle manually
+    ///     }
+    /// }
+    /// ```
+    pub fn dispatch_from<I, T>(&self, cmd: Command, args: I) -> RunResult
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<std::ffi::OsString> + Clone,
+    {
+        // Augment command with --output flag
+        let cmd = self.augment_command_for_dispatch(cmd);
+
+        // Parse arguments
+        let matches = match cmd.try_get_matches_from(args) {
+            Ok(m) => m,
+            Err(e) => {
+                // Return error as handled output
+                return RunResult::Handled(e.to_string());
+            }
+        };
+
+        // Extract output mode
+        let output_mode = if self.output_flag.is_some() {
+            match matches.get_one::<String>("_output_mode").map(|s| s.as_str()) {
+                Some("term") => OutputMode::Term,
+                Some("text") => OutputMode::Text,
+                Some("term-debug") => OutputMode::TermDebug,
+                Some("json") => OutputMode::Json,
+                _ => OutputMode::Auto,
+            }
+        } else {
+            OutputMode::Auto
+        };
+
+        // Dispatch to handler
+        self.dispatch(matches, output_mode)
+    }
+
+    /// Augments a command for dispatch (adds --output flag without help subcommand).
+    fn augment_command_for_dispatch(&self, mut cmd: Command) -> Command {
+        if let Some(ref flag_name) = self.output_flag {
+            let flag: &'static str = Box::leak(flag_name.clone().into_boxed_str());
+            cmd = cmd.arg(
+                Arg::new("_output_mode")
+                    .long(flag)
+                    .value_name("MODE")
+                    .global(true)
+                    .value_parser(["auto", "term", "text", "term-debug", "json"])
+                    .default_value("auto")
+                    .help("Output mode: auto, term, text, term-debug, or json")
+            );
+        }
+        cmd
     }
 
     /// Builds the Outstanding instance.
@@ -1158,5 +1237,60 @@ mod tests {
         let path = extract_command_path(&matches);
 
         assert!(path.is_empty());
+    }
+
+    #[test]
+    fn test_dispatch_from_basic() {
+        use serde_json::json;
+
+        let builder = Outstanding::builder()
+            .command("list", |_m, _ctx| {
+                CommandResult::Ok(json!({"items": ["a", "b"]}))
+            }, "Items: {{ items }}");
+
+        let cmd = Command::new("app")
+            .subcommand(Command::new("list"));
+
+        let result = builder.dispatch_from(cmd, ["app", "list"]);
+
+        assert!(result.is_handled());
+        assert_eq!(result.output(), Some("Items: [\"a\", \"b\"]"));
+    }
+
+    #[test]
+    fn test_dispatch_from_with_json_flag() {
+        use serde_json::json;
+
+        let builder = Outstanding::builder()
+            .command("list", |_m, _ctx| {
+                CommandResult::Ok(json!({"count": 5}))
+            }, "Count: {{ count }}");
+
+        let cmd = Command::new("app")
+            .subcommand(Command::new("list"));
+
+        let result = builder.dispatch_from(cmd, ["app", "--output=json", "list"]);
+
+        assert!(result.is_handled());
+        let output = result.output().unwrap();
+        assert!(output.contains("\"count\": 5"));
+    }
+
+    #[test]
+    fn test_dispatch_from_unhandled() {
+        use serde_json::json;
+
+        let builder = Outstanding::builder()
+            .command("list", |_m, _ctx| {
+                CommandResult::Ok(json!({}))
+            }, "");
+
+        let cmd = Command::new("app")
+            .subcommand(Command::new("list"))
+            .subcommand(Command::new("other"));
+
+        let result = builder.dispatch_from(cmd, ["app", "other"]);
+
+        assert!(!result.is_handled());
     }
 }
