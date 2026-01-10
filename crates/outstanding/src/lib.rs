@@ -849,6 +849,68 @@ pub fn render_with_output<T: Serialize>(
     tmpl.render(data)
 }
 
+/// Renders data using a template, or serializes directly for structured output modes.
+///
+/// This is the recommended function when you want to support both human-readable
+/// output (terminal, text) and machine-readable output (JSON). For structured modes
+/// like `Json`, the data is serialized directly, skipping template rendering entirely.
+///
+/// # Arguments
+///
+/// * `template` - A minijinja template string (ignored for structured modes)
+/// * `data` - Any serializable data to render or serialize
+/// * `theme` - Theme definitions for the `style` filter (ignored for structured modes)
+/// * `mode` - Output mode determining the output format
+///
+/// # Example
+///
+/// ```rust
+/// use outstanding::{render_or_serialize, Theme, ThemeChoice, OutputMode};
+/// use console::Style;
+/// use serde::Serialize;
+///
+/// #[derive(Serialize)]
+/// struct Report { title: String, count: usize }
+///
+/// let theme = Theme::new().add("title", Style::new().bold());
+/// let data = Report { title: "Summary".into(), count: 42 };
+///
+/// // Terminal output uses the template
+/// let term = render_or_serialize(
+///     r#"{{ title | style("title") }}: {{ count }}"#,
+///     &data,
+///     ThemeChoice::from(&theme),
+///     OutputMode::Text,
+/// ).unwrap();
+/// assert_eq!(term, "Summary: 42");
+///
+/// // JSON output serializes directly
+/// let json = render_or_serialize(
+///     r#"{{ title | style("title") }}: {{ count }}"#,
+///     &data,
+///     ThemeChoice::from(&theme),
+///     OutputMode::Json,
+/// ).unwrap();
+/// assert!(json.contains("\"title\": \"Summary\""));
+/// assert!(json.contains("\"count\": 42"));
+/// ```
+pub fn render_or_serialize<T: Serialize>(
+    template: &str,
+    data: &T,
+    theme: ThemeChoice<'_>,
+    mode: OutputMode,
+) -> Result<String, Error> {
+    if mode.is_structured() {
+        match mode {
+            OutputMode::Json => serde_json::to_string_pretty(data)
+                .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())),
+            _ => unreachable!("is_structured() returned true for non-structured mode"),
+        }
+    } else {
+        render_with_output(template, data, theme, mode)
+    }
+}
+
 /// A renderer with pre-registered templates.
 ///
 /// Use this when your application has multiple templates that are rendered
@@ -1536,6 +1598,91 @@ mod tests {
     #[test]
     fn test_output_mode_json_not_debug() {
         assert!(!OutputMode::Json.is_debug());
+    }
+
+    #[test]
+    fn test_render_or_serialize_json_mode() {
+        use serde_json::json;
+
+        let theme = Theme::new();
+        let data = json!({"name": "test", "count": 42});
+
+        let output = render_or_serialize(
+            "unused template",
+            &data,
+            ThemeChoice::from(&theme),
+            OutputMode::Json,
+        )
+        .unwrap();
+
+        // Should be valid JSON
+        assert!(output.contains("\"name\": \"test\""));
+        assert!(output.contains("\"count\": 42"));
+    }
+
+    #[test]
+    fn test_render_or_serialize_text_mode_uses_template() {
+        use serde_json::json;
+
+        let theme = Theme::new();
+        let data = json!({"name": "test"});
+
+        let output = render_or_serialize(
+            "Name: {{ name }}",
+            &data,
+            ThemeChoice::from(&theme),
+            OutputMode::Text,
+        )
+        .unwrap();
+
+        assert_eq!(output, "Name: test");
+    }
+
+    #[test]
+    fn test_render_or_serialize_term_mode_uses_template() {
+        use serde_json::json;
+
+        let theme = Theme::new().add("bold", Style::new().bold().force_styling(true));
+        let data = json!({"name": "test"});
+
+        let output = render_or_serialize(
+            r#"{{ name | style("bold") }}"#,
+            &data,
+            ThemeChoice::from(&theme),
+            OutputMode::Term,
+        )
+        .unwrap();
+
+        // Should contain ANSI codes
+        assert!(output.contains("\x1b[1m"));
+        assert!(output.contains("test"));
+    }
+
+    #[test]
+    fn test_render_or_serialize_json_with_struct() {
+        #[derive(Serialize)]
+        struct Report {
+            title: String,
+            items: Vec<String>,
+        }
+
+        let theme = Theme::new();
+        let data = Report {
+            title: "Summary".into(),
+            items: vec!["one".into(), "two".into()],
+        };
+
+        let output = render_or_serialize(
+            "unused",
+            &data,
+            ThemeChoice::from(&theme),
+            OutputMode::Json,
+        )
+        .unwrap();
+
+        assert!(output.contains("\"title\": \"Summary\""));
+        assert!(output.contains("\"items\""));
+        assert!(output.contains("\"one\""));
     }
 
     #[test]
