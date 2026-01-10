@@ -63,15 +63,26 @@
 //! For non-clap applications, use `outstanding` directly and write your own
 //! argument parsing glue.
 
+pub mod handler;
+
+pub use handler::{CommandContext, CommandResult, FnHandler, Handler, RunResult};
+
 use outstanding::topics::{
     Topic, TopicRegistry, TopicRenderConfig,
     render_topic, render_topics_list,
 };
-use outstanding::{render_with_output, Theme, ThemeChoice, OutputMode};
-use clap::{Command, Arg, ArgAction};
+use outstanding::{render_with_output, render_or_serialize, Theme, ThemeChoice, OutputMode};
+use clap::{Command, Arg, ArgAction, ArgMatches};
 use console::Style;
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
+
+/// Type-erased dispatch function.
+///
+/// Takes ArgMatches and CommandContext, returns either the rendered output
+/// or an error message.
+type DispatchFn = Arc<dyn Fn(&ArgMatches, &CommandContext) -> Result<Option<String>, String> + Send + Sync>;
 
 /// Fixed width for the name column in help output (commands, options, topics).
 const NAME_COLUMN_WIDTH: usize = 14;
@@ -368,11 +379,17 @@ impl Default for Outstanding {
 ///     .output_flag(Some("format"))
 ///     .build();
 /// ```
-#[derive(Default)]
 pub struct OutstandingBuilder {
     registry: TopicRegistry,
     output_flag: Option<String>,
     theme: Option<Theme>,
+    commands: HashMap<String, DispatchFn>,
+}
+
+impl Default for OutstandingBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl OutstandingBuilder {
@@ -384,6 +401,7 @@ impl OutstandingBuilder {
             registry: TopicRegistry::new(),
             output_flag: Some("output".to_string()), // Enabled by default
             theme: None,
+            commands: HashMap::new(),
         }
     }
 
@@ -427,6 +445,132 @@ impl OutstandingBuilder {
         self
     }
 
+    /// Registers a command handler (closure) with a template.
+    ///
+    /// The handler will be invoked when the command path matches. The path uses
+    /// dot notation for nested commands (e.g., "config.get" matches `app config get`).
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Command path using dot notation (e.g., "list" or "config.get")
+    /// * `handler` - The handler closure
+    /// * `template` - MiniJinja template for rendering output
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use outstanding_clap::{Outstanding, CommandResult};
+    /// use serde::Serialize;
+    ///
+    /// #[derive(Serialize)]
+    /// struct ListOutput { items: Vec<String> }
+    ///
+    /// Outstanding::builder()
+    ///     .command("list", |_m, _ctx| {
+    ///         CommandResult::Ok(ListOutput { items: vec!["one".into()] })
+    ///     }, "{% for item in items %}{{ item }}\n{% endfor %}")
+    ///     .run(cmd);
+    /// ```
+    pub fn command<F, T>(self, path: &str, handler: F, template: &str) -> Self
+    where
+        F: Fn(&ArgMatches, &CommandContext) -> CommandResult<T> + Send + Sync + 'static,
+        T: Serialize + Send + Sync + 'static,
+    {
+        self.command_handler(path, handler::FnHandler::new(handler), template)
+    }
+
+    /// Registers a struct handler with a template.
+    ///
+    /// Use this when your handler needs to carry state (like database connections).
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Command path using dot notation (e.g., "list" or "config.get")
+    /// * `handler` - A struct implementing the `Handler` trait
+    /// * `template` - MiniJinja template for rendering output
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use outstanding_clap::{Outstanding, Handler, CommandResult, CommandContext};
+    /// use clap::ArgMatches;
+    /// use serde::Serialize;
+    ///
+    /// struct ListHandler { db: Database }
+    ///
+    /// impl Handler for ListHandler {
+    ///     type Output = Vec<Item>;
+    ///     fn handle(&self, _m: &ArgMatches, _ctx: &CommandContext) -> CommandResult<Self::Output> {
+    ///         CommandResult::Ok(self.db.list())
+    ///     }
+    /// }
+    ///
+    /// Outstanding::builder()
+    ///     .command_handler("list", ListHandler { db }, "{% for item in items %}...")
+    ///     .run(cmd);
+    /// ```
+    pub fn command_handler<H, T>(mut self, path: &str, handler: H, template: &str) -> Self
+    where
+        H: Handler<Output = T> + 'static,
+        T: Serialize + 'static,
+    {
+        let template = template.to_string();
+        let handler = Arc::new(handler);
+
+        let dispatch: DispatchFn = Arc::new(move |matches: &ArgMatches, ctx: &CommandContext| {
+            let result = handler.handle(matches, ctx);
+
+            match result {
+                CommandResult::Ok(data) => {
+                    // Use a default theme for now - will be enhanced in Phase 6
+                    let theme = Theme::new();
+                    let output = render_or_serialize(
+                        &template,
+                        &data,
+                        ThemeChoice::from(&theme),
+                        ctx.output_mode,
+                    )
+                    .map_err(|e| e.to_string())?;
+                    Ok(Some(output))
+                }
+                CommandResult::Err(e) => Err(format!("Error: {}", e)),
+                CommandResult::Silent => Ok(None),
+            }
+        });
+
+        self.commands.insert(path.to_string(), dispatch);
+        self
+    }
+
+    /// Dispatches to a registered handler if one matches the command path.
+    ///
+    /// Returns `RunResult::Handled(output)` if a handler was found and executed,
+    /// or `RunResult::Unhandled(matches)` if no handler matched.
+    pub fn dispatch(&self, matches: ArgMatches, output_mode: OutputMode) -> RunResult {
+        // Build command path from matches
+        let path = extract_command_path(&matches);
+        let path_str = path.join(".");
+
+        // Look up handler
+        if let Some(dispatch) = self.commands.get(&path_str) {
+            let ctx = CommandContext {
+                output_mode,
+                command_path: path,
+            };
+
+            // Get the subcommand matches for the deepest command
+            let sub_matches = get_deepest_matches(&matches);
+
+            match dispatch(sub_matches, &ctx) {
+                Ok(Some(output)) => RunResult::Handled(output),
+                Ok(None) => RunResult::Handled(String::new()), // Silent
+                Err(e) => RunResult::Handled(e), // Error message as output
+            }
+        } else {
+            RunResult::Unhandled(matches)
+        }
+    }
+
     /// Builds the Outstanding instance.
     pub fn build(self) -> Outstanding {
         Outstanding {
@@ -457,6 +601,37 @@ fn find_subcommand_recursive<'a>(cmd: &'a Command, keywords: &[&str]) -> Option<
 
 fn find_subcommand<'a>(cmd: &'a Command, name: &str) -> Option<&'a Command> {
     cmd.get_subcommands().find(|s| s.get_name() == name || s.get_aliases().any(|a| a == name))
+}
+
+/// Extracts the command path from ArgMatches by following subcommand chain.
+fn extract_command_path(matches: &ArgMatches) -> Vec<String> {
+    let mut path = Vec::new();
+    let mut current = matches;
+
+    while let Some((name, sub)) = current.subcommand() {
+        // Skip "help" as it's handled separately
+        if name == "help" {
+            break;
+        }
+        path.push(name.to_string());
+        current = sub;
+    }
+
+    path
+}
+
+/// Gets the deepest subcommand matches.
+fn get_deepest_matches(matches: &ArgMatches) -> &ArgMatches {
+    let mut current = matches;
+
+    while let Some((name, sub)) = current.subcommand() {
+        if name == "help" {
+            break;
+        }
+        current = sub;
+    }
+
+    current
 }
 
 // ============================================================================
@@ -816,5 +991,172 @@ mod tests {
             .output_flag(Some("format"))
             .build();
         assert_eq!(outstanding.output_flag.as_deref(), Some("format"));
+    }
+
+    // ==================== Router Tests ====================
+
+    #[test]
+    fn test_command_registration() {
+        use serde_json::json;
+
+        let builder = Outstanding::builder()
+            .command("list", |_m, _ctx| {
+                CommandResult::Ok(json!({"items": ["a", "b"]}))
+            }, "Items: {{ items }}");
+
+        assert!(builder.commands.contains_key("list"));
+    }
+
+    #[test]
+    fn test_dispatch_to_handler() {
+        use serde_json::json;
+
+        let builder = Outstanding::builder()
+            .command("list", |_m, _ctx| {
+                CommandResult::Ok(json!({"count": 42}))
+            }, "Count: {{ count }}");
+
+        let cmd = Command::new("app")
+            .subcommand(Command::new("list"));
+
+        let matches = cmd.try_get_matches_from(["app", "list"]).unwrap();
+        let result = builder.dispatch(matches, OutputMode::Text);
+
+        assert!(result.is_handled());
+        assert_eq!(result.output(), Some("Count: 42"));
+    }
+
+    #[test]
+    fn test_dispatch_unhandled_fallthrough() {
+        use serde_json::json;
+
+        let builder = Outstanding::builder()
+            .command("list", |_m, _ctx| {
+                CommandResult::Ok(json!({}))
+            }, "");
+
+        let cmd = Command::new("app")
+            .subcommand(Command::new("list"))
+            .subcommand(Command::new("other"));
+
+        let matches = cmd.try_get_matches_from(["app", "other"]).unwrap();
+        let result = builder.dispatch(matches, OutputMode::Text);
+
+        assert!(!result.is_handled());
+        assert!(result.matches().is_some());
+    }
+
+    #[test]
+    fn test_dispatch_json_output() {
+        use serde_json::json;
+
+        let builder = Outstanding::builder()
+            .command("list", |_m, _ctx| {
+                CommandResult::Ok(json!({"name": "test", "value": 123}))
+            }, "{{ name }}: {{ value }}");
+
+        let cmd = Command::new("app")
+            .subcommand(Command::new("list"));
+
+        let matches = cmd.try_get_matches_from(["app", "list"]).unwrap();
+        let result = builder.dispatch(matches, OutputMode::Json);
+
+        assert!(result.is_handled());
+        let output = result.output().unwrap();
+        assert!(output.contains("\"name\": \"test\""));
+        assert!(output.contains("\"value\": 123"));
+    }
+
+    #[test]
+    fn test_dispatch_nested_command() {
+        use serde_json::json;
+
+        let builder = Outstanding::builder()
+            .command("config.get", |_m, _ctx| {
+                CommandResult::Ok(json!({"key": "value"}))
+            }, "{{ key }}");
+
+        let cmd = Command::new("app")
+            .subcommand(
+                Command::new("config")
+                    .subcommand(Command::new("get"))
+            );
+
+        let matches = cmd.try_get_matches_from(["app", "config", "get"]).unwrap();
+        let result = builder.dispatch(matches, OutputMode::Text);
+
+        assert!(result.is_handled());
+        assert_eq!(result.output(), Some("value"));
+    }
+
+    #[test]
+    fn test_dispatch_silent_result() {
+        let builder = Outstanding::builder()
+            .command("quiet", |_m, _ctx| {
+                CommandResult::<()>::Silent
+            }, "");
+
+        let cmd = Command::new("app")
+            .subcommand(Command::new("quiet"));
+
+        let matches = cmd.try_get_matches_from(["app", "quiet"]).unwrap();
+        let result = builder.dispatch(matches, OutputMode::Text);
+
+        assert!(result.is_handled());
+        assert_eq!(result.output(), Some(""));
+    }
+
+    #[test]
+    fn test_dispatch_error_result() {
+        let builder = Outstanding::builder()
+            .command("fail", |_m, _ctx| {
+                CommandResult::<()>::Err(anyhow::anyhow!("something went wrong"))
+            }, "");
+
+        let cmd = Command::new("app")
+            .subcommand(Command::new("fail"));
+
+        let matches = cmd.try_get_matches_from(["app", "fail"]).unwrap();
+        let result = builder.dispatch(matches, OutputMode::Text);
+
+        assert!(result.is_handled());
+        let output = result.output().unwrap();
+        assert!(output.contains("Error:"));
+        assert!(output.contains("something went wrong"));
+    }
+
+    #[test]
+    fn test_extract_command_path() {
+        let cmd = Command::new("app")
+            .subcommand(
+                Command::new("config")
+                    .subcommand(Command::new("get"))
+            );
+
+        let matches = cmd.try_get_matches_from(["app", "config", "get"]).unwrap();
+        let path = extract_command_path(&matches);
+
+        assert_eq!(path, vec!["config", "get"]);
+    }
+
+    #[test]
+    fn test_extract_command_path_single() {
+        let cmd = Command::new("app")
+            .subcommand(Command::new("list"));
+
+        let matches = cmd.try_get_matches_from(["app", "list"]).unwrap();
+        let path = extract_command_path(&matches);
+
+        assert_eq!(path, vec!["list"]);
+    }
+
+    #[test]
+    fn test_extract_command_path_empty() {
+        let cmd = Command::new("app");
+
+        let matches = cmd.try_get_matches_from(["app"]).unwrap();
+        let path = extract_command_path(&matches);
+
+        assert!(path.is_empty());
     }
 }
