@@ -20,8 +20,8 @@ Runs **before** the command handler is invoked. Pre-dispatch hooks receive the `
 - Abort execution by returning an error
 - Log or record the command being executed
 
-```rust
-Hooks::new().pre_dispatch(|ctx| {
+```
+Hooks::new().pre_dispatch(|_m, ctx| {
     println!("Running command: {:?}", ctx.command_path);
 
     // Optionally abort
@@ -42,8 +42,8 @@ Runs **after** the command handler has executed and output has been rendered. Po
 - Perform side effects (copy to clipboard, write to file)
 - Abort with an error if needed
 
-```rust
-Hooks::new().post_output(|ctx, output| {
+```
+Hooks::new().post_output(|_m, _ctx, output| {
     // Copy text to clipboard (pseudo-code)
     if let Output::Text(ref text) = output {
         clipboard::copy(text)?;
@@ -78,7 +78,7 @@ Multiple hooks at the same phase are chained and run in registration order:
 ```rust
 Hooks::new()
     // First: add a prefix
-    .post_output(|_ctx, output| {
+    .post_output(|_m, _ctx, output| {
         if let Output::Text(text) = output {
             Ok(Output::Text(format!("[INFO] {}", text)))
         } else {
@@ -86,7 +86,7 @@ Hooks::new()
         }
     })
     // Second: convert to uppercase
-    .post_output(|_ctx, output| {
+    .post_output(|_m, _ctx, output| {
         if let Output::Text(text) = output {
             Ok(Output::Text(text.to_uppercase()))
         } else {
@@ -94,7 +94,7 @@ Hooks::new()
         }
     })
     // Third: copy to clipboard
-    .post_output(|_ctx, output| {
+    .post_output(|_m, _ctx, output| {
         if let Output::Text(ref text) = output {
             // clipboard::copy(text)?;
         }
@@ -126,14 +126,14 @@ fn list_handler(_m: &ArgMatches, _ctx: &CommandContext) -> CommandResult<ListOut
 Outstanding::builder()
     .command("list", list_handler, "{% for i in items %}{{ i }}\n{% endfor %}")
     .hooks("list", Hooks::new()
-        .pre_dispatch(|ctx| {
+        .pre_dispatch(|_m, _ctx| {
             println!("Listing items...");
             Ok(())
         })
         .post_output(copy_to_clipboard))
     .command("export", export_handler, "")
     .hooks("export", Hooks::new()
-        .post_output(|_ctx, output| {
+        .post_output(|_m, _ctx, output| {
             if let Output::Binary(ref bytes, ref filename) = output {
                 std::fs::write(filename, bytes)?;
                 println!("Wrote {} bytes to {}", bytes.len(), filename);
@@ -151,7 +151,7 @@ Use dot notation for nested command paths:
 Outstanding::builder()
     .command("config.get", config_get_handler, "{{ value }}")
     .hooks("config.get", Hooks::new()
-        .post_output(|_ctx, output| {
+        .post_output(|_m, _ctx, output| {
             // Mask sensitive values
             if let Output::Text(_) = output {
                 Ok(Output::Text("***".into()))
@@ -205,12 +205,12 @@ Hook errors abort execution immediately. Use `HookError` to create errors with p
 use outstanding_clap::HookError;
 
 // Pre-dispatch error
-Hooks::new().pre_dispatch(|_ctx| {
+Hooks::new().pre_dispatch(|_m, _ctx| {
     Err(HookError::pre_dispatch("access denied"))
 })
 
 // Post-output error
-Hooks::new().post_output(|_ctx, _output| {
+Hooks::new().post_output(|_m, _ctx, _output| {
     Err(HookError::post_output("clipboard operation failed"))
 })
 ```

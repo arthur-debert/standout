@@ -149,7 +149,7 @@ impl Outstanding {
 
         // Run pre-dispatch hooks
         if let Some(hooks) = self.command_hooks.get(path) {
-            hooks.run_pre_dispatch(&ctx)?;
+            hooks.run_pre_dispatch(matches, &ctx)?;
         }
 
         // Run handler
@@ -166,11 +166,11 @@ impl Outstanding {
                     self.output_mode,
                 ) {
                     Ok(rendered) => Output::Text(rendered),
-                    Err(e) => return Err(HookError::post_output(format!("Render error: {}", e))),
+                    Err(e) => return Err(HookError::post_output("Render error").with_source(e)),
                 }
             }
             CommandResult::Err(e) => {
-                return Err(HookError::post_output(format!("Handler error: {}", e)));
+                return Err(HookError::post_output("Handler error").with_source(e));
             }
             CommandResult::Silent => Output::Silent,
             CommandResult::Archive(bytes, filename) => Output::Binary(bytes, filename),
@@ -178,7 +178,7 @@ impl Outstanding {
 
         // Run post-output hooks
         if let Some(hooks) = self.command_hooks.get(path) {
-            hooks.run_post_output(&ctx, output)
+            hooks.run_post_output(matches, &ctx, output)
         } else {
             Ok(output)
         }
@@ -650,7 +650,7 @@ impl OutstandingBuilder {
 
             // Run pre-dispatch hooks if registered
             if let Some(hooks) = self.command_hooks.get(&path_str) {
-                if let Err(e) = hooks.run_pre_dispatch(&ctx) {
+                if let Err(e) = hooks.run_pre_dispatch(&matches, &ctx) {
                     return RunResult::Handled(format!("Hook error: {}", e));
                 }
             }
@@ -673,7 +673,7 @@ impl OutstandingBuilder {
 
             // Run post-output hooks if registered
             let final_output = if let Some(hooks) = self.command_hooks.get(&path_str) {
-                match hooks.run_post_output(&ctx, output) {
+                match hooks.run_post_output(&matches, &ctx, output) {
                     Ok(o) => o,
                     Err(e) => return RunResult::Handled(format!("Hook error: {}", e)),
                 }
@@ -1074,7 +1074,7 @@ mod tests {
     fn test_hooks_registration() {
         use crate::hooks::Hooks;
 
-        let builder = Outstanding::builder().hooks("list", Hooks::new().pre_dispatch(|_| Ok(())));
+        let builder = Outstanding::builder().hooks("list", Hooks::new().pre_dispatch(|_, _| Ok(())));
 
         assert!(builder.command_hooks.contains_key("list"));
     }
@@ -1097,7 +1097,7 @@ mod tests {
             )
             .hooks(
                 "list",
-                Hooks::new().pre_dispatch(move |_ctx| {
+                Hooks::new().pre_dispatch(move |_, _ctx| {
                     hook_called_clone.store(true, Ordering::SeqCst);
                     Ok(())
                 }),
@@ -1127,7 +1127,7 @@ mod tests {
             )
             .hooks(
                 "list",
-                Hooks::new().pre_dispatch(|_ctx| Err(HookError::pre_dispatch("blocked by hook"))),
+                Hooks::new().pre_dispatch(|_, _ctx| Err(HookError::pre_dispatch("blocked by hook"))),
             );
 
         let cmd = Command::new("app").subcommand(Command::new("list"));
@@ -1154,7 +1154,7 @@ mod tests {
             )
             .hooks(
                 "list",
-                Hooks::new().post_output(|_ctx, output| {
+                Hooks::new().post_output(|_, _ctx, output| {
                     if let Output::Text(text) = output {
                         Ok(Output::Text(text.to_uppercase()))
                     } else {
@@ -1186,14 +1186,14 @@ mod tests {
             .hooks(
                 "list",
                 Hooks::new()
-                    .post_output(|_ctx, output| {
+                    .post_output(|_, _ctx, output| {
                         if let Output::Text(text) = output {
                             Ok(Output::Text(format!("[{}]", text)))
                         } else {
                             Ok(output)
                         }
                     })
-                    .post_output(|_ctx, output| {
+                    .post_output(|_, _ctx, output| {
                         if let Output::Text(text) = output {
                             Ok(Output::Text(text.to_uppercase()))
                         } else {
@@ -1224,7 +1224,7 @@ mod tests {
             )
             .hooks(
                 "list",
-                Hooks::new().post_output(|_ctx, _output| {
+                Hooks::new().post_output(|_, _ctx, _output| {
                     Err(HookError::post_output("post-processing failed"))
                 }),
             );
@@ -1253,7 +1253,7 @@ mod tests {
             )
             .hooks(
                 "config.get",
-                Hooks::new().post_output(|_ctx, output| {
+                Hooks::new().post_output(|_, _ctx, output| {
                     if let Output::Text(_) = output {
                         Ok(Output::Text("***".into()))
                     } else {
@@ -1291,7 +1291,7 @@ mod tests {
             )
             .hooks(
                 "list",
-                Hooks::new().post_output(|_ctx, _| {
+                Hooks::new().post_output(|_, _ctx, _| {
                     panic!("Should not be called for 'other' command");
                 }),
             );
@@ -1321,7 +1321,7 @@ mod tests {
             )
             .hooks(
                 "export",
-                Hooks::new().post_output(|_ctx, output| {
+                Hooks::new().post_output(|_, _ctx, output| {
                     if let Output::Binary(mut bytes, filename) = output {
                         bytes.push(4);
                         Ok(Output::Binary(bytes, filename))
@@ -1347,7 +1347,7 @@ mod tests {
         use crate::hooks::Hooks;
 
         let outstanding = Outstanding::builder()
-            .hooks("list", Hooks::new().pre_dispatch(|_| Ok(())))
+            .hooks("list", Hooks::new().pre_dispatch(|_, _| Ok(())))
             .build();
 
         assert!(outstanding.get_hooks("list").is_some());
@@ -1367,7 +1367,7 @@ mod tests {
         let outstanding = Outstanding::builder()
             .hooks(
                 "test",
-                Hooks::new().post_output(|_ctx, output| {
+                Hooks::new().post_output(|_, _ctx, output| {
                     if let Output::Text(text) = output {
                         Ok(Output::Text(format!("wrapped: {}", text)))
                     } else {
@@ -1400,7 +1400,7 @@ mod tests {
         let outstanding = Outstanding::builder()
             .hooks(
                 "test",
-                Hooks::new().pre_dispatch(|_ctx| Err(HookError::pre_dispatch("access denied"))),
+                Hooks::new().pre_dispatch(|_, _ctx| Err(HookError::pre_dispatch("access denied"))),
             )
             .build();
 
@@ -1477,7 +1477,7 @@ mod tests {
         let outstanding = Outstanding::builder()
             .hooks(
                 "export",
-                Hooks::new().post_output(|_ctx, output| {
+                Hooks::new().post_output(|_, _ctx, output| {
                     // Verify we receive binary output
                     assert!(output.is_binary());
                     Ok(output)

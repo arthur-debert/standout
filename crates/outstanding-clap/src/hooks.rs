@@ -33,6 +33,7 @@
 
 use std::fmt;
 use std::sync::Arc;
+use thiserror::Error;
 
 use crate::handler::CommandContext;
 
@@ -103,13 +104,17 @@ impl fmt::Display for HookPhase {
 
 /// Error returned by a hook.
 ///
-/// Contains a message and the phase at which the error occurred.
-#[derive(Debug, Clone)]
+/// Contains a message, the phase at which the error occurred, and an optional source error.
+#[derive(Debug, Error)]
+#[error("hook error ({phase}): {message}")]
 pub struct HookError {
     /// Human-readable error message
     pub message: String,
     /// The hook phase where the error occurred
     pub phase: HookPhase,
+    /// The underlying error source, if any
+    #[source]
+    pub source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
 }
 
 impl HookError {
@@ -118,6 +123,7 @@ impl HookError {
         Self {
             message: message.into(),
             phase: HookPhase::PreDispatch,
+            source: None,
         }
     }
 
@@ -126,30 +132,34 @@ impl HookError {
         Self {
             message: message.into(),
             phase: HookPhase::PostOutput,
+            source: None,
         }
     }
-}
 
-impl fmt::Display for HookError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "hook error ({}): {}", self.phase, self.message)
+    /// Sets the source error.
+    pub fn with_source<E>(mut self, source: E) -> Self
+    where
+        E: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
+    {
+        self.source = Some(source.into());
+        self
     }
 }
 
-impl std::error::Error for HookError {}
+use clap::ArgMatches;
 
 /// Type alias for pre-dispatch hook functions.
 ///
-/// Pre-dispatch hooks receive the command context and can abort execution
+/// Pre-dispatch hooks receive the command context and arguments, and can abort execution
 /// by returning an error.
-pub type PreDispatchFn = Arc<dyn Fn(&CommandContext) -> Result<(), HookError> + Send + Sync>;
+pub type PreDispatchFn = Arc<dyn Fn(&ArgMatches, &CommandContext) -> Result<(), HookError> + Send + Sync>;
 
 /// Type alias for post-output hook functions.
 ///
-/// Post-output hooks receive the command context and output, and can
+/// Post-output hooks receive the command context, arguments, and output, and can
 /// transform the output or abort execution by returning an error.
 pub type PostOutputFn =
-    Arc<dyn Fn(&CommandContext, Output) -> Result<Output, HookError> + Send + Sync>;
+    Arc<dyn Fn(&ArgMatches, &CommandContext, Output) -> Result<Output, HookError> + Send + Sync>;
 
 /// Per-command hook configuration.
 ///
@@ -164,11 +174,11 @@ pub type PostOutputFn =
 /// use outstanding_clap::{Hooks, HookError, Output, CommandContext};
 ///
 /// let hooks = Hooks::new()
-///     .pre_dispatch(|ctx| {
+///     .pre_dispatch(|_m, ctx| {
 ///         println!("About to run: {:?}", ctx.command_path);
 ///         Ok(())
 ///     })
-///     .post_output(|ctx, output| {
+///     .post_output(|_m, ctx, output| {
 ///         // Transform: add a prefix to text output
 ///         if let Output::Text(text) = output {
 ///             Ok(Output::Text(format!("[{}] {}", ctx.command_path.join("."), text)))
@@ -218,8 +228,7 @@ impl Hooks {
     /// ```
     pub fn pre_dispatch<F>(mut self, f: F) -> Self
     where
-        F: Fn(&CommandContext) -> Result<(), HookError> + Send + Sync + 'static,
-    {
+        F: Fn(&ArgMatches, &CommandContext) -> Result<(), HookError> + Send + Sync + 'static,    {
         self.pre_dispatch.push(Arc::new(f));
         self
     }
@@ -258,8 +267,7 @@ impl Hooks {
     /// ```
     pub fn post_output<F>(mut self, f: F) -> Self
     where
-        F: Fn(&CommandContext, Output) -> Result<Output, HookError> + Send + Sync + 'static,
-    {
+        F: Fn(&ArgMatches, &CommandContext, Output) -> Result<Output, HookError> + Send + Sync + 'static,    {
         self.post_output.push(Arc::new(f));
         self
     }
@@ -268,9 +276,9 @@ impl Hooks {
     ///
     /// Hooks are executed in registration order. If any hook returns an error,
     /// execution stops and the error is returned.
-    pub(crate) fn run_pre_dispatch(&self, ctx: &CommandContext) -> Result<(), HookError> {
+    pub(crate) fn run_pre_dispatch(&self, matches: &ArgMatches, ctx: &CommandContext) -> Result<(), HookError> {
         for hook in &self.pre_dispatch {
-            hook(ctx)?;
+            hook(matches, ctx)?;
         }
         Ok(())
     }
@@ -282,12 +290,13 @@ impl Hooks {
     /// stops and the error is returned.
     pub(crate) fn run_post_output(
         &self,
+        matches: &ArgMatches,
         ctx: &CommandContext,
         output: Output,
     ) -> Result<Output, HookError> {
         let mut current = output;
         for hook in &self.post_output {
-            current = hook(ctx, current)?;
+            current = hook(matches, ctx, current)?;
         }
         Ok(current)
     }
@@ -308,11 +317,17 @@ mod tests {
     use crate::handler::CommandContext;
     use outstanding::OutputMode;
 
+    use clap::ArgMatches;
+
     fn test_context() -> CommandContext {
         CommandContext {
             output_mode: OutputMode::Text,
             command_path: vec!["test".into()],
         }
+    }
+
+    fn test_matches() -> ArgMatches {
+        clap::Command::new("test").get_matches_from(vec!["test"])
     }
 
     #[test]
@@ -365,10 +380,10 @@ mod tests {
 
     #[test]
     fn test_hooks_not_empty_after_adding() {
-        let hooks = Hooks::new().pre_dispatch(|_| Ok(()));
+        let hooks = Hooks::new().pre_dispatch(|_, _| Ok(()));
         assert!(!hooks.is_empty());
 
-        let hooks = Hooks::new().post_output(|_, o| Ok(o));
+        let hooks = Hooks::new().post_output(|_, _, o| Ok(o));
         assert!(!hooks.is_empty());
     }
 
@@ -377,13 +392,14 @@ mod tests {
         let called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let called_clone = called.clone();
 
-        let hooks = Hooks::new().pre_dispatch(move |_ctx| {
+        let hooks = Hooks::new().pre_dispatch(move |_, _ctx| {
             called_clone.store(true, std::sync::atomic::Ordering::SeqCst);
             Ok(())
         });
 
         let ctx = test_context();
-        let result = hooks.run_pre_dispatch(&ctx);
+        let matches = test_matches();
+        let result = hooks.run_pre_dispatch(&matches, &ctx);
 
         assert!(result.is_ok());
         assert!(called.load(std::sync::atomic::Ordering::SeqCst));
@@ -392,11 +408,12 @@ mod tests {
     #[test]
     fn test_pre_dispatch_error_aborts() {
         let hooks = Hooks::new()
-            .pre_dispatch(|_| Err(HookError::pre_dispatch("first fails")))
-            .pre_dispatch(|_| panic!("should not be called"));
+            .pre_dispatch(|_, _| Err(HookError::pre_dispatch("first fails")))
+            .pre_dispatch(|_, _| panic!("should not be called"));
 
         let ctx = test_context();
-        let result = hooks.run_pre_dispatch(&ctx);
+        let matches = test_matches();
+        let result = hooks.run_pre_dispatch(&matches, &ctx);
 
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().message, "first fails");
@@ -409,17 +426,18 @@ mod tests {
         let c2 = counter.clone();
 
         let hooks = Hooks::new()
-            .pre_dispatch(move |_| {
+            .pre_dispatch(move |_, _| {
                 c1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 Ok(())
             })
-            .pre_dispatch(move |_| {
+            .pre_dispatch(move |_, _| {
                 c2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 Ok(())
             });
 
         let ctx = test_context();
-        let result = hooks.run_pre_dispatch(&ctx);
+        let matches = test_matches();
+        let result = hooks.run_pre_dispatch(&matches, &ctx);
 
         assert!(result.is_ok());
         assert_eq!(counter.load(std::sync::atomic::Ordering::SeqCst), 2);
@@ -427,10 +445,11 @@ mod tests {
 
     #[test]
     fn test_post_output_passthrough() {
-        let hooks = Hooks::new().post_output(|_, output| Ok(output));
+        let hooks = Hooks::new().post_output(|_, _, output| Ok(output));
 
         let ctx = test_context();
-        let result = hooks.run_post_output(&ctx, Output::Text("hello".into()));
+        let matches = test_matches();
+        let result = hooks.run_post_output(&matches, &ctx, Output::Text("hello".into()));
 
         assert!(result.is_ok());
         assert_eq!(result.unwrap().as_text(), Some("hello"));
@@ -438,7 +457,7 @@ mod tests {
 
     #[test]
     fn test_post_output_transformation() {
-        let hooks = Hooks::new().post_output(|_, output| {
+        let hooks = Hooks::new().post_output(|_, _, output| {
             if let Output::Text(text) = output {
                 Ok(Output::Text(text.to_uppercase()))
             } else {
@@ -447,7 +466,8 @@ mod tests {
         });
 
         let ctx = test_context();
-        let result = hooks.run_post_output(&ctx, Output::Text("hello".into()));
+        let matches = test_matches();
+        let result = hooks.run_post_output(&matches, &ctx, Output::Text("hello".into()));
 
         assert!(result.is_ok());
         assert_eq!(result.unwrap().as_text(), Some("HELLO"));
@@ -456,14 +476,14 @@ mod tests {
     #[test]
     fn test_post_output_chained_transformations() {
         let hooks = Hooks::new()
-            .post_output(|_, output| {
+            .post_output(|_, _, output| {
                 if let Output::Text(text) = output {
                     Ok(Output::Text(format!("[{}]", text)))
                 } else {
                     Ok(output)
                 }
             })
-            .post_output(|_, output| {
+            .post_output(|_, _, output| {
                 if let Output::Text(text) = output {
                     Ok(Output::Text(text.to_uppercase()))
                 } else {
@@ -472,7 +492,8 @@ mod tests {
             });
 
         let ctx = test_context();
-        let result = hooks.run_post_output(&ctx, Output::Text("hello".into()));
+        let matches = test_matches();
+        let result = hooks.run_post_output(&matches, &ctx, Output::Text("hello".into()));
 
         assert!(result.is_ok());
         assert_eq!(result.unwrap().as_text(), Some("[HELLO]"));
@@ -481,11 +502,12 @@ mod tests {
     #[test]
     fn test_post_output_error_aborts() {
         let hooks = Hooks::new()
-            .post_output(|_, _| Err(HookError::post_output("transform failed")))
-            .post_output(|_, _| panic!("should not be called"));
+            .post_output(|_, _, _| Err(HookError::post_output("transform failed")))
+            .post_output(|_, _, _| panic!("should not be called"));
 
         let ctx = test_context();
-        let result = hooks.run_post_output(&ctx, Output::Text("hello".into()));
+        let matches = test_matches();
+        let result = hooks.run_post_output(&matches, &ctx, Output::Text("hello".into()));
 
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().message, "transform failed");
@@ -493,7 +515,7 @@ mod tests {
 
     #[test]
     fn test_post_output_binary() {
-        let hooks = Hooks::new().post_output(|_, output| {
+        let hooks = Hooks::new().post_output(|_, _, output| {
             if let Output::Binary(mut bytes, filename) = output {
                 bytes.push(0xFF);
                 Ok(Output::Binary(bytes, filename))
@@ -503,7 +525,8 @@ mod tests {
         });
 
         let ctx = test_context();
-        let result = hooks.run_post_output(&ctx, Output::Binary(vec![1, 2], "test.bin".into()));
+        let matches = test_matches();
+        let result = hooks.run_post_output(&matches, &ctx, Output::Binary(vec![1, 2], "test.bin".into()));
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -515,13 +538,14 @@ mod tests {
 
     #[test]
     fn test_post_output_silent() {
-        let hooks = Hooks::new().post_output(|_, output| {
+        let hooks = Hooks::new().post_output(|_, _, output| {
             assert!(output.is_silent());
             Ok(output)
         });
 
         let ctx = test_context();
-        let result = hooks.run_post_output(&ctx, Output::Silent);
+        let matches = test_matches();
+        let result = hooks.run_post_output(&matches, &ctx, Output::Silent);
 
         assert!(result.is_ok());
         assert!(result.unwrap().is_silent());
@@ -530,11 +554,11 @@ mod tests {
     #[test]
     fn test_hooks_receive_context() {
         let hooks = Hooks::new()
-            .pre_dispatch(|ctx| {
+            .pre_dispatch(|_, ctx| {
                 assert_eq!(ctx.command_path, vec!["config", "get"]);
                 Ok(())
             })
-            .post_output(|ctx, output| {
+            .post_output(|_, ctx, output| {
                 assert_eq!(ctx.command_path, vec!["config", "get"]);
                 Ok(output)
             });
@@ -543,17 +567,18 @@ mod tests {
             output_mode: OutputMode::Json,
             command_path: vec!["config".into(), "get".into()],
         };
+        let matches = test_matches();
 
-        assert!(hooks.run_pre_dispatch(&ctx).is_ok());
-        assert!(hooks.run_post_output(&ctx, Output::Silent).is_ok());
+        assert!(hooks.run_pre_dispatch(&matches, &ctx).is_ok());
+        assert!(hooks.run_post_output(&matches, &ctx, Output::Silent).is_ok());
     }
 
     #[test]
     fn test_hooks_debug() {
         let hooks = Hooks::new()
-            .pre_dispatch(|_| Ok(()))
-            .pre_dispatch(|_| Ok(()))
-            .post_output(|_, o| Ok(o));
+            .pre_dispatch(|_, _| Ok(()))
+            .pre_dispatch(|_, _| Ok(()))
+            .post_output(|_, _, o| Ok(o));
 
         let debug = format!("{:?}", hooks);
         assert!(debug.contains("pre_dispatch_count: 2"));
