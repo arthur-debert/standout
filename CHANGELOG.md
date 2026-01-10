@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-01-10
+
 ### Added
 
 - **Post-dispatch hooks** - New hook phase that runs after handler execution but before rendering
@@ -106,7 +108,8 @@ Outstanding::builder()
 - Command handler system with `dispatch_from` convenience method
 - Archive variant support in clap integration
 
-[Unreleased]: https://github.com/arthur-debert/outstanding-rs/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/arthur-debert/outstanding-rs/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/arthur-debert/outstanding-rs/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/arthur-debert/outstanding-rs/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/arthur-debert/outstanding-rs/compare/v0.6.2...v0.7.0
 [0.6.2]: https://github.com/arthur-debert/outstanding-rs/compare/v0.6.1...v0.6.2
