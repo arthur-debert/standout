@@ -143,6 +143,7 @@
 //! let matches = Outstanding::run(Command::new("my-app"));
 //! ```
 
+pub mod table;
 pub mod topics;
 
 use console::{Style, Term};
