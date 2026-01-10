@@ -1,0 +1,70 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Added
+
+- **Hook system for pre/post command execution** - Register custom callbacks that run before and after command handlers execute
+  - `pre_dispatch` hooks: Run before command handler, can abort execution
+  - `post_output` hooks: Run after output is generated, can transform output or abort
+  - Multiple hooks can be chained at each phase
+  - Full access to `ArgMatches` and `CommandContext` in hook functions
+- New `Output` enum for hook output handling:
+  - `Output::Text(String)` - Text output from templates
+  - `Output::Binary(Vec<u8>, String)` - Binary output with filename
+  - `Output::Silent` - No output
+- `HookError` type with phase information (`PreDispatch` / `PostOutput`)
+- `Hooks::new()` builder with fluent `.pre_dispatch()` and `.post_output()` methods
+
+### Example
+
+```rust
+use outstanding_clap::{Outstanding, Hooks, Output, HookError};
+
+Outstanding::builder()
+    .command("list", handler, template)
+    .hooks("list", Hooks::new()
+        .pre_dispatch(|matches, ctx| {
+            println!("Running: {}", ctx.command_path.join(" "));
+            Ok(())
+        })
+        .post_output(|matches, ctx, output| {
+            // Transform or inspect output
+            Ok(output)
+        }))
+    .run_and_print(cmd, args);
+```
+
+## [0.6.2] - 2025-01-10
+
+### Changed
+
+- Code reorganization: split `lib.rs` into focused modules for both `outstanding` and `outstanding-clap` crates
+
+## [0.6.1] - 2025-01-09
+
+### Changed
+
+- Switched to cargo-release for publishing
+
+## [0.6.0] - 2025-01-09
+
+### Added
+
+- Tabular output support with `TableFormatter` and MiniJinja filters
+- Width resolution algorithm for responsive column layouts
+- ANSI-aware text manipulation utilities
+- `OutputMode::Json` for structured output
+- `render_or_serialize()` method for conditional rendering/serialization
+- Command handler system with `dispatch_from` convenience method
+- Archive variant support in clap integration
+
+[Unreleased]: https://github.com/arthur-debert/outstanding-rs/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/arthur-debert/outstanding-rs/compare/v0.6.1...v0.6.2
+[0.6.1]: https://github.com/arthur-debert/outstanding-rs/compare/v0.6.0...v0.6.1
+[0.6.0]: https://github.com/arthur-debert/outstanding-rs/releases/tag/v0.6.0
