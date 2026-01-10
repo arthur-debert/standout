@@ -95,6 +95,7 @@ mod result;
 // Public modules
 pub mod handler;
 pub mod help;
+pub mod hooks;
 
 // Re-export main types from outstanding module
 pub use outstanding::{Outstanding, OutstandingBuilder};
@@ -108,11 +109,14 @@ pub use help::{default_help_theme, render_help, render_help_with_topics, HelpCon
 // Re-export handler types
 pub use handler::{CommandContext, CommandResult, FnHandler, Handler, RunResult};
 
+// Re-export hook types
+pub use hooks::{HookError, HookPhase, Hooks, Output};
+
 // Re-export core types from outstanding crate for convenience
 pub use ::outstanding::topics::{
     display_with_pager, render_topic as render_topic_core,
-    render_topics_list as render_topics_list_core, Topic as TopicDef, TopicRegistry as TopicRegistryDef,
-    TopicType,
+    render_topics_list as render_topics_list_core, Topic as TopicDef,
+    TopicRegistry as TopicRegistryDef, TopicType,
 };
 
 // ============================================================================
