@@ -5,6 +5,7 @@ use serde::Serialize;
 
 use super::filters::register_filters;
 use crate::output::OutputMode;
+use crate::table::FlatDataSpec;
 use crate::theme::ThemeChoice;
 
 /// Renders a template with automatic terminal color detection.
@@ -193,13 +194,85 @@ pub fn render_or_serialize<T: Serialize>(
     }
 }
 
+/// Renders data using a template, or serializes with granular control.
+///
+/// Similar to `render_or_serialize`, but allows passing an optional `FlatDataSpec`.
+/// This is particularly useful for controlling CSV output structure (columns, headers)
+/// instead of relying on automatic JSON flattening.
+///
+/// # Arguments
+///
+/// * `template` - A minijinja template string
+/// * `data` - Any serializable data to render or serialize
+/// * `theme` - Theme definitions for the `style` filter
+/// * `mode` - Output mode determining the output format
+/// * `spec` - Optional `FlatDataSpec` for defining CSV/Table structure
+pub fn render_or_serialize_with_spec<T: Serialize>(
+    template: &str,
+    data: &T,
+    theme: ThemeChoice<'_>,
+    mode: OutputMode,
+    spec: Option<&FlatDataSpec>,
+) -> Result<String, Error> {
+    if mode.is_structured() {
+        match mode {
+            OutputMode::Json => serde_json::to_string_pretty(data)
+                .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())),
+            OutputMode::Yaml => serde_yaml::to_string(data)
+                .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())),
+            OutputMode::Xml => quick_xml::se::to_string(data)
+                .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())),
+            OutputMode::Csv => {
+                let value = serde_json::to_value(data).map_err(|e| {
+                    Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
+                })?;
+
+                let (headers, rows) = if let Some(s) = spec {
+                    // Use the spec for explicit extraction
+                    let headers = s.extract_header();
+                    let rows: Vec<Vec<String>> = match value {
+                        serde_json::Value::Array(items) => {
+                            items.iter().map(|item| s.extract_row(item)).collect()
+                        }
+                        _ => vec![s.extract_row(&value)],
+                    };
+                    (headers, rows)
+                } else {
+                    // Use automatic flattening
+                    crate::util::flatten_json_for_csv(&value)
+                };
+
+                let mut wtr = csv::Writer::from_writer(Vec::new());
+                wtr.write_record(&headers).map_err(|e| {
+                    Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
+                })?;
+                for row in rows {
+                    wtr.write_record(&row).map_err(|e| {
+                        Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
+                    })?;
+                }
+                let bytes = wtr.into_inner().map_err(|e| {
+                    Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
+                })?;
+                String::from_utf8(bytes)
+                    .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string()))
+            }
+            _ => unreachable!("is_structured() returned true for non-structured mode"),
+        }
+    } else {
+        render_with_output(template, data, theme, mode)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::style::Styles;
+    use crate::table::{Column, FlatDataSpec, Width};
     use crate::theme::Theme;
     use console::Style;
     use serde::Serialize;
+    use serde_json::json;
 
     #[derive(Serialize)]
     struct SimpleData {
@@ -738,5 +811,39 @@ mod tests {
         assert!(output.contains("name,stats.score"));
         assert!(output.contains("Alice,10"));
         assert!(output.contains("Bob,20"));
+    }
+
+    #[test]
+    fn test_render_or_serialize_csv_mode_with_spec() {
+        let theme = Theme::new();
+        let data = json!([
+            {"name": "Alice", "meta": {"age": 30, "role": "admin"}},
+            {"name": "Bob", "meta": {"age": 25, "role": "user"}}
+        ]);
+
+        let spec = FlatDataSpec::builder()
+            .column(Column::new(Width::Fixed(10)).key("name"))
+            .column(
+                Column::new(Width::Fixed(10))
+                    .key("meta.role")
+                    .header("Role"),
+            )
+            .build();
+
+        let output = render_or_serialize_with_spec(
+            "unused",
+            &data,
+            ThemeChoice::from(&theme),
+            OutputMode::Csv,
+            Some(&spec),
+        )
+        .unwrap();
+
+        let lines: Vec<&str> = output.lines().collect();
+        assert_eq!(lines[0], "name,Role"); // Header from key/header
+        assert!(lines.contains(&"Alice,admin"));
+        assert!(lines.contains(&"Bob,user"));
+        // age should NOT be present since it's not in the spec
+        assert!(!output.contains("30"));
     }
 }

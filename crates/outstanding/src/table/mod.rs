@@ -15,9 +15,9 @@
 //! ## Using TableFormatter (Imperative)
 //!
 //! ```rust
-//! use outstanding::table::{TableSpec, Column, Width, Align, TableFormatter};
+//! use outstanding::table::{FlatDataSpec, Column, Width, Align, TableFormatter};
 //!
-//! let spec = TableSpec::builder()
+//! let spec = FlatDataSpec::builder()
 //!     .column(Column::new(Width::Fixed(8)))
 //!     .column(Column::new(Width::Fill))
 //!     .column(Column::new(Width::Fixed(10)).align(Align::Right))
@@ -86,7 +86,8 @@ mod util;
 pub use formatter::TableFormatter;
 pub use resolve::ResolvedWidths;
 pub use types::{
-    Align, Column, ColumnBuilder, Decorations, TableSpec, TableSpecBuilder, TruncateAt, Width,
+    Align, Column, ColumnBuilder, Decorations, FlatDataSpec, FlatDataSpecBuilder, TableSpec,
+    TableSpecBuilder, TruncateAt, Width,
 };
 
 // Re-export utility functions

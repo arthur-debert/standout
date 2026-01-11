@@ -171,6 +171,7 @@ pub use output::OutputMode;
 pub use render::{
     render,
     render_or_serialize,
+    render_or_serialize_with_spec,
     render_with_output,
     // Template registry
     walk_template_dir,

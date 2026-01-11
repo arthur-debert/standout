@@ -3,7 +3,7 @@
 //! This module handles calculating the actual display width for each column
 //! based on the column specifications and available space.
 
-use super::types::{TableSpec, Width};
+use super::types::{FlatDataSpec, Width};
 use super::util::display_width;
 
 /// Resolved widths for all columns in a table.
@@ -35,7 +35,7 @@ impl ResolvedWidths {
     }
 }
 
-impl TableSpec {
+impl FlatDataSpec {
     /// Resolve column widths without examining data.
     ///
     /// This uses minimum widths for Bounded columns and allocates remaining
@@ -63,9 +63,9 @@ impl TableSpec {
     /// # Example
     ///
     /// ```rust
-    /// use outstanding::table::{TableSpec, Column, Width};
+    /// use outstanding::table::{FlatDataSpec, Column, Width};
     ///
-    /// let spec = TableSpec::builder()
+    /// let spec = FlatDataSpec::builder()
     ///     .column(Column::new(Width::Bounded { min: Some(5), max: Some(20) }))
     ///     .column(Column::new(Width::Fill))
     ///     .separator("  ")
@@ -182,14 +182,14 @@ mod tests {
 
     #[test]
     fn resolve_empty_spec() {
-        let spec = TableSpec::builder().build();
+        let spec = FlatDataSpec::builder().build();
         let resolved = spec.resolve_widths(80);
         assert!(resolved.is_empty());
     }
 
     #[test]
     fn resolve_fixed_columns() {
-        let spec = TableSpec::builder()
+        let spec = FlatDataSpec::builder()
             .column(Column::new(Width::Fixed(10)))
             .column(Column::new(Width::Fixed(20)))
             .column(Column::new(Width::Fixed(15)))
@@ -202,7 +202,7 @@ mod tests {
 
     #[test]
     fn resolve_fill_column() {
-        let spec = TableSpec::builder()
+        let spec = FlatDataSpec::builder()
             .column(Column::new(Width::Fixed(10)))
             .column(Column::new(Width::Fill))
             .column(Column::new(Width::Fixed(10)))
@@ -217,7 +217,7 @@ mod tests {
 
     #[test]
     fn resolve_multiple_fill_columns() {
-        let spec = TableSpec::builder()
+        let spec = FlatDataSpec::builder()
             .column(Column::new(Width::Fixed(10)))
             .column(Column::new(Width::Fill))
             .column(Column::new(Width::Fill))
@@ -231,7 +231,7 @@ mod tests {
 
     #[test]
     fn resolve_fill_columns_uneven_split() {
-        let spec = TableSpec::builder()
+        let spec = FlatDataSpec::builder()
             .column(Column::new(Width::Fill))
             .column(Column::new(Width::Fill))
             .column(Column::new(Width::Fill))
@@ -245,7 +245,7 @@ mod tests {
 
     #[test]
     fn resolve_bounded_with_min() {
-        let spec = TableSpec::builder()
+        let spec = FlatDataSpec::builder()
             .column(Column::new(Width::Bounded {
                 min: Some(10),
                 max: None,
@@ -259,7 +259,7 @@ mod tests {
 
     #[test]
     fn resolve_bounded_from_data() {
-        let spec = TableSpec::builder()
+        let spec = FlatDataSpec::builder()
             .column(Column::new(Width::Bounded {
                 min: Some(5),
                 max: Some(20),
@@ -286,7 +286,7 @@ mod tests {
         // To test clamping without expansion, we ensure there is no remaining space
         // OR we make sure it's not the rightmost bounded column?
         // Or we add a Fill column to soak up space.
-        let spec = TableSpec::builder()
+        let spec = FlatDataSpec::builder()
             .column(Column::new(Width::Bounded {
                 min: Some(5),
                 max: Some(10),
@@ -303,7 +303,7 @@ mod tests {
 
     #[test]
     fn resolve_bounded_respects_min() {
-        let spec = TableSpec::builder()
+        let spec = FlatDataSpec::builder()
             .column(Column::new(Width::Bounded {
                 min: Some(10),
                 max: Some(20),
@@ -322,7 +322,7 @@ mod tests {
 
     #[test]
     fn resolve_with_decorations() {
-        let spec = TableSpec::builder()
+        let spec = FlatDataSpec::builder()
             .column(Column::new(Width::Fixed(10)))
             .column(Column::new(Width::Fill))
             .separator(" | ") // 3 chars
@@ -340,7 +340,7 @@ mod tests {
 
     #[test]
     fn resolve_tight_space() {
-        let spec = TableSpec::builder()
+        let spec = FlatDataSpec::builder()
             .column(Column::new(Width::Fixed(10)))
             .column(Column::new(Width::Fill))
             .column(Column::new(Width::Fixed(10)))
@@ -356,7 +356,7 @@ mod tests {
 
     #[test]
     fn resolve_no_fill_expands_rightmost_bounded() {
-        let spec = TableSpec::builder()
+        let spec = FlatDataSpec::builder()
             .column(Column::new(Width::Fixed(10)))
             .column(Column::new(Width::Bounded {
                 min: Some(5),
@@ -402,7 +402,7 @@ mod proptests {
             has_fill in prop::bool::ANY,
             total_width in 20usize..200,
         ) {
-            let mut builder = TableSpec::builder();
+            let mut builder = FlatDataSpec::builder();
 
             for _ in 0..num_fixed {
                 builder = builder.column(Column::new(Width::Fixed(fixed_width)));
@@ -443,7 +443,7 @@ mod proptests {
             data_width in 0usize..50,
             has_fill in prop::bool::ANY,
         ) {
-            let mut builder = TableSpec::builder()
+            let mut builder = FlatDataSpec::builder()
                 .column(Column::new(Width::Bounded {
                     min: Some(min_width),
                     max: Some(max_width),
