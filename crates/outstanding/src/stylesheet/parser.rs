@@ -167,7 +167,7 @@ impl Default for ThemeVariants {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust
 /// use outstanding::stylesheet::parse_stylesheet;
 ///
 /// let yaml = r#"
@@ -188,7 +188,7 @@ impl Default for ThemeVariants {
 /// disabled: muted
 /// "#;
 ///
-/// let variants = parse_stylesheet(yaml)?;
+/// let variants = parse_stylesheet(yaml).unwrap();
 /// ```
 pub fn parse_stylesheet(yaml: &str) -> Result<ThemeVariants, StylesheetError> {
     // Parse YAML into a mapping

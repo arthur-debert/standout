@@ -10,18 +10,18 @@
 //!
 //! # Example
 //!
-//! ```rust,ignore
+//! ```rust
 //! use outstanding::stylesheet::ColorDef;
 //!
 //! // Parse from YAML values
-//! let red = ColorDef::parse_value(&serde_yaml::Value::String("red".into()))?;
-//! let hex = ColorDef::parse_value(&serde_yaml::Value::String("#ff6b35".into()))?;
-//! let palette = ColorDef::parse_value(&serde_yaml::Value::Number(208.into()))?;
+//! let red = ColorDef::parse_value(&serde_yaml::Value::String("red".into())).unwrap();
+//! let hex = ColorDef::parse_value(&serde_yaml::Value::String("#ff6b35".into())).unwrap();
+//! let palette = ColorDef::parse_value(&serde_yaml::Value::Number(208.into())).unwrap();
 //! let rgb = ColorDef::parse_value(&serde_yaml::Value::Sequence(vec![
 //!     serde_yaml::Value::Number(255.into()),
 //!     serde_yaml::Value::Number(107.into()),
 //!     serde_yaml::Value::Number(53.into()),
-//! ]))?;
+//! ])).unwrap();
 //! ```
 
 use console::Color;
