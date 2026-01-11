@@ -7,7 +7,7 @@ use clap::{Arg, ArgAction, ArgMatches, Command};
 use outstanding::topics::{
     display_with_pager, render_topic, render_topics_list, Topic, TopicRegistry, TopicRenderConfig,
 };
-use outstanding::{render_or_serialize, OutputMode, Theme, ThemeChoice};
+use outstanding::{render_or_serialize, OutputMode, Theme};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -171,12 +171,7 @@ impl Outstanding {
 
                 // Render the (potentially modified) data
                 let theme = self.theme.clone().unwrap_or_default();
-                match render_or_serialize(
-                    template,
-                    &json_data,
-                    ThemeChoice::from(&theme),
-                    self.output_mode,
-                ) {
+                match render_or_serialize(template, &json_data, &theme, self.output_mode) {
                     Ok(rendered) => Output::Text(rendered),
                     Err(e) => return Err(HookError::post_output("Render error").with_source(e)),
                 }
@@ -590,13 +585,9 @@ impl OutstandingBuilder {
 
                         // Render the (potentially modified) data
                         let theme = Theme::new();
-                        let output = render_or_serialize(
-                            &template,
-                            &json_data,
-                            ThemeChoice::from(&theme),
-                            ctx.output_mode,
-                        )
-                        .map_err(|e| e.to_string())?;
+                        let output =
+                            render_or_serialize(&template, &json_data, &theme, ctx.output_mode)
+                                .map_err(|e| e.to_string())?;
                         Ok(DispatchOutput::Text(output))
                     }
                     CommandResult::Err(e) => Err(format!("Error: {}", e)),
