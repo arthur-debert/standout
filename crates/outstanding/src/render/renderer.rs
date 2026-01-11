@@ -343,9 +343,28 @@ impl Renderer {
     /// ```
     pub fn render<T: Serialize>(&mut self, name: &str, data: &T) -> Result<String, Error> {
         // First, try the minijinja environment (inline templates)
-        if let Ok(tmpl) = self.env.get_template(name) {
-            return tmpl.render(data);
-        }
+        // We check this first to avoid filesystem lookups for known templates.
+        // In debug mode, if it's a file-based template, we want to skip this check
+        // to force a reload from disk.
+        //
+        // NOTE: We can't easily distinguish inline vs file in the env, so we rely on
+        // the registry. Inline templates are added to both env and registry.
+        //
+        // If it's inline, we can use the env cache safely even in debug.
+        // If it's potentially file-based (or not yet known), we proceed.
+
+        let is_inline = self
+            .registry
+            .get(name)
+            .is_ok_and(|t| matches!(t, ResolvedTemplate::Inline(_)));
+
+        // In release mode: always use env cache if available.
+        // In debug mode: only use env cache if it's an inline template (which doesn't change on disk).
+        if (!cfg!(debug_assertions) || is_inline)
+            && self.env.get_template(name).is_ok() {
+                let tmpl = self.env.get_template(name)?;
+                return tmpl.render(data);
+            }
 
         // Ensure registry is initialized for file-based templates
         self.ensure_registry_initialized()?;
@@ -353,12 +372,10 @@ impl Renderer {
         // Try file-based templates from registry
         let content = self.get_template_content(name)?;
 
-        // In debug mode, compile fresh each time (hot reload)
-        // In release mode, we could cache, but for simplicity we compile each time
-        // (minijinja compilation is fast)
-        let mut env = self.env.clone();
-        env.add_template_owned(name.to_string(), content)?;
-        let tmpl = env.get_template(name)?;
+        // In debug mode, we always re-add to update content (hot reload).
+        // In release mode, we add once and the environment caches it.
+        self.env.add_template_owned(name.to_string(), content)?;
+        let tmpl = self.env.get_template(name)?;
         tmpl.render(data)
     }
 
