@@ -97,7 +97,7 @@
 //!
 //! # Example Usage
 //!
-//! ```rust,ignore
+//! ```rust
 //! use outstanding::stylesheet::{parse_stylesheet, ThemeVariants};
 //! use outstanding::ColorMode;
 //!
@@ -114,10 +114,10 @@
 //!     fg: white
 //! "#;
 //!
-//! let variants = parse_stylesheet(yaml)?;
+//! let variants = parse_stylesheet(yaml).unwrap();
 //!
 //! // Get styles for dark mode
-//! let dark_styles = variants.resolve(ColorMode::Dark);
+//! let dark_styles = variants.resolve(Some(ColorMode::Dark));
 //! ```
 
 mod attributes;

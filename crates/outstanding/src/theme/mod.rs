@@ -33,7 +33,7 @@
 //!
 //! ## From YAML
 //!
-//! ```rust,ignore
+//! ```rust
 //! use outstanding::Theme;
 //!
 //! let theme = Theme::from_yaml(r#"
@@ -43,7 +43,7 @@
 //!     fg: black
 //!   dark:
 //!     fg: white
-//! "#)?;
+//! "#).unwrap();
 //! ```
 
 mod adaptive;

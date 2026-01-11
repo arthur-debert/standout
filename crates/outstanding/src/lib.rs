@@ -86,26 +86,21 @@
 //! Themes can also be loaded from YAML files, which is convenient for
 //! UI designers who may not be Rust programmers.
 //!
-//! ```rust,ignore
+//! ```rust
 //! use outstanding::Theme;
 //!
 //! let theme = Theme::from_yaml(r#"
-//! # Non-adaptive styles
 //! header:
 //!   fg: cyan
 //!   bold: true
-//!
-//! # Adaptive style with light/dark overrides
 //! panel:
 //!   fg: gray
 //!   light:
 //!     fg: black
 //!   dark:
 //!     fg: white
-//!
-//! # Aliases
 //! title: header
-//! "#)?;
+//! "#).unwrap();
 //! ```
 //!
 //! ## Rendering Strategy

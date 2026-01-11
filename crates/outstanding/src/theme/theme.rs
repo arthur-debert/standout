@@ -32,7 +32,7 @@
 //!
 //! ## From YAML
 //!
-//! ```rust,ignore
+//! ```rust
 //! use outstanding::Theme;
 //!
 //! let theme = Theme::from_yaml(r#"
@@ -47,8 +47,11 @@
 //!   dark:
 //!     fg: white
 //!
+//! muted:
+//!   dim: true
+//!
 //! disabled: muted
-//! "#)?;
+//! "#).unwrap();
 //! ```
 //!
 //! # Mode Resolution
@@ -90,23 +93,20 @@ use super::adaptive::ColorMode;
 ///
 /// # Example: From YAML
 ///
-/// ```rust,ignore
+/// ```rust
 /// use outstanding::Theme;
 ///
 /// let theme = Theme::from_yaml(r#"
-/// # Adaptive style - varies by mode
 /// panel:
 ///   bg: gray
 ///   light:
 ///     bg: white
 ///   dark:
 ///     bg: black
-///
-/// # Non-adaptive styles work in all modes
 /// header:
 ///   fg: cyan
 ///   bold: true
-/// "#)?;
+/// "#).unwrap();
 /// ```
 #[derive(Debug, Clone)]
 pub struct Theme {
@@ -202,7 +202,7 @@ impl Theme {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```rust
     /// use outstanding::Theme;
     ///
     /// let theme = Theme::from_yaml(r#"
@@ -216,7 +216,7 @@ impl Theme {
     ///     fg: black
     ///   dark:
     ///     fg: white
-    /// "#)?;
+    /// "#).unwrap();
     /// ```
     pub fn from_yaml(yaml: &str) -> Result<Self, StylesheetError> {
         let variants = parse_stylesheet(yaml)?;
