@@ -144,6 +144,7 @@
 //! ```
 
 // Internal modules
+pub mod file_loader;
 mod output;
 mod render;
 mod style;

@@ -5,6 +5,9 @@
 //!
 //! # Design
 //!
+//! The registry is a thin wrapper around [`FileRegistry<String>`](crate::file_loader::FileRegistry),
+//! providing template-specific functionality while reusing the generic file loading infrastructure.
+//!
 //! The registry uses a two-phase approach:
 //!
 //! 1. **Collection**: Templates are collected from various sources (inline, directories, embedded)
@@ -41,7 +44,7 @@
 //! The registry enforces strict collision rules:
 //!
 //! - **Same-directory, different extensions**: Higher priority extension wins (no error)
-//! - **Cross-directory collisions**: Error with detailed message listing conflicting files
+//! - **Cross-directory collisions**: Panic with detailed message listing conflicting files
 //!
 //! This strict behavior catches configuration mistakes early rather than silently
 //! using an arbitrary winner.
@@ -51,14 +54,8 @@
 //! ```rust,ignore
 //! use outstanding::render::TemplateRegistry;
 //!
-//! // Build from collected template files
-//! let files = vec![
-//!     TemplateFile::new("config", "config.tmpl", "/app/templates/config.tmpl"),
-//!     TemplateFile::new("todos/list", "todos/list.tmpl", "/app/templates/todos/list.tmpl"),
-//! ];
-//!
 //! let mut registry = TemplateRegistry::new();
-//! registry.add_from_files(files, "/app/templates")?;
+//! registry.add_template_dir("./templates")?;
 //! registry.add_inline("override", "Custom content");
 //!
 //! // Resolve templates
@@ -67,6 +64,10 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+
+use crate::file_loader::{
+    self, FileRegistry, FileRegistryConfig, LoadError, LoadedEntry, LoadedFile,
+};
 
 /// Recognized template file extensions in priority order.
 ///
@@ -145,6 +146,28 @@ impl TemplateFile {
     }
 }
 
+impl From<LoadedFile> for TemplateFile {
+    fn from(file: LoadedFile) -> Self {
+        Self {
+            name: file.name,
+            name_with_ext: file.name_with_ext,
+            absolute_path: file.path,
+            source_dir: file.source_dir,
+        }
+    }
+}
+
+impl From<TemplateFile> for LoadedFile {
+    fn from(file: TemplateFile) -> Self {
+        Self {
+            name: file.name,
+            name_with_ext: file.name_with_ext,
+            path: file.absolute_path,
+            source_dir: file.source_dir,
+        }
+    }
+}
+
 /// How a template's content is stored or accessed.
 ///
 /// This enum enables different storage strategies:
@@ -164,6 +187,15 @@ pub enum ResolvedTemplate {
     /// The path is read on each render in development mode,
     /// enabling hot reloading without recompilation.
     File(PathBuf),
+}
+
+impl From<&LoadedEntry<String>> for ResolvedTemplate {
+    fn from(entry: &LoadedEntry<String>) -> Self {
+        match entry {
+            LoadedEntry::Embedded(content) => ResolvedTemplate::Inline(content.clone()),
+            LoadedEntry::File(path) => ResolvedTemplate::File(path.clone()),
+        }
+    }
 }
 
 /// Error type for template registry operations.
@@ -240,6 +272,44 @@ impl std::fmt::Display for RegistryError {
 
 impl std::error::Error for RegistryError {}
 
+impl From<LoadError> for RegistryError {
+    fn from(err: LoadError) -> Self {
+        match err {
+            LoadError::NotFound { name } => RegistryError::NotFound { name },
+            LoadError::Io { path, message } => RegistryError::ReadError { path, message },
+            LoadError::Collision {
+                name,
+                existing_path,
+                existing_dir,
+                conflicting_path,
+                conflicting_dir,
+            } => RegistryError::Collision {
+                name,
+                existing_path,
+                existing_dir,
+                conflicting_path,
+                conflicting_dir,
+            },
+            LoadError::DirectoryNotFound { path } => RegistryError::ReadError {
+                path: path.clone(),
+                message: format!("Directory not found: {}", path.display()),
+            },
+            LoadError::Transform { name, message } => RegistryError::ReadError {
+                path: PathBuf::from(&name),
+                message,
+            },
+        }
+    }
+}
+
+/// Creates the file registry configuration for templates.
+fn template_config() -> FileRegistryConfig<String> {
+    FileRegistryConfig {
+        extensions: TEMPLATE_EXTENSIONS,
+        transform: |content| Ok(content.to_string()),
+    }
+}
+
 /// Registry for template resolution from multiple sources.
 ///
 /// The registry maintains a unified view of templates from:
@@ -268,32 +338,42 @@ impl std::error::Error for RegistryError {}
 /// // Add inline template (highest priority)
 /// registry.add_inline("header", "{{ title }}");
 ///
-/// // Add from directory scan
-/// let files = walk_template_dir("./templates")?;
-/// registry.add_from_files(files)?;
+/// // Add from directory
+/// registry.add_template_dir("./templates")?;
 ///
 /// // Resolve and get content
 /// let content = registry.get_content("header")?;
 /// ```
-#[derive(Debug, Clone, Default)]
 pub struct TemplateRegistry {
-    /// Map from template name to resolved template.
-    ///
-    /// Names are stored both with and without extension for flexible lookup.
-    /// For example, "config.tmpl" creates entries for both "config" and "config.tmpl".
-    templates: HashMap<String, ResolvedTemplate>,
+    /// The underlying file registry for directory-based file loading.
+    inner: FileRegistry<String>,
 
-    /// Tracks which source directory each template came from.
-    ///
-    /// Used for collision detection when adding templates from multiple directories.
-    /// Key is the canonical name (without extension), value is (path, source_dir).
+    /// Inline templates (stored separately for highest priority).
+    inline: HashMap<String, String>,
+
+    /// File-based templates from add_from_files (maps name → path).
+    /// These are separate from directory-based loading.
+    files: HashMap<String, PathBuf>,
+
+    /// Tracks source info for collision detection: name → (path, source_dir).
     sources: HashMap<String, (PathBuf, PathBuf)>,
+}
+
+impl Default for TemplateRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TemplateRegistry {
     /// Creates an empty template registry.
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            inner: FileRegistry::new(template_config()),
+            inline: HashMap::new(),
+            files: HashMap::new(),
+            sources: HashMap::new(),
+        }
     }
 
     /// Adds an inline template with the given name.
@@ -312,10 +392,22 @@ impl TemplateRegistry {
     /// registry.add_inline("header", "{{ title | style(\"title\") }}");
     /// ```
     pub fn add_inline(&mut self, name: impl Into<String>, content: impl Into<String>) {
-        let name = name.into();
-        let content = content.into();
-        self.templates
-            .insert(name, ResolvedTemplate::Inline(content));
+        self.inline.insert(name.into(), content.into());
+    }
+
+    /// Adds a template directory to search for files.
+    ///
+    /// Templates in the directory are resolved by their relative path without
+    /// extension. For example, with directory `./templates`:
+    ///
+    /// - `"config"` → `./templates/config.tmpl`
+    /// - `"todos/list"` → `./templates/todos/list.tmpl`
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the directory doesn't exist.
+    pub fn add_template_dir<P: AsRef<Path>>(&mut self, path: P) -> Result<(), RegistryError> {
+        self.inner.add_dir(path).map_err(RegistryError::from)
     }
 
     /// Adds templates discovered from a directory scan.
@@ -370,18 +462,19 @@ impl TemplateRegistry {
                 continue;
             }
 
-            // Register the template
-            let resolved = ResolvedTemplate::File(file.absolute_path.clone());
-
-            // Add under extensionless name
-            self.templates.insert(file.name.clone(), resolved.clone());
+            // Track source for collision detection
             self.sources.insert(
                 file.name.clone(),
                 (file.absolute_path.clone(), file.source_dir.clone()),
             );
 
-            // Add under name with extension (allows explicit access)
-            self.templates.insert(file.name_with_ext.clone(), resolved);
+            // Register the template under extensionless name
+            self.files
+                .insert(file.name.clone(), file.absolute_path.clone());
+
+            // Register under name with extension (allows explicit access)
+            self.files
+                .insert(file.name_with_ext.clone(), file.absolute_path);
         }
 
         Ok(())
@@ -397,8 +490,7 @@ impl TemplateRegistry {
     /// * `templates` - Map of template name to content
     pub fn add_embedded(&mut self, templates: HashMap<String, String>) {
         for (name, content) in templates {
-            self.templates
-                .insert(name, ResolvedTemplate::Inline(content));
+            self.inline.insert(name, content);
         }
     }
 
@@ -411,12 +503,25 @@ impl TemplateRegistry {
     /// # Errors
     ///
     /// Returns [`RegistryError::NotFound`] if the template doesn't exist.
-    pub fn get(&self, name: &str) -> Result<&ResolvedTemplate, RegistryError> {
-        self.templates
-            .get(name)
-            .ok_or_else(|| RegistryError::NotFound {
-                name: name.to_string(),
-            })
+    pub fn get(&self, name: &str) -> Result<ResolvedTemplate, RegistryError> {
+        // Check inline first (highest priority)
+        if let Some(content) = self.inline.get(name) {
+            return Ok(ResolvedTemplate::Inline(content.clone()));
+        }
+
+        // Check file-based templates from add_from_files
+        if let Some(path) = self.files.get(name) {
+            return Ok(ResolvedTemplate::File(path.clone()));
+        }
+
+        // Check directory-based file registry
+        if let Some(entry) = self.inner.get_entry(name) {
+            return Ok(ResolvedTemplate::from(entry));
+        }
+
+        Err(RegistryError::NotFound {
+            name: name.to_string(),
+        })
     }
 
     /// Gets the content of a template, reading from disk if necessary.
@@ -430,14 +535,29 @@ impl TemplateRegistry {
     pub fn get_content(&self, name: &str) -> Result<String, RegistryError> {
         let resolved = self.get(name)?;
         match resolved {
-            ResolvedTemplate::Inline(content) => Ok(content.clone()),
+            ResolvedTemplate::Inline(content) => Ok(content),
             ResolvedTemplate::File(path) => {
-                std::fs::read_to_string(path).map_err(|e| RegistryError::ReadError {
-                    path: path.clone(),
+                std::fs::read_to_string(&path).map_err(|e| RegistryError::ReadError {
+                    path,
                     message: e.to_string(),
                 })
             }
         }
+    }
+
+    /// Refreshes the registry from registered directories.
+    ///
+    /// This re-walks all registered template directories and rebuilds the
+    /// resolution map. Call this if:
+    ///
+    /// - You've added template directories after the first render
+    /// - Template files have been added/removed from disk
+    ///
+    /// # Panics
+    ///
+    /// Panics if a collision is detected (same name from different directories).
+    pub fn refresh(&mut self) -> Result<(), RegistryError> {
+        self.inner.refresh().map_err(RegistryError::from)
     }
 
     /// Returns the number of registered templates.
@@ -445,23 +565,29 @@ impl TemplateRegistry {
     /// Note: This counts both extensionless and with-extension entries,
     /// so it may be higher than the number of unique template files.
     pub fn len(&self) -> usize {
-        self.templates.len()
+        self.inline.len() + self.files.len() + self.inner.len()
     }
 
     /// Returns true if no templates are registered.
     pub fn is_empty(&self) -> bool {
-        self.templates.is_empty()
+        self.inline.is_empty() && self.files.is_empty() && self.inner.is_empty()
     }
 
     /// Returns an iterator over all registered template names.
     pub fn names(&self) -> impl Iterator<Item = &str> {
-        self.templates.keys().map(|s| s.as_str())
+        self.inline
+            .keys()
+            .map(|s| s.as_str())
+            .chain(self.files.keys().map(|s| s.as_str()))
+            .chain(self.inner.names())
     }
 
     /// Clears all templates from the registry.
     pub fn clear(&mut self) {
-        self.templates.clear();
+        self.inline.clear();
+        self.files.clear();
         self.sources.clear();
+        self.inner.clear();
     }
 }
 
@@ -492,60 +618,10 @@ impl TemplateRegistry {
 /// }
 /// ```
 pub fn walk_template_dir(root: impl AsRef<Path>) -> Result<Vec<TemplateFile>, std::io::Error> {
-    let root = root.as_ref();
-    let root_canonical = root.canonicalize()?;
-    let mut files = Vec::new();
+    let files = file_loader::walk_dir(root.as_ref(), TEMPLATE_EXTENSIONS)
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
 
-    walk_dir_recursive(&root_canonical, &root_canonical, &mut files)?;
-
-    Ok(files)
-}
-
-/// Recursive helper for directory walking.
-fn walk_dir_recursive(
-    current: &Path,
-    root: &Path,
-    files: &mut Vec<TemplateFile>,
-) -> Result<(), std::io::Error> {
-    for entry in std::fs::read_dir(current)? {
-        let entry = entry?;
-        let path = entry.path();
-
-        if path.is_dir() {
-            walk_dir_recursive(&path, root, files)?;
-        } else if path.is_file() {
-            // Check if this file has a recognized template extension
-            if let Some(template_file) = try_parse_template_file(&path, root) {
-                files.push(template_file);
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Attempts to parse a file path as a template file.
-///
-/// Returns `None` if the file doesn't have a recognized template extension.
-fn try_parse_template_file(path: &Path, root: &Path) -> Option<TemplateFile> {
-    let path_str = path.to_string_lossy();
-
-    // Find which extension this file has
-    let extension = TEMPLATE_EXTENSIONS
-        .iter()
-        .find(|ext| path_str.ends_with(*ext))?;
-
-    // Compute relative path from root
-    let relative = path.strip_prefix(root).ok()?;
-    let relative_str = relative.to_string_lossy();
-
-    // Name with extension (using forward slashes for consistency)
-    let name_with_ext = relative_str.replace(std::path::MAIN_SEPARATOR, "/");
-
-    // Name without extension
-    let name = name_with_ext.strip_suffix(extension)?.to_string();
-
-    Some(TemplateFile::new(name, name_with_ext, path, root))
+    Ok(files.into_iter().map(TemplateFile::from).collect())
 }
 
 #[cfg(test)]

@@ -360,11 +360,10 @@ impl Renderer {
 
         // In release mode: always use env cache if available.
         // In debug mode: only use env cache if it's an inline template (which doesn't change on disk).
-        if (!cfg!(debug_assertions) || is_inline)
-            && self.env.get_template(name).is_ok() {
-                let tmpl = self.env.get_template(name)?;
-                return tmpl.render(data);
-            }
+        if (!cfg!(debug_assertions) || is_inline) && self.env.get_template(name).is_ok() {
+            let tmpl = self.env.get_template(name)?;
+            return tmpl.render(data);
+        }
 
         // Ensure registry is initialized for file-based templates
         self.ensure_registry_initialized()?;
@@ -387,11 +386,11 @@ impl Renderer {
             .map_err(|e| Error::new(minijinja::ErrorKind::TemplateNotFound, e.to_string()))?;
 
         match resolved {
-            ResolvedTemplate::Inline(content) => Ok(content.clone()),
+            ResolvedTemplate::Inline(content) => Ok(content),
             ResolvedTemplate::File(path) => {
                 // In debug mode, always re-read for hot reloading
                 // In release mode, we still read (could optimize with caching)
-                std::fs::read_to_string(path).map_err(|e| {
+                std::fs::read_to_string(&path).map_err(|e| {
                     Error::new(
                         minijinja::ErrorKind::InvalidOperation,
                         format!("Failed to read template {}: {}", path.display(), e),
