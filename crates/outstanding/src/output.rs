@@ -70,6 +70,12 @@ pub enum OutputMode {
     TermDebug,
     /// Structured output: serialize data as JSON (skips template rendering)
     Json,
+    /// Structured output: serialize data as YAML (skips template rendering)
+    Yaml,
+    /// Structured output: serialize data as XML (skips template rendering)
+    Xml,
+    /// Structured output: serialize flattened data as CSV (skips template rendering)
+    Csv,
 }
 
 impl OutputMode {
@@ -87,6 +93,9 @@ impl OutputMode {
             OutputMode::Text => false,
             OutputMode::TermDebug => false, // Handled specially
             OutputMode::Json => false,      // Structured output
+            OutputMode::Yaml => false,      // Structured output
+            OutputMode::Xml => false,       // Structured output
+            OutputMode::Csv => false,       // Structured output
         }
     }
 
@@ -99,7 +108,10 @@ impl OutputMode {
     ///
     /// Structured modes serialize data directly instead of rendering templates.
     pub fn is_structured(&self) -> bool {
-        matches!(self, OutputMode::Json)
+        matches!(
+            self,
+            OutputMode::Json | OutputMode::Yaml | OutputMode::Xml | OutputMode::Csv
+        )
     }
 }
 

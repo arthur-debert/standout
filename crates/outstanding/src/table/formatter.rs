@@ -41,7 +41,7 @@ use minijinja::value::{Enumerator, Object, Value};
 use std::sync::Arc;
 
 use super::resolve::ResolvedWidths;
-use super::types::{Align, Column, TableSpec, TruncateAt};
+use super::types::{Align, Column, FlatDataSpec, TruncateAt};
 use super::util::{
     display_width, pad_center, pad_left, pad_right, truncate_end, truncate_middle, truncate_start,
 };
@@ -54,9 +54,9 @@ use super::util::{
 /// # Example
 ///
 /// ```rust
-/// use outstanding::table::{TableSpec, Column, Width, TableFormatter};
+/// use outstanding::table::{FlatDataSpec, Column, Width, TableFormatter};
 ///
-/// let spec = TableSpec::builder()
+/// let spec = FlatDataSpec::builder()
 ///     .column(Column::new(Width::Fixed(8)))
 ///     .column(Column::new(Width::Fill))
 ///     .column(Column::new(Width::Fixed(10)))
@@ -93,7 +93,7 @@ impl TableFormatter {
     ///
     /// * `spec` - Table specification
     /// * `total_width` - Total available width including decorations
-    pub fn new(spec: &TableSpec, total_width: usize) -> Self {
+    pub fn new(spec: &FlatDataSpec, total_width: usize) -> Self {
         let resolved = spec.resolve_widths(total_width);
         Self::from_resolved(spec, resolved)
     }
@@ -101,7 +101,7 @@ impl TableFormatter {
     /// Create a formatter with pre-resolved widths.
     ///
     /// Use this when you've already calculated widths (e.g., from data).
-    pub fn from_resolved(spec: &TableSpec, resolved: ResolvedWidths) -> Self {
+    pub fn from_resolved(spec: &FlatDataSpec, resolved: ResolvedWidths) -> Self {
         TableFormatter {
             columns: spec.columns.clone(),
             widths: resolved.widths,
@@ -113,7 +113,7 @@ impl TableFormatter {
 
     /// Create a formatter from explicit widths and columns.
     ///
-    /// This is useful for direct construction without a full TableSpec.
+    /// This is useful for direct construction without a full FlatDataSpec.
     pub fn with_widths(columns: Vec<Column>, widths: Vec<usize>) -> Self {
         TableFormatter {
             columns,
@@ -154,9 +154,9 @@ impl TableFormatter {
     /// # Example
     ///
     /// ```rust
-    /// use outstanding::table::{TableSpec, Column, Width, TableFormatter};
+    /// use outstanding::table::{FlatDataSpec, Column, Width, TableFormatter};
     ///
-    /// let spec = TableSpec::builder()
+    /// let spec = FlatDataSpec::builder()
     ///     .column(Column::new(Width::Fixed(10)))
     ///     .column(Column::new(Width::Fixed(8)))
     ///     .separator(" | ")
@@ -319,10 +319,10 @@ fn format_cell(value: &str, width: usize, col: &Column) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::table::Width;
+    use crate::table::{TableSpec, Width};
 
-    fn simple_spec() -> TableSpec {
-        TableSpec::builder()
+    fn simple_spec() -> FlatDataSpec {
+        FlatDataSpec::builder()
             .column(Column::new(Width::Fixed(10)))
             .column(Column::new(Width::Fixed(8)))
             .separator(" | ")
@@ -338,7 +338,7 @@ mod tests {
 
     #[test]
     fn format_row_with_truncation() {
-        let spec = TableSpec::builder()
+        let spec = FlatDataSpec::builder()
             .column(Column::new(Width::Fixed(8)))
             .build();
         let formatter = TableFormatter::new(&spec, 80);
@@ -349,7 +349,7 @@ mod tests {
 
     #[test]
     fn format_row_right_align() {
-        let spec = TableSpec::builder()
+        let spec = FlatDataSpec::builder()
             .column(Column::new(Width::Fixed(10)).align(Align::Right))
             .build();
         let formatter = TableFormatter::new(&spec, 80);
@@ -360,7 +360,7 @@ mod tests {
 
     #[test]
     fn format_row_center_align() {
-        let spec = TableSpec::builder()
+        let spec = FlatDataSpec::builder()
             .column(Column::new(Width::Fixed(10)).align(Align::Center))
             .build();
         let formatter = TableFormatter::new(&spec, 80);
@@ -371,7 +371,7 @@ mod tests {
 
     #[test]
     fn format_row_truncate_start() {
-        let spec = TableSpec::builder()
+        let spec = FlatDataSpec::builder()
             .column(Column::new(Width::Fixed(10)).truncate(TruncateAt::Start))
             .build();
         let formatter = TableFormatter::new(&spec, 80);
@@ -383,7 +383,7 @@ mod tests {
 
     #[test]
     fn format_row_truncate_middle() {
-        let spec = TableSpec::builder()
+        let spec = FlatDataSpec::builder()
             .column(Column::new(Width::Fixed(10)).truncate(TruncateAt::Middle))
             .build();
         let formatter = TableFormatter::new(&spec, 80);
@@ -395,7 +395,7 @@ mod tests {
 
     #[test]
     fn format_row_with_null() {
-        let spec = TableSpec::builder()
+        let spec = FlatDataSpec::builder()
             .column(Column::new(Width::Fixed(10)))
             .column(Column::new(Width::Fixed(8)).null_repr("N/A"))
             .separator("  ")
@@ -409,7 +409,7 @@ mod tests {
 
     #[test]
     fn format_row_with_decorations() {
-        let spec = TableSpec::builder()
+        let spec = FlatDataSpec::builder()
             .column(Column::new(Width::Fixed(10)))
             .column(Column::new(Width::Fixed(8)))
             .separator(" │ ")
@@ -435,7 +435,7 @@ mod tests {
 
     #[test]
     fn format_row_fill_column() {
-        let spec = TableSpec::builder()
+        let spec = FlatDataSpec::builder()
             .column(Column::new(Width::Fixed(5)))
             .column(Column::new(Width::Fill))
             .column(Column::new(Width::Fixed(5)))
@@ -452,7 +452,7 @@ mod tests {
 
     #[test]
     fn formatter_accessors() {
-        let spec = TableSpec::builder()
+        let spec = FlatDataSpec::builder()
             .column(Column::new(Width::Fixed(10)))
             .column(Column::new(Width::Fixed(8)))
             .build();
@@ -466,7 +466,7 @@ mod tests {
 
     #[test]
     fn format_empty_spec() {
-        let spec = TableSpec::builder().build();
+        let spec = FlatDataSpec::builder().build();
         let formatter = TableFormatter::new(&spec, 80);
 
         let output = formatter.format_row::<&str>(&[]);
@@ -475,7 +475,7 @@ mod tests {
 
     #[test]
     fn format_with_ansi() {
-        let spec = TableSpec::builder()
+        let spec = FlatDataSpec::builder()
             .column(Column::new(Width::Fixed(10)))
             .build();
         let formatter = TableFormatter::new(&spec, 80);

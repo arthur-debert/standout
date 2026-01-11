@@ -210,6 +210,7 @@ pub use render::{
     render,
     render_or_serialize,
     render_or_serialize_with_context,
+    render_or_serialize_with_spec,
     render_with_context,
     render_with_output,
     // Template registry

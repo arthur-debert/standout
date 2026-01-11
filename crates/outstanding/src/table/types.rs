@@ -4,6 +4,7 @@
 //! column widths, alignment, truncation strategies, and decorations.
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// Text alignment within a column.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -149,6 +150,11 @@ pub struct Column {
     pub null_repr: String,
     /// Optional style name (resolved via theme).
     pub style: Option<String>,
+    /// Optional key for data extraction (used in CSV export).
+    /// Supports dot notation for nested fields.
+    pub key: Option<String>,
+    /// Optional header title (used in CSV header).
+    pub header: Option<String>,
 }
 
 impl Default for Column {
@@ -160,6 +166,8 @@ impl Default for Column {
             ellipsis: "…".to_string(),
             null_repr: "-".to_string(),
             style: None,
+            key: None,
+            header: None,
         }
     }
 }
@@ -207,6 +215,18 @@ impl Column {
         self.style = Some(style.into());
         self
     }
+
+    /// Set the data key for this column (e.g. "author.name").
+    pub fn key(mut self, key: impl Into<String>) -> Self {
+        self.key = Some(key.into());
+        self
+    }
+
+    /// Set the header title for this column.
+    pub fn header(mut self, header: impl Into<String>) -> Self {
+        self.header = Some(header.into());
+        self
+    }
 }
 
 /// Builder for constructing `Column` instances.
@@ -218,6 +238,8 @@ pub struct ColumnBuilder {
     ellipsis: Option<String>,
     null_repr: Option<String>,
     style: Option<String>,
+    key: Option<String>,
+    header: Option<String>,
 }
 
 impl ColumnBuilder {
@@ -285,6 +307,8 @@ impl ColumnBuilder {
             ellipsis: self.ellipsis.unwrap_or(default.ellipsis),
             null_repr: self.null_repr.unwrap_or(default.null_repr),
             style: self.style,
+            key: self.key,
+            header: self.header,
         }
     }
 }
@@ -339,27 +363,27 @@ impl Decorations {
     }
 }
 
-/// Complete specification for a table's layout.
+/// Complete specification for a flat data layout (Table or CSV).
 #[derive(Clone, Debug)]
-pub struct TableSpec {
+pub struct FlatDataSpec {
     /// Column specifications.
     pub columns: Vec<Column>,
     /// Row decorations (separators, prefix, suffix).
     pub decorations: Decorations,
 }
 
-impl TableSpec {
-    /// Create a new table spec with the given columns and default decorations.
+impl FlatDataSpec {
+    /// Create a new spec with the given columns and default decorations.
     pub fn new(columns: Vec<Column>) -> Self {
-        TableSpec {
+        FlatDataSpec {
             columns,
             decorations: Decorations::default(),
         }
     }
 
-    /// Create a table spec builder.
-    pub fn builder() -> TableSpecBuilder {
-        TableSpecBuilder::default()
+    /// Create a spec builder.
+    pub fn builder() -> FlatDataSpecBuilder {
+        FlatDataSpecBuilder::default()
     }
 
     /// Get the number of columns.
@@ -371,16 +395,71 @@ impl TableSpec {
     pub fn has_fill_column(&self) -> bool {
         self.columns.iter().any(|c| matches!(c.width, Width::Fill))
     }
+
+    /// Extract a header row from the spec.
+    ///
+    /// Uses column `header` if present, otherwise `key`, otherwise empty string.
+    pub fn extract_header(&self) -> Vec<String> {
+        self.columns
+            .iter()
+            .map(|col| {
+                col.header
+                    .as_deref()
+                    .or(col.key.as_deref())
+                    .unwrap_or("")
+                    .to_string()
+            })
+            .collect()
+    }
+
+    /// Extract a data row from a JSON value using the spec.
+    ///
+    /// For each column:
+    /// - If `key` is set, traverses the JSON to find the value.
+    /// - If `key` is unset/missing, uses `null_repr`.
+    /// - Handles nested objects via dot notation (e.g. "author.name").
+    pub fn extract_row(&self, data: &Value) -> Vec<String> {
+        self.columns
+            .iter()
+            .map(|col| {
+                if let Some(key) = &col.key {
+                    extract_value(data, key).unwrap_or(col.null_repr.clone())
+                } else {
+                    col.null_repr.clone()
+                }
+            })
+            .collect()
+    }
 }
 
-/// Builder for constructing `TableSpec` instances.
+/// Helper to extract a value from nested JSON using dot notation.
+fn extract_value(data: &Value, path: &str) -> Option<String> {
+    let mut current = data;
+    for part in path.split('.') {
+        match current {
+            Value::Object(map) => {
+                current = map.get(part)?;
+            }
+            _ => return None,
+        }
+    }
+
+    match current {
+        Value::String(s) => Some(s.clone()),
+        Value::Null => None,
+        // For structured types, just jsonify them effectively
+        v => Some(v.to_string()),
+    }
+}
+
+/// Builder for constructing `FlatDataSpec` instances.
 #[derive(Clone, Debug, Default)]
-pub struct TableSpecBuilder {
+pub struct FlatDataSpecBuilder {
     columns: Vec<Column>,
     decorations: Decorations,
 }
 
-impl TableSpecBuilder {
+impl FlatDataSpecBuilder {
     /// Add a column to the table.
     pub fn column(mut self, column: Column) -> Self {
         self.columns.push(column);
@@ -417,14 +496,19 @@ impl TableSpecBuilder {
         self
     }
 
-    /// Build the `TableSpec` instance.
-    pub fn build(self) -> TableSpec {
-        TableSpec {
+    /// Build the `FlatDataSpec` instance.
+    pub fn build(self) -> FlatDataSpec {
+        FlatDataSpec {
             columns: self.columns,
             decorations: self.decorations,
         }
     }
 }
+
+/// Backward compatibility alias
+pub type TableSpec = FlatDataSpec;
+/// Backward compatibility alias
+pub type TableSpecBuilder = FlatDataSpecBuilder;
 
 #[cfg(test)]
 mod tests {
@@ -610,11 +694,11 @@ mod tests {
         assert_eq!(dec.overhead(0), 4);
     }
 
-    // --- TableSpec tests ---
+    // --- FlatDataSpec tests ---
 
     #[test]
-    fn table_spec_builder() {
-        let spec = TableSpec::builder()
+    fn flat_data_spec_builder() {
+        let spec = FlatDataSpec::builder()
             .column(Column::new(Width::Fixed(8)))
             .column(Column::new(Width::Fill))
             .column(Column::new(Width::Fixed(10)))
@@ -637,14 +721,40 @@ mod tests {
     }
 
     #[test]
-    fn table_spec_columns_iterator() {
-        let spec = TableSpec::builder()
-            .columns(vec![
-                Column::new(Width::Fixed(5)),
-                Column::new(Width::Fixed(10)),
-            ])
+    fn extract_fields_from_json() {
+        let json = serde_json::json!({
+            "name": "Alice",
+            "meta": {
+                "age": 30,
+                "role": "admin"
+            }
+        });
+
+        let spec = FlatDataSpec::builder()
+            .column(Column::new(Width::Fixed(10)).key("name"))
+            .column(Column::new(Width::Fixed(5)).key("meta.age"))
+            .column(Column::new(Width::Fixed(10)).key("meta.role"))
+            .column(Column::new(Width::Fixed(10)).key("missing.field")) // Should use null_repr
             .build();
 
-        assert_eq!(spec.num_columns(), 2);
+        let row = spec.extract_row(&json);
+        assert_eq!(row[0], "Alice");
+        assert_eq!(row[1], "30"); // Numbers coerced to string
+        assert_eq!(row[2], "admin");
+        assert_eq!(row[3], "-"); // Default null_repr
+    }
+
+    #[test]
+    fn extract_header_row() {
+        let spec = FlatDataSpec::builder()
+            .column(Column::new(Width::Fixed(10)).header("Name").key("name"))
+            .column(Column::new(Width::Fixed(5)).key("age")) // Fallback to key
+            .column(Column::new(Width::Fixed(10))) // Empty
+            .build();
+
+        let header = spec.extract_header();
+        assert_eq!(header[0], "Name");
+        assert_eq!(header[1], "age");
+        assert_eq!(header[2], "");
     }
 }

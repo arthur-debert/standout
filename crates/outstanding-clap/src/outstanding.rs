@@ -229,9 +229,18 @@ impl Outstanding {
                     .long(flag)
                     .value_name("MODE")
                     .global(true)
-                    .value_parser(["auto", "term", "text", "term-debug", "json"])
+                    .value_parser([
+                        "auto",
+                        "term",
+                        "text",
+                        "term-debug",
+                        "json",
+                        "yaml",
+                        "xml",
+                        "csv",
+                    ])
                     .default_value("auto")
-                    .help("Output mode: auto, term, text, term-debug, or json"),
+                    .help("Output mode: auto, term, text, term-debug, json, yaml, xml, or csv"),
             );
         }
 
@@ -306,6 +315,9 @@ impl Outstanding {
                 Some("text") => OutputMode::Text,
                 Some("term-debug") => OutputMode::TermDebug,
                 Some("json") => OutputMode::Json,
+                Some("yaml") => OutputMode::Yaml,
+                Some("xml") => OutputMode::Xml,
+                Some("csv") => OutputMode::Csv,
                 _ => OutputMode::Auto,
             }
         } else {
@@ -897,6 +909,9 @@ impl OutstandingBuilder {
                 Some("text") => OutputMode::Text,
                 Some("term-debug") => OutputMode::TermDebug,
                 Some("json") => OutputMode::Json,
+                Some("yaml") => OutputMode::Yaml,
+                Some("xml") => OutputMode::Xml,
+                Some("csv") => OutputMode::Csv,
                 _ => OutputMode::Auto,
             }
         } else {

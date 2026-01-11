@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use super::filters::register_filters;
 use crate::context::{ContextRegistry, RenderContext};
 use crate::output::OutputMode;
+use crate::table::FlatDataSpec;
 use crate::theme::{detect_color_mode, Theme};
 
 /// Renders a template with automatic terminal color detection.
@@ -170,6 +171,101 @@ pub fn render_or_serialize<T: Serialize>(
         match mode {
             OutputMode::Json => serde_json::to_string_pretty(data)
                 .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())),
+            OutputMode::Yaml => serde_yaml::to_string(data)
+                .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())),
+            OutputMode::Xml => quick_xml::se::to_string(data)
+                .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())),
+            OutputMode::Csv => {
+                let value = serde_json::to_value(data).map_err(|e| {
+                    Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
+                })?;
+                let (headers, rows) = crate::util::flatten_json_for_csv(&value);
+
+                let mut wtr = csv::Writer::from_writer(Vec::new());
+                wtr.write_record(&headers).map_err(|e| {
+                    Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
+                })?;
+                for row in rows {
+                    wtr.write_record(&row).map_err(|e| {
+                        Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
+                    })?;
+                }
+                let bytes = wtr.into_inner().map_err(|e| {
+                    Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
+                })?;
+                String::from_utf8(bytes)
+                    .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string()))
+            }
+            _ => unreachable!("is_structured() returned true for non-structured mode"),
+        }
+    } else {
+        render_with_output(template, data, theme, mode)
+    }
+}
+
+/// Renders data using a template, or serializes with granular control.
+///
+/// Similar to `render_or_serialize`, but allows passing an optional `FlatDataSpec`.
+/// This is particularly useful for controlling CSV output structure (columns, headers)
+/// instead of relying on automatic JSON flattening.
+///
+/// # Arguments
+///
+/// * `template` - A minijinja template string
+/// * `data` - Any serializable data to render or serialize
+/// * `theme` - Theme definitions for the `style` filter
+/// * `mode` - Output mode determining the output format
+/// * `spec` - Optional `FlatDataSpec` for defining CSV/Table structure
+pub fn render_or_serialize_with_spec<T: Serialize>(
+    template: &str,
+    data: &T,
+    theme: &Theme,
+    mode: OutputMode,
+    spec: Option<&FlatDataSpec>,
+) -> Result<String, Error> {
+    if mode.is_structured() {
+        match mode {
+            OutputMode::Json => serde_json::to_string_pretty(data)
+                .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())),
+            OutputMode::Yaml => serde_yaml::to_string(data)
+                .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())),
+            OutputMode::Xml => quick_xml::se::to_string(data)
+                .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())),
+            OutputMode::Csv => {
+                let value = serde_json::to_value(data).map_err(|e| {
+                    Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
+                })?;
+
+                let (headers, rows) = if let Some(s) = spec {
+                    // Use the spec for explicit extraction
+                    let headers = s.extract_header();
+                    let rows: Vec<Vec<String>> = match value {
+                        serde_json::Value::Array(items) => {
+                            items.iter().map(|item| s.extract_row(item)).collect()
+                        }
+                        _ => vec![s.extract_row(&value)],
+                    };
+                    (headers, rows)
+                } else {
+                    // Use automatic flattening
+                    crate::util::flatten_json_for_csv(&value)
+                };
+
+                let mut wtr = csv::Writer::from_writer(Vec::new());
+                wtr.write_record(&headers).map_err(|e| {
+                    Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
+                })?;
+                for row in rows {
+                    wtr.write_record(&row).map_err(|e| {
+                        Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
+                    })?;
+                }
+                let bytes = wtr.into_inner().map_err(|e| {
+                    Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
+                })?;
+                String::from_utf8(bytes)
+                    .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string()))
+            }
             _ => unreachable!("is_structured() returned true for non-structured mode"),
         }
     } else {
@@ -424,9 +520,11 @@ fn json_to_minijinja(json: &serde_json::Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::table::{Column, FlatDataSpec, Width};
     use crate::theme::Theme;
     use console::Style;
     use serde::Serialize;
+    use serde_json::json;
 
     #[derive(Serialize)]
     struct SimpleData {
@@ -839,6 +937,92 @@ mod tests {
     }
 
     // ============================================================================
+    // YAML/XML/CSV Output Tests
+    // ============================================================================
+
+    #[test]
+    fn test_render_or_serialize_yaml_mode() {
+        use serde_json::json;
+
+        let theme = Theme::new();
+        let data = json!({"name": "test", "count": 42});
+
+        let output =
+            render_or_serialize("unused template", &data, &theme, OutputMode::Yaml).unwrap();
+
+        assert!(output.contains("name: test"));
+        assert!(output.contains("count: 42"));
+    }
+
+    #[test]
+    fn test_render_or_serialize_xml_mode() {
+        let theme = Theme::new();
+
+        #[derive(Serialize)]
+        #[serde(rename = "root")]
+        struct Data {
+            name: String,
+            count: usize,
+        }
+
+        let data = Data {
+            name: "test".into(),
+            count: 42,
+        };
+
+        let output =
+            render_or_serialize("unused template", &data, &theme, OutputMode::Xml).unwrap();
+
+        assert!(output.contains("<root>"));
+        assert!(output.contains("<name>test</name>"));
+    }
+
+    #[test]
+    fn test_render_or_serialize_csv_mode_auto_flatten() {
+        use serde_json::json;
+
+        let theme = Theme::new();
+        let data = json!([
+            {"name": "Alice", "stats": {"score": 10}},
+            {"name": "Bob", "stats": {"score": 20}}
+        ]);
+
+        let output = render_or_serialize("unused", &data, &theme, OutputMode::Csv).unwrap();
+
+        assert!(output.contains("name,stats.score"));
+        assert!(output.contains("Alice,10"));
+        assert!(output.contains("Bob,20"));
+    }
+
+    #[test]
+    fn test_render_or_serialize_csv_mode_with_spec() {
+        let theme = Theme::new();
+        let data = json!([
+            {"name": "Alice", "meta": {"age": 30, "role": "admin"}},
+            {"name": "Bob", "meta": {"age": 25, "role": "user"}}
+        ]);
+
+        let spec = FlatDataSpec::builder()
+            .column(Column::new(Width::Fixed(10)).key("name"))
+            .column(
+                Column::new(Width::Fixed(10))
+                    .key("meta.role")
+                    .header("Role"),
+            )
+            .build();
+
+        let output =
+            render_or_serialize_with_spec("unused", &data, &theme, OutputMode::Csv, Some(&spec))
+                .unwrap();
+
+        let lines: Vec<&str> = output.lines().collect();
+        assert_eq!(lines[0], "name,Role");
+        assert!(lines.contains(&"Alice,admin"));
+        assert!(lines.contains(&"Bob,user"));
+        assert!(!output.contains("30"));
+    }
+
+    // ============================================================================
     // Context Injection Tests
     // ============================================================================
 
@@ -926,7 +1110,6 @@ mod tests {
         let json_data = serde_json::to_value(&data).unwrap();
 
         let mut registry = ContextRegistry::new();
-        // Context also has "value" - data should win
         registry.add_static("value", Value::from("from_context"));
 
         let render_ctx = RenderContext::new(OutputMode::Text, None, &theme, &json_data);
@@ -993,7 +1176,6 @@ mod tests {
 
         let render_ctx = RenderContext::new(OutputMode::Json, None, &theme, &json_data);
 
-        // JSON mode should serialize data directly, ignoring context
         let output = render_or_serialize_with_context(
             "unused template {{ extra }}",
             &data,
