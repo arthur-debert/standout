@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **File-based stylesheet loading** - Load themes and styles from YAML files at runtime
+  - `StylesheetRegistry` for managing file-based themes
+  - YAML stylesheet parsing with full spec compliance
+  - Adaptive themes that respond to terminal capabilities
+- **Auto output to file** - Automatically save command output to files
+  - Configurable output path patterns
+  - Support for all output formats (text, JSON, YAML, XML, CSV)
+
+### Changed
+
+- **Renamed `TableSpec` to `FlatDataSpec`** - Better reflects its purpose for flat data extraction across multiple formats (tables, CSV)
+- Improved data extraction for CSV export
+
 ## [0.10.1] - 2026-01-11
 
 ### Added
