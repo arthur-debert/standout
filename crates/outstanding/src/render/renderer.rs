@@ -57,6 +57,10 @@ use crate::theme::Theme;
 /// When the same name exists in multiple sources, inline templates take
 /// precedence over file-based templates.
 ///
+/// **Note:** File-based templates must have unique names across all registered
+/// directories. If the same name exists in multiple directories, it is treated
+/// as a collision error.
+///
 /// # Example: Inline Templates
 ///
 /// ```rust
@@ -189,13 +193,15 @@ impl Renderer {
     ///
     /// # Multiple Directories
     ///
-    /// Multiple directories can be registered. Templates are searched in
-    /// registration order, with earlier directories taking priority.
+    /// Multiple directories can be registered. However, template names must be
+    /// unique across all directories.
     ///
     /// # Collision Detection
     ///
     /// If the same template name exists in multiple directories, an error
-    /// is returned with details about the conflicting files.
+    /// is returned (either immediately or during `refresh()`) with details
+    /// about the conflicting files. Strict uniqueness is enforced to prevent
+    /// ambiguous template resolution.
     ///
     /// # Lazy Initialization
     ///
