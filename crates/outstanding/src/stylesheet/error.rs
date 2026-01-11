@@ -58,6 +58,12 @@ pub enum StylesheetError {
         /// Optional source file path.
         path: Option<PathBuf>,
     },
+
+    /// File loading error.
+    Load {
+        /// Error message from the file loader.
+        message: String,
+    },
 }
 
 impl std::fmt::Display for StylesheetError {
@@ -124,6 +130,9 @@ impl std::fmt::Display for StylesheetError {
                     "Invalid definition for style '{}'{}: {}",
                     style, location, message
                 )
+            }
+            StylesheetError::Load { message } => {
+                write!(f, "Failed to load stylesheet: {}", message)
             }
         }
     }
