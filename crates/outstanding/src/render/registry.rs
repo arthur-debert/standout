@@ -24,7 +24,7 @@
 //!
 //! 1. **Inline templates** (added via [`TemplateRegistry::add_inline`]) have highest priority
 //! 2. **File templates** are searched in directory registration order (first directory wins)
-//! 3. Names can be specified with or without extension: both `"config"` and `"config.tmpl"` resolve
+//! 3. Names can be specified with or without extension: both `"config"` and `"config.jinja"` resolve
 //!
 //! # Supported Extensions
 //!
@@ -32,12 +32,13 @@
 //!
 //! | Priority | Extension | Description |
 //! |----------|-----------|-------------|
-//! | 1 (highest) | `.tmpl` | Recommended extension |
-//! | 2 | `.jinja2` | Jinja2 compatibility |
-//! | 3 (lowest) | `.j2` | Short Jinja2 extension |
+//! | 1 (highest) | `.jinja` | Standard Jinja extension |
+//! | 2 | `.jinja2` | Full Jinja2 extension |
+//! | 3 | `.j2` | Short Jinja2 extension |
+//! | 4 (lowest) | `.txt` | Plain text templates |
 //!
 //! If multiple files exist with the same base name but different extensions
-//! (e.g., `config.tmpl` and `config.j2`), the higher-priority extension wins.
+//! (e.g., `config.jinja` and `config.j2`), the higher-priority extension wins.
 //!
 //! # Collision Handling
 //!
@@ -76,10 +77,11 @@ use crate::file_loader::{
 ///
 /// # Priority Order
 ///
-/// 1. `.tmpl` - Recommended, unambiguous extension
-/// 2. `.jinja2` - Full Jinja2 extension for compatibility
+/// 1. `.jinja` - Standard Jinja extension
+/// 2. `.jinja2` - Full Jinja2 extension
 /// 3. `.j2` - Short Jinja2 extension
-pub const TEMPLATE_EXTENSIONS: &[&str] = &[".tmpl", ".jinja2", ".j2"];
+/// 4. `.txt` - Plain text templates
+pub const TEMPLATE_EXTENSIONS: &[&str] = &[".jinja", ".jinja2", ".j2", ".txt"];
 
 /// A template file discovered during directory walking.
 ///
@@ -89,19 +91,19 @@ pub const TEMPLATE_EXTENSIONS: &[&str] = &[".tmpl", ".jinja2", ".j2"];
 /// # Fields
 ///
 /// - `name`: The resolution name without extension (e.g., `"todos/list"`)
-/// - `name_with_ext`: The resolution name with extension (e.g., `"todos/list.tmpl"`)
+/// - `name_with_ext`: The resolution name with extension (e.g., `"todos/list.jinja"`)
 /// - `absolute_path`: Full filesystem path for reading content
 /// - `source_dir`: The template directory this file came from (for collision reporting)
 ///
 /// # Example
 ///
-/// For a file at `/app/templates/todos/list.tmpl` with root `/app/templates`:
+/// For a file at `/app/templates/todos/list.jinja` with root `/app/templates`:
 ///
 /// ```rust,ignore
 /// TemplateFile {
 ///     name: "todos/list".to_string(),
-///     name_with_ext: "todos/list.tmpl".to_string(),
-///     absolute_path: PathBuf::from("/app/templates/todos/list.tmpl"),
+///     name_with_ext: "todos/list.jinja".to_string(),
+///     absolute_path: PathBuf::from("/app/templates/todos/list.jinja"),
 ///     source_dir: PathBuf::from("/app/templates"),
 /// }
 /// ```
@@ -109,7 +111,7 @@ pub const TEMPLATE_EXTENSIONS: &[&str] = &[".tmpl", ".jinja2", ".j2"];
 pub struct TemplateFile {
     /// Resolution name without extension (e.g., "config" or "todos/list")
     pub name: String,
-    /// Resolution name with extension (e.g., "config.tmpl" or "todos/list.tmpl")
+    /// Resolution name with extension (e.g., "config.jinja" or "todos/list.jinja")
     pub name_with_ext: String,
     /// Absolute path to the template file
     pub absolute_path: PathBuf,
@@ -400,8 +402,8 @@ impl TemplateRegistry {
     /// Templates in the directory are resolved by their relative path without
     /// extension. For example, with directory `./templates`:
     ///
-    /// - `"config"` → `./templates/config.tmpl`
-    /// - `"todos/list"` → `./templates/todos/list.tmpl`
+    /// - `"config"` → `./templates/config.jinja`
+    /// - `"todos/list"` → `./templates/todos/list.jinja`
     ///
     /// # Errors
     ///
@@ -418,13 +420,13 @@ impl TemplateRegistry {
     /// # Resolution Names
     ///
     /// Each file is registered under two names:
-    /// - Without extension: `"config"` for `config.tmpl`
-    /// - With extension: `"config.tmpl"` for `config.tmpl`
+    /// - Without extension: `"config"` for `config.jinja`
+    /// - With extension: `"config.jinja"` for `config.jinja`
     ///
     /// # Extension Priority
     ///
     /// If multiple files share the same base name with different extensions
-    /// (e.g., `config.tmpl` and `config.j2`), the higher-priority extension wins
+    /// (e.g., `config.jinja` and `config.j2`), the higher-priority extension wins
     /// for the extensionless name. Both can still be accessed by full name.
     ///
     /// # Collision Detection
@@ -494,11 +496,76 @@ impl TemplateRegistry {
         }
     }
 
+    /// Creates a registry from embedded template entries.
+    ///
+    /// This is the primary entry point for compile-time embedded templates,
+    /// typically called by the [`embed_templates!`](outstanding_macros::embed_templates) macro.
+    ///
+    /// # Arguments
+    ///
+    /// * `entries` - Slice of `(name_with_ext, content)` pairs where `name_with_ext`
+    ///   is the relative path including extension (e.g., `"report/summary.jinja"`)
+    ///
+    /// # Processing
+    ///
+    /// This method applies the same logic as runtime file loading:
+    ///
+    /// 1. **Extension stripping**: `"report/summary.jinja"` → `"report/summary"`
+    /// 2. **Extension priority**: When multiple files share a base name, the
+    ///    higher-priority extension wins (see [`TEMPLATE_EXTENSIONS`])
+    /// 3. **Dual registration**: Each template is accessible by both its base
+    ///    name and its full name with extension
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use outstanding::TemplateRegistry;
+    ///
+    /// // Typically generated by embed_templates! macro
+    /// let entries: &[(&str, &str)] = &[
+    ///     ("list.jinja", "Hello {{ name }}"),
+    ///     ("report/summary.jinja", "Report: {{ title }}"),
+    /// ];
+    ///
+    /// let registry = TemplateRegistry::from_embedded_entries(entries);
+    ///
+    /// // Access by base name or full name
+    /// assert!(registry.get("list").is_ok());
+    /// assert!(registry.get("list.jinja").is_ok());
+    /// assert!(registry.get("report/summary").is_ok());
+    /// ```
+    pub fn from_embedded_entries(entries: &[(&str, &str)]) -> Self {
+        let mut registry = Self::new();
+
+        // Sort by extension priority so higher-priority extensions are processed first
+        let mut sorted: Vec<_> = entries.iter().collect();
+        sorted.sort_by_key(|(name, _)| extension_priority(name, TEMPLATE_EXTENSIONS));
+
+        let mut seen_base_names = std::collections::HashSet::new();
+
+        for (name_with_ext, content) in sorted {
+            let base_name = strip_extension(name_with_ext, TEMPLATE_EXTENSIONS);
+
+            // Register under full name with extension
+            registry
+                .inline
+                .insert((*name_with_ext).to_string(), (*content).to_string());
+
+            // Register under base name only if not already registered
+            // (higher priority extension was already processed)
+            if seen_base_names.insert(base_name.clone()) {
+                registry.inline.insert(base_name, (*content).to_string());
+            }
+        }
+
+        registry
+    }
+
     /// Looks up a template by name.
     ///
     /// Names can be specified with or without extension:
-    /// - `"config"` resolves to `config.tmpl` (or highest-priority extension)
-    /// - `"config.tmpl"` resolves to exactly that file
+    /// - `"config"` resolves to `config.jinja` (or highest-priority extension)
+    /// - `"config.jinja"` resolves to exactly that file
     ///
     /// # Errors
     ///
@@ -591,6 +658,31 @@ impl TemplateRegistry {
     }
 }
 
+/// Returns the extension priority for a filename (lower = higher priority).
+///
+/// Returns `usize::MAX` if the extension is not recognized.
+fn extension_priority(name: &str, extensions: &[&str]) -> usize {
+    for (i, ext) in extensions.iter().enumerate() {
+        if name.ends_with(ext) {
+            return i;
+        }
+    }
+    usize::MAX
+}
+
+/// Strips a recognized extension from a filename.
+///
+/// Returns the base name without extension if a recognized extension is found,
+/// otherwise returns the original name.
+fn strip_extension(name: &str, extensions: &[&str]) -> String {
+    for ext in extensions {
+        if let Some(base) = name.strip_suffix(ext) {
+            return base.to_string();
+        }
+    }
+    name.to_string()
+}
+
 /// Walks a template directory and collects template files.
 ///
 /// This function traverses the directory recursively, finding all files
@@ -634,14 +726,16 @@ mod tests {
 
     #[test]
     fn test_template_file_extension_priority() {
-        let tmpl = TemplateFile::new("config", "config.tmpl", "/a/config.tmpl", "/a");
+        let jinja = TemplateFile::new("config", "config.jinja", "/a/config.jinja", "/a");
         let jinja2 = TemplateFile::new("config", "config.jinja2", "/a/config.jinja2", "/a");
         let j2 = TemplateFile::new("config", "config.j2", "/a/config.j2", "/a");
-        let unknown = TemplateFile::new("config", "config.txt", "/a/config.txt", "/a");
+        let txt = TemplateFile::new("config", "config.txt", "/a/config.txt", "/a");
+        let unknown = TemplateFile::new("config", "config.xyz", "/a/config.xyz", "/a");
 
-        assert_eq!(tmpl.extension_priority(), 0);
+        assert_eq!(jinja.extension_priority(), 0);
         assert_eq!(jinja2.extension_priority(), 1);
         assert_eq!(j2.extension_priority(), 2);
+        assert_eq!(txt.extension_priority(), 3);
         assert_eq!(unknown.extension_priority(), usize::MAX);
     }
 
@@ -690,14 +784,14 @@ mod tests {
         let files = vec![
             TemplateFile::new(
                 "config",
-                "config.tmpl",
-                "/templates/config.tmpl",
+                "config.jinja",
+                "/templates/config.jinja",
                 "/templates",
             ),
             TemplateFile::new(
                 "todos/list",
-                "todos/list.tmpl",
-                "/templates/todos/list.tmpl",
+                "todos/list.jinja",
+                "/templates/todos/list.jinja",
                 "/templates",
             ),
         ];
@@ -712,8 +806,8 @@ mod tests {
         assert!(registry.get("todos/list").is_ok());
 
         // Can access by name with extension
-        assert!(registry.get("config.tmpl").is_ok());
-        assert!(registry.get("todos/list.tmpl").is_ok());
+        assert!(registry.get("config.jinja").is_ok());
+        assert!(registry.get("todos/list.jinja").is_ok());
     }
 
     #[test]
@@ -721,24 +815,24 @@ mod tests {
         let mut registry = TemplateRegistry::new();
 
         // Add files with different extensions for same base name
-        // (j2 should be ignored because tmpl has higher priority)
+        // (j2 should be ignored because jinja has higher priority)
         let files = vec![
             TemplateFile::new("config", "config.j2", "/templates/config.j2", "/templates"),
             TemplateFile::new(
                 "config",
-                "config.tmpl",
-                "/templates/config.tmpl",
+                "config.jinja",
+                "/templates/config.jinja",
                 "/templates",
             ),
         ];
 
         registry.add_from_files(files).unwrap();
 
-        // Extensionless name should resolve to .tmpl
+        // Extensionless name should resolve to .jinja
         let resolved = registry.get("config").unwrap();
         match resolved {
             ResolvedTemplate::File(path) => {
-                assert!(path.to_string_lossy().ends_with("config.tmpl"));
+                assert!(path.to_string_lossy().ends_with("config.jinja"));
             }
             _ => panic!("Expected file template"),
         }
@@ -751,14 +845,14 @@ mod tests {
         let files = vec![
             TemplateFile::new(
                 "config",
-                "config.tmpl",
-                "/app/templates/config.tmpl",
+                "config.jinja",
+                "/app/templates/config.jinja",
                 "/app/templates",
             ),
             TemplateFile::new(
                 "config",
-                "config.tmpl",
-                "/plugins/templates/config.tmpl",
+                "config.jinja",
+                "/plugins/templates/config.jinja",
                 "/plugins/templates",
             ),
         ];
@@ -779,8 +873,8 @@ mod tests {
         // Add file-based template first
         let files = vec![TemplateFile::new(
             "config",
-            "config.tmpl",
-            "/templates/config.tmpl",
+            "config.jinja",
+            "/templates/config.jinja",
             "/templates",
         )];
         registry.add_from_files(files).unwrap();
@@ -821,16 +915,16 @@ mod tests {
     fn test_error_display_collision() {
         let err = RegistryError::Collision {
             name: "config".to_string(),
-            existing_path: PathBuf::from("/a/config.tmpl"),
+            existing_path: PathBuf::from("/a/config.jinja"),
             existing_dir: PathBuf::from("/a"),
-            conflicting_path: PathBuf::from("/b/config.tmpl"),
+            conflicting_path: PathBuf::from("/b/config.jinja"),
             conflicting_dir: PathBuf::from("/b"),
         };
 
         let display = err.to_string();
         assert!(display.contains("config"));
-        assert!(display.contains("/a/config.tmpl"));
-        assert!(display.contains("/b/config.tmpl"));
+        assert!(display.contains("/a/config.jinja"));
+        assert!(display.contains("/b/config.jinja"));
     }
 
     #[test]
@@ -841,5 +935,104 @@ mod tests {
 
         let display = err.to_string();
         assert!(display.contains("missing"));
+    }
+
+    // =========================================================================
+    // from_embedded_entries tests
+    // =========================================================================
+
+    #[test]
+    fn test_from_embedded_entries_single() {
+        let entries: &[(&str, &str)] = &[("hello.jinja", "Hello {{ name }}")];
+        let registry = TemplateRegistry::from_embedded_entries(entries);
+
+        // Should be accessible by both names
+        assert!(registry.get("hello").is_ok());
+        assert!(registry.get("hello.jinja").is_ok());
+
+        let content = registry.get_content("hello").unwrap();
+        assert_eq!(content, "Hello {{ name }}");
+    }
+
+    #[test]
+    fn test_from_embedded_entries_multiple() {
+        let entries: &[(&str, &str)] = &[
+            ("header.jinja", "{{ title }}"),
+            ("footer.jinja", "Copyright {{ year }}"),
+        ];
+        let registry = TemplateRegistry::from_embedded_entries(entries);
+
+        assert_eq!(registry.len(), 4); // 2 base + 2 with ext
+        assert!(registry.get("header").is_ok());
+        assert!(registry.get("footer").is_ok());
+    }
+
+    #[test]
+    fn test_from_embedded_entries_nested_paths() {
+        let entries: &[(&str, &str)] = &[
+            ("report/summary.jinja", "Summary: {{ text }}"),
+            ("report/details.jinja", "Details: {{ info }}"),
+        ];
+        let registry = TemplateRegistry::from_embedded_entries(entries);
+
+        assert!(registry.get("report/summary").is_ok());
+        assert!(registry.get("report/summary.jinja").is_ok());
+        assert!(registry.get("report/details").is_ok());
+    }
+
+    #[test]
+    fn test_from_embedded_entries_extension_priority() {
+        // .jinja has higher priority than .txt (index 0 vs index 3)
+        let entries: &[(&str, &str)] = &[
+            ("config.txt", "txt content"),
+            ("config.jinja", "jinja content"),
+        ];
+        let registry = TemplateRegistry::from_embedded_entries(entries);
+
+        // Base name should resolve to higher priority (.jinja)
+        let content = registry.get_content("config").unwrap();
+        assert_eq!(content, "jinja content");
+
+        // Both can still be accessed by full name
+        assert_eq!(registry.get_content("config.txt").unwrap(), "txt content");
+        assert_eq!(
+            registry.get_content("config.jinja").unwrap(),
+            "jinja content"
+        );
+    }
+
+    #[test]
+    fn test_from_embedded_entries_extension_priority_reverse_order() {
+        // Same test but with entries in reverse order to ensure sorting works
+        let entries: &[(&str, &str)] = &[
+            ("config.jinja", "jinja content"),
+            ("config.txt", "txt content"),
+        ];
+        let registry = TemplateRegistry::from_embedded_entries(entries);
+
+        // Base name should still resolve to higher priority (.jinja)
+        let content = registry.get_content("config").unwrap();
+        assert_eq!(content, "jinja content");
+    }
+
+    #[test]
+    fn test_from_embedded_entries_names_iterator() {
+        let entries: &[(&str, &str)] = &[("a.jinja", "content a"), ("nested/b.jinja", "content b")];
+        let registry = TemplateRegistry::from_embedded_entries(entries);
+
+        let names: Vec<&str> = registry.names().collect();
+        assert!(names.contains(&"a"));
+        assert!(names.contains(&"a.jinja"));
+        assert!(names.contains(&"nested/b"));
+        assert!(names.contains(&"nested/b.jinja"));
+    }
+
+    #[test]
+    fn test_from_embedded_entries_empty() {
+        let entries: &[(&str, &str)] = &[];
+        let registry = TemplateRegistry::from_embedded_entries(entries);
+
+        assert!(registry.is_empty());
+        assert_eq!(registry.len(), 0);
     }
 }

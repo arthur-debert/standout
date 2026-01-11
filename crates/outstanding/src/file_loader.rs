@@ -82,6 +82,10 @@
 //! The macros walk the directory at compile time, read each file, and generate
 //! code that registers all resources with their derived names.
 //!
+//! See the [`outstanding_macros`] crate for detailed documentation on
+//! [`embed_templates!`](outstanding_macros::embed_templates) and
+//! [`embed_styles!`](outstanding_macros::embed_styles).
+//!
 //! # Extension Priority
 //!
 //! Extensions are specified in priority order. When multiple files share the same

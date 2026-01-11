@@ -13,7 +13,7 @@
 //! let mut renderer = Renderer::new(Theme::new())?;
 //! renderer.add_template_dir("./templates")?;
 //!
-//! // Renders templates/todos/list.tmpl
+//! // Renders templates/todos/list.jinja
 //! let output = renderer.render("todos/list", &data)?;
 //! ```
 //!
@@ -97,8 +97,8 @@ use crate::theme::Theme;
 /// renderer.add_template_dir("./templates")?;
 ///
 /// // Templates are resolved by relative path:
-/// // "config" -> ./templates/config.tmpl
-/// // "todos/list" -> ./templates/todos/list.tmpl
+/// // "config" -> ./templates/config.jinja
+/// // "todos/list" -> ./templates/todos/list.jinja
 /// let output = renderer.render("config", &data)?;
 /// ```
 ///
@@ -109,7 +109,7 @@ use crate::theme::Theme;
 ///
 /// ```bash
 /// # Edit template
-/// vim templates/todos/list.tmpl
+/// vim templates/todos/list.jinja
 ///
 /// # Re-run - changes are picked up immediately
 /// cargo run -- todos list
@@ -191,12 +191,12 @@ impl Renderer {
     /// Templates in the directory are resolved by their relative path without
     /// extension. For example, with directory `./templates`:
     ///
-    /// - `"config"` → `./templates/config.tmpl`
-    /// - `"todos/list"` → `./templates/todos/list.tmpl`
+    /// - `"config"` → `./templates/config.jinja`
+    /// - `"todos/list"` → `./templates/todos/list.jinja`
     ///
     /// # Extension Priority
     ///
-    /// Recognized extensions in priority order: `.tmpl`, `.jinja2`, `.j2`
+    /// Recognized extensions in priority order: `.jinja`, `.jinja2`, `.j2`, `.txt`
     ///
     /// If multiple files share the same base name with different extensions,
     /// the higher-priority extension wins for extensionless lookups.
@@ -522,7 +522,7 @@ mod tests {
     #[test]
     fn test_renderer_add_template_dir() {
         let temp_dir = TempDir::new().unwrap();
-        create_template_file(temp_dir.path(), "config.tmpl", "Config: {{ value }}");
+        create_template_file(temp_dir.path(), "config.jinja", "Config: {{ value }}");
 
         let mut renderer = Renderer::new(Theme::new()).unwrap();
         renderer.add_template_dir(temp_dir.path()).unwrap();
@@ -546,8 +546,8 @@ mod tests {
     #[test]
     fn test_renderer_nested_template_dir() {
         let temp_dir = TempDir::new().unwrap();
-        create_template_file(temp_dir.path(), "todos/list.tmpl", "List: {{ count }}");
-        create_template_file(temp_dir.path(), "todos/detail.tmpl", "Detail: {{ id }}");
+        create_template_file(temp_dir.path(), "todos/list.jinja", "List: {{ count }}");
+        create_template_file(temp_dir.path(), "todos/detail.jinja", "Detail: {{ id }}");
 
         let mut renderer = Renderer::new(Theme::new()).unwrap();
         renderer.add_template_dir(temp_dir.path()).unwrap();
@@ -576,7 +576,7 @@ mod tests {
     #[test]
     fn test_renderer_template_with_extension() {
         let temp_dir = TempDir::new().unwrap();
-        create_template_file(temp_dir.path(), "config.tmpl", "Content");
+        create_template_file(temp_dir.path(), "config.jinja", "Content");
 
         let mut renderer = Renderer::new(Theme::new()).unwrap();
         renderer.add_template_dir(temp_dir.path()).unwrap();
@@ -586,13 +586,13 @@ mod tests {
 
         // Both with and without extension should work
         assert!(renderer.render("config", &Empty {}).is_ok());
-        assert!(renderer.render("config.tmpl", &Empty {}).is_ok());
+        assert!(renderer.render("config.jinja", &Empty {}).is_ok());
     }
 
     #[test]
     fn test_renderer_inline_shadows_file() {
         let temp_dir = TempDir::new().unwrap();
-        create_template_file(temp_dir.path(), "config.tmpl", "From file");
+        create_template_file(temp_dir.path(), "config.jinja", "From file");
 
         let mut renderer = Renderer::new(Theme::new()).unwrap();
         renderer.add_template_dir(temp_dir.path()).unwrap();
@@ -617,7 +617,7 @@ mod tests {
     #[test]
     fn test_renderer_hot_reload() {
         let temp_dir = TempDir::new().unwrap();
-        create_template_file(temp_dir.path(), "hot.tmpl", "Version 1");
+        create_template_file(temp_dir.path(), "hot.jinja", "Version 1");
 
         let mut renderer = Renderer::new(Theme::new()).unwrap();
         renderer.add_template_dir(temp_dir.path()).unwrap();
@@ -630,7 +630,7 @@ mod tests {
         assert_eq!(output1, "Version 1");
 
         // Modify the file
-        create_template_file(temp_dir.path(), "hot.tmpl", "Version 2");
+        create_template_file(temp_dir.path(), "hot.jinja", "Version 2");
 
         // Second render should see the change (hot reload)
         let output2 = renderer.render("hot", &Empty {}).unwrap();
@@ -642,7 +642,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         // Create files with different extensions
         create_template_file(temp_dir.path(), "config.j2", "From j2");
-        create_template_file(temp_dir.path(), "config.tmpl", "From tmpl");
+        create_template_file(temp_dir.path(), "config.jinja", "From jinja");
 
         let mut renderer = Renderer::new(Theme::new()).unwrap();
         renderer.add_template_dir(temp_dir.path()).unwrap();
@@ -650,9 +650,9 @@ mod tests {
         #[derive(Serialize)]
         struct Empty {}
 
-        // Extensionless should resolve to .tmpl (higher priority)
+        // Extensionless should resolve to .jinja (higher priority)
         let output = renderer.render("config", &Empty {}).unwrap();
-        assert_eq!(output, "From tmpl");
+        assert_eq!(output, "From jinja");
     }
 
     #[test]
