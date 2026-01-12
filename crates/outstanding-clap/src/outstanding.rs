@@ -698,6 +698,59 @@ impl OutstandingBuilder {
         self
     }
 
+    /// Registers commands from a dispatch closure (used by the `dispatch!` macro).
+    ///
+    /// This method accepts a closure that configures a [`GroupBuilder`] with commands
+    /// and nested groups. It's typically used with the [`dispatch!`] macro:
+    ///
+    /// ```rust,ignore
+    /// use outstanding_clap::{dispatch, Outstanding};
+    ///
+    /// Outstanding::builder()
+    ///     .template_dir("templates")
+    ///     .commands(dispatch! {
+    ///         db: {
+    ///             migrate => db::migrate,
+    ///             backup => db::backup,
+    ///         },
+    ///         version => version,
+    ///     })
+    ///     .build()
+    /// ```
+    ///
+    /// The closure receives an empty [`GroupBuilder`] and should return it with
+    /// commands added. Each top-level entry becomes a command or group.
+    pub fn commands<F>(mut self, configure: F) -> Self
+    where
+        F: FnOnce(GroupBuilder) -> GroupBuilder,
+    {
+        let builder = configure(GroupBuilder::new());
+
+        // Register all entries from the group builder
+        for (name, entry) in builder.entries {
+            match entry {
+                GroupEntry::Command { mut handler } => {
+                    let template = handler
+                        .template()
+                        .map(String::from)
+                        .unwrap_or_else(|| self.resolve_template(&name));
+
+                    if let Some(hooks) = handler.take_hooks() {
+                        self.command_hooks.insert(name.clone(), hooks);
+                    }
+
+                    let dispatch = handler.register(&name, template, self.context_registry.clone());
+                    self.commands.insert(name, dispatch);
+                }
+                GroupEntry::Group { builder: nested } => {
+                    self.register_group(&name, nested);
+                }
+            }
+        }
+
+        self
+    }
+
     /// Creates a command group for organizing related commands.
     ///
     /// Groups allow nested command hierarchies with a fluent API:
@@ -2735,5 +2788,133 @@ mod tests {
 
         assert!(builder.commands.contains_key("version"));
         assert!(builder.commands.contains_key("db.migrate"));
+    }
+
+    // ============================================================================
+    // Dispatch Macro Integration Tests
+    // ============================================================================
+
+    #[test]
+    fn test_dispatch_macro_simple() {
+        use crate::dispatch;
+        use serde_json::json;
+
+        let builder = Outstanding::builder().commands(dispatch! {
+            list => |_m, _ctx| CommandResult::Ok(json!({"items": ["a", "b"]}))
+        });
+
+        assert!(builder.commands.contains_key("list"));
+
+        let cmd = Command::new("app").subcommand(Command::new("list"));
+        let matches = cmd.try_get_matches_from(["app", "list"]).unwrap();
+        let result = builder.dispatch(matches, OutputMode::Json);
+
+        assert!(result.is_handled());
+        let output = result.output().unwrap();
+        assert!(output.contains("items"));
+    }
+
+    #[test]
+    fn test_dispatch_macro_with_groups() {
+        use crate::dispatch;
+        use serde_json::json;
+
+        let builder = Outstanding::builder().commands(dispatch! {
+            db: {
+                migrate => |_m, _ctx| CommandResult::Ok(json!({"migrated": true})),
+                backup => |_m, _ctx| CommandResult::Ok(json!({"backed_up": true})),
+            },
+            version => |_m, _ctx| CommandResult::Ok(json!({"v": "1.0"})),
+        });
+
+        assert!(builder.commands.contains_key("db.migrate"));
+        assert!(builder.commands.contains_key("db.backup"));
+        assert!(builder.commands.contains_key("version"));
+
+        // Test dispatch to nested command
+        let cmd = Command::new("app")
+            .subcommand(
+                Command::new("db")
+                    .subcommand(Command::new("migrate"))
+                    .subcommand(Command::new("backup")),
+            )
+            .subcommand(Command::new("version"));
+
+        let matches = cmd
+            .clone()
+            .try_get_matches_from(["app", "db", "migrate"])
+            .unwrap();
+        let result = builder.dispatch(matches, OutputMode::Json);
+        assert!(result.is_handled());
+        assert!(result.output().unwrap().contains("migrated"));
+    }
+
+    #[test]
+    fn test_dispatch_macro_with_template() {
+        use crate::dispatch;
+        use serde_json::json;
+
+        let builder = Outstanding::builder().commands(dispatch! {
+            list => {
+                handler: |_m, _ctx| CommandResult::Ok(json!({"count": 42})),
+                template: "Count: {{ count }}",
+            }
+        });
+
+        let cmd = Command::new("app").subcommand(Command::new("list"));
+        let matches = cmd.try_get_matches_from(["app", "list"]).unwrap();
+        let result = builder.dispatch(matches, OutputMode::Text);
+
+        assert!(result.is_handled());
+        assert_eq!(result.output(), Some("Count: 42"));
+    }
+
+    #[test]
+    fn test_dispatch_macro_with_hooks() {
+        use crate::dispatch;
+        use serde_json::json;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        let hook_called = Arc::new(AtomicBool::new(false));
+        let hook_called_clone = hook_called.clone();
+
+        let builder = Outstanding::builder().commands(dispatch! {
+            list => {
+                handler: |_m, _ctx| CommandResult::Ok(json!({"ok": true})),
+                template: "{{ ok }}",
+                pre_dispatch: move |_, _| {
+                    hook_called_clone.store(true, Ordering::SeqCst);
+                    Ok(())
+                },
+            }
+        });
+
+        let cmd = Command::new("app").subcommand(Command::new("list"));
+        let matches = cmd.try_get_matches_from(["app", "list"]).unwrap();
+        let result = builder.dispatch(matches, OutputMode::Text);
+
+        assert!(result.is_handled());
+        assert!(hook_called.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_dispatch_macro_deeply_nested() {
+        use crate::dispatch;
+        use serde_json::json;
+
+        let builder = Outstanding::builder().commands(dispatch! {
+            app: {
+                config: {
+                    get => |_m, _ctx| CommandResult::Ok(json!({"key": "value"})),
+                    set => |_m, _ctx| CommandResult::Ok(json!({"ok": true})),
+                },
+                start => |_m, _ctx| CommandResult::Ok(json!({"started": true})),
+            },
+        });
+
+        assert!(builder.commands.contains_key("app.config.get"));
+        assert!(builder.commands.contains_key("app.config.set"));
+        assert!(builder.commands.contains_key("app.start"));
     }
 }

@@ -171,6 +171,8 @@ pub mod group;
 pub mod handler;
 pub mod help;
 pub mod hooks;
+#[macro_use]
+pub mod macros;
 
 // Re-export main types from outstanding module
 pub use outstanding::{Outstanding, OutstandingBuilder};
