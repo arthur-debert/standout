@@ -167,12 +167,16 @@ mod outstanding;
 mod result;
 
 // Public modules
+pub mod group;
 pub mod handler;
 pub mod help;
 pub mod hooks;
 
 // Re-export main types from outstanding module
 pub use outstanding::{Outstanding, OutstandingBuilder};
+
+// Re-export group types for declarative dispatch
+pub use group::{CommandConfig, GroupBuilder};
 
 // Re-export result type
 pub use result::HelpResult;
