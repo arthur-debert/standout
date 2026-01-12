@@ -74,6 +74,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `serde_json` dependency added to `outstanding-clap` (previously dev-only)
 
 - **Example**:
+
   ```rust
   use outstanding_clap::{Outstanding, Hooks, HookError};
   use serde_json::json;
@@ -117,6 +118,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `Hooks::new()` builder with fluent `.pre_dispatch()` and `.post_output()` methods
 
 - **Example**:
+
   ```rust
   use outstanding_clap::{Outstanding, Hooks, Output, HookError};
 
