@@ -253,41 +253,80 @@ impl BBParser {
     /// Post-processes the output to apply styles (for TagTransform::Apply mode).
     fn apply_styles(&self, intermediate: &str) -> String {
         let mut result = String::with_capacity(intermediate.len());
-        let mut chars = intermediate.chars().peekable();
         let mut style_stack: Vec<&Style> = Vec::new();
 
-        while let Some(c) = chars.next() {
-            if c == '\x00' {
-                // Parse marker
-                let mut marker = String::new();
-                while let Some(&next) = chars.peek() {
-                    if next == '\x00' {
-                        chars.next();
-                        break;
-                    }
-                    marker.push(chars.next().unwrap());
-                }
+        // We use split_inclusive to keep the markers in the iteration if possible,
+        // or just manual scanning. Manual scanning is safer given the specific marker format.
+        // Format is: \x00STYLE_START:tag\x00 or \x00STYLE_END:tag\x00
 
-                if let Some(tag) = marker.strip_prefix("STYLE_START:") {
+        let mut last_pos = 0;
+
+        while let Some(start_idx) = intermediate[last_pos..].find('\x00') {
+            let abs_start = last_pos + start_idx;
+
+            // 1. Append content before the marker
+            if abs_start > last_pos {
+                let text = &intermediate[last_pos..abs_start];
+                self.append_styled(&mut result, text, &style_stack);
+            }
+
+            // 2. Find end of marker
+            if let Some(end_offset) = intermediate[abs_start + 1..].find('\x00') {
+                let abs_end = abs_start + 1 + end_offset; // index of closing \x00
+                let marker_content = &intermediate[abs_start + 1..abs_end];
+
+                if let Some(tag) = marker_content.strip_prefix("STYLE_START:") {
                     if let Some(style) = self.styles.get(tag) {
                         style_stack.push(style);
                     }
-                } else if let Some(tag) = marker.strip_prefix("STYLE_END:") {
+                } else if let Some(tag) = marker_content.strip_prefix("STYLE_END:") {
+                    // We only pop if the stack top matches (or verify integrity).
+                    // This implementation assumes well-matched pairs from parse(),
+                    // but for robustness we check if we should pop specifically.
+                    // The old implementation just popped if the tag existed in styles.
                     if self.styles.contains_key(tag) {
                         style_stack.pop();
                     }
                 }
+
+                last_pos = abs_end + 1;
             } else {
-                // Apply current style stack to the character
-                let s = c.to_string();
-                let styled = style_stack
-                    .iter()
-                    .fold(s, |acc, style| style.apply_to(&acc).to_string());
-                result.push_str(&styled);
+                // Malformed marker (unclosed null byte) - treat rest as text
+                // This shouldn't happen with our generator but good for safety
+                let text = &intermediate[abs_start..];
+                self.append_styled(&mut result, text, &style_stack);
+                last_pos = intermediate.len();
+                break;
             }
         }
 
+        // Append remaining text
+        if last_pos < intermediate.len() {
+            let text = &intermediate[last_pos..];
+            self.append_styled(&mut result, text, &style_stack);
+        }
+
         result
+    }
+
+    /// Helper to append styled text.
+    fn append_styled(&self, output: &mut String, text: &str, style_stack: &[&Style]) {
+        if text.is_empty() {
+            return;
+        }
+
+        if style_stack.is_empty() {
+            output.push_str(text);
+        } else {
+            // Apply styles in order.
+            // Note: console::Style::apply_to returns a StyledObject.
+            // We need to chain them.
+            let mut current = text.to_string();
+            for style in style_stack {
+                current = style.apply_to(current).to_string();
+            }
+            output.push_str(&current);
+        }
     }
 }
 
