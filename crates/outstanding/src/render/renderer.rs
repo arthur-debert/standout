@@ -34,11 +34,13 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use minijinja::{Environment, Error};
+use outstanding_bbparser::{BBParser, TagTransform, UnknownTagBehavior};
 use serde::Serialize;
 
 use super::filters::register_filters;
 use super::registry::{walk_template_dir, ResolvedTemplate, TemplateRegistry};
 use crate::output::OutputMode;
+use crate::style::Styles;
 use crate::theme::Theme;
 
 /// A renderer with pre-registered templates.
@@ -122,6 +124,10 @@ pub struct Renderer {
     registry_initialized: bool,
     /// Registered template directories (for lazy initialization)
     template_dirs: Vec<std::path::PathBuf>,
+    /// Resolved styles for BBParser post-processing
+    styles: Styles,
+    /// Output mode for BBParser transform selection
+    output_mode: OutputMode,
 }
 
 impl Renderer {
@@ -156,12 +162,14 @@ impl Renderer {
         let styles = theme.resolve_styles(Some(color_mode));
 
         let mut env = Environment::new();
-        register_filters(&mut env, styles, mode);
+        register_filters(&mut env, styles.clone(), mode);
         Ok(Self {
             env,
             registry: TemplateRegistry::new(),
             registry_initialized: false,
             template_dirs: Vec::new(),
+            styles,
+            output_mode: mode,
         })
     }
 
@@ -370,22 +378,52 @@ impl Renderer {
 
         // In release mode: always use env cache if available.
         // In debug mode: only use env cache if it's an inline template (which doesn't change on disk).
-        if (!cfg!(debug_assertions) || is_inline) && self.env.get_template(name).is_ok() {
-            let tmpl = self.env.get_template(name)?;
-            return tmpl.render(data);
-        }
+        let minijinja_output =
+            if (!cfg!(debug_assertions) || is_inline) && self.env.get_template(name).is_ok() {
+                let tmpl = self.env.get_template(name)?;
+                tmpl.render(data)?
+            } else {
+                // Ensure registry is initialized for file-based templates
+                self.ensure_registry_initialized()?;
 
-        // Ensure registry is initialized for file-based templates
-        self.ensure_registry_initialized()?;
+                // Try file-based templates from registry
+                let content = self.get_template_content(name)?;
 
-        // Try file-based templates from registry
-        let content = self.get_template_content(name)?;
+                // In debug mode, we always re-add to update content (hot reload).
+                // In release mode, we add once and the environment caches it.
+                self.env.add_template_owned(name.to_string(), content)?;
+                let tmpl = self.env.get_template(name)?;
+                tmpl.render(data)?
+            };
 
-        // In debug mode, we always re-add to update content (hot reload).
-        // In release mode, we add once and the environment caches it.
-        self.env.add_template_owned(name.to_string(), content)?;
-        let tmpl = self.env.get_template(name)?;
-        tmpl.render(data)
+        // Pass 2: BBParser style tag processing
+        let final_output = self.apply_style_tags(&minijinja_output);
+
+        Ok(final_output)
+    }
+
+    /// Applies BBParser style tag post-processing.
+    fn apply_style_tags(&self, output: &str) -> String {
+        let transform = match self.output_mode {
+            OutputMode::Auto => {
+                if self.output_mode.should_use_color() {
+                    TagTransform::Apply
+                } else {
+                    TagTransform::Remove
+                }
+            }
+            OutputMode::Term => TagTransform::Apply,
+            OutputMode::Text => TagTransform::Remove,
+            OutputMode::TermDebug => TagTransform::Keep,
+            OutputMode::Json | OutputMode::Yaml | OutputMode::Xml | OutputMode::Csv => {
+                TagTransform::Remove
+            }
+        };
+
+        let resolved_styles = self.styles.to_resolved_map();
+        let parser = BBParser::new(resolved_styles, transform)
+            .unknown_behavior(UnknownTagBehavior::Passthrough);
+        parser.parse(output)
     }
 
     /// Gets template content, re-reading from disk in debug mode.

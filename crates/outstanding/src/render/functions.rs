@@ -7,16 +7,63 @@
 //! - [`render_with_mode`]: Rendering with explicit output mode and color mode
 //! - [`render_with_context`]: Rendering with injected context objects
 //! - [`render_or_serialize`]: Render or serialize to JSON based on mode
+//!
+//! # Two-Pass Rendering
+//!
+//! Templates support both the traditional filter syntax (`{{ value | style("name") }}`)
+//! and the more ergonomic tag syntax (`[name]content[/name]`).
+//!
+//! The rendering process works in two passes:
+//! 1. **MiniJinja pass**: Variable substitution and template logic
+//! 2. **BBParser pass**: Style tag processing (`[tag]...[/tag]`)
+//!
+//! This allows templates like:
+//! ```text
+//! [title]{{ data.title }}[/title]: [count]{{ items | length }}[/count] items
+//! ```
 
 use minijinja::{Environment, Error, Value};
+use outstanding_bbparser::{BBParser, TagTransform, UnknownTagBehavior};
 use serde::Serialize;
 use std::collections::HashMap;
 
 use super::filters::register_filters;
 use crate::context::{ContextRegistry, RenderContext};
 use crate::output::OutputMode;
+use crate::style::Styles;
 use crate::table::FlatDataSpec;
 use crate::theme::{detect_color_mode, ColorMode, Theme};
+
+/// Maps OutputMode to BBParser's TagTransform.
+fn output_mode_to_transform(mode: OutputMode) -> TagTransform {
+    match mode {
+        OutputMode::Auto => {
+            if mode.should_use_color() {
+                TagTransform::Apply
+            } else {
+                TagTransform::Remove
+            }
+        }
+        OutputMode::Term => TagTransform::Apply,
+        OutputMode::Text => TagTransform::Remove,
+        OutputMode::TermDebug => TagTransform::Keep,
+        // Structured modes shouldn't reach here (filtered out before)
+        OutputMode::Json | OutputMode::Yaml | OutputMode::Xml | OutputMode::Csv => {
+            TagTransform::Remove
+        }
+    }
+}
+
+/// Post-processes rendered output with BBParser to apply style tags.
+///
+/// This is the second pass of the two-pass rendering system.
+fn apply_style_tags(output: &str, styles: &Styles, mode: OutputMode) -> String {
+    let transform = output_mode_to_transform(mode);
+    let resolved_styles = styles.to_resolved_map();
+    let parser =
+        BBParser::new(resolved_styles, transform).unknown_behavior(UnknownTagBehavior::Passthrough);
+    parser.parse(output)
+}
 
 /// Renders a template with automatic terminal color detection.
 ///
@@ -170,11 +217,18 @@ pub fn render_with_mode<T: Serialize>(
     let styles = theme.resolve_styles(Some(color_mode));
 
     let mut env = Environment::new();
-    register_filters(&mut env, styles, output_mode);
+    register_filters(&mut env, styles.clone(), output_mode);
 
     env.add_template_owned("_inline".to_string(), template.to_string())?;
     let tmpl = env.get_template("_inline")?;
-    tmpl.render(data)
+
+    // Pass 1: MiniJinja template rendering
+    let minijinja_output = tmpl.render(data)?;
+
+    // Pass 2: BBParser style tag processing
+    let final_output = apply_style_tags(&minijinja_output, &styles, output_mode);
+
+    Ok(final_output)
 }
 
 /// Renders data using a template, or serializes directly for structured output modes.
@@ -406,15 +460,15 @@ pub fn render_with_context<T: Serialize>(
     render_context: &RenderContext,
 ) -> Result<String, Error> {
     let color_mode = detect_color_mode();
-    let theme = theme.resolve_styles(Some(color_mode));
+    let styles = theme.resolve_styles(Some(color_mode));
 
     // Validate style aliases before rendering
-    theme
+    styles
         .validate()
         .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string()))?;
 
     let mut env = Environment::new();
-    register_filters(&mut env, theme, mode);
+    register_filters(&mut env, styles.clone(), mode);
 
     env.add_template_owned("_inline".to_string(), template.to_string())?;
     let tmpl = env.get_template("_inline")?;
@@ -423,7 +477,13 @@ pub fn render_with_context<T: Serialize>(
     // Data fields take precedence over context fields
     let combined = build_combined_context(data, context_registry, render_context)?;
 
-    tmpl.render(&combined)
+    // Pass 1: MiniJinja template rendering
+    let minijinja_output = tmpl.render(&combined)?;
+
+    // Pass 2: BBParser style tag processing
+    let final_output = apply_style_tags(&minijinja_output, &styles, mode);
+
+    Ok(final_output)
 }
 
 /// Renders with context, or serializes directly for structured output modes.
@@ -1407,5 +1467,218 @@ mod tests {
             light_output.contains("\x1b[30"),
             "Expected black (30) in light mode"
         );
+    }
+
+    // ============================================================================
+    // BBParser Tag Syntax Tests
+    // ============================================================================
+
+    #[test]
+    fn test_tag_syntax_text_mode() {
+        let theme = Theme::new().add("title", Style::new().bold());
+
+        #[derive(Serialize)]
+        struct Data {
+            name: String,
+        }
+
+        let output = render_with_output(
+            "[title]{{ name }}[/title]",
+            &Data {
+                name: "Hello".into(),
+            },
+            &theme,
+            OutputMode::Text,
+        )
+        .unwrap();
+
+        // Tags should be stripped in text mode
+        assert_eq!(output, "Hello");
+    }
+
+    #[test]
+    fn test_tag_syntax_term_mode() {
+        let theme = Theme::new().add("bold", Style::new().bold().force_styling(true));
+
+        #[derive(Serialize)]
+        struct Data {
+            name: String,
+        }
+
+        let output = render_with_output(
+            "[bold]{{ name }}[/bold]",
+            &Data {
+                name: "Hello".into(),
+            },
+            &theme,
+            OutputMode::Term,
+        )
+        .unwrap();
+
+        // Should contain ANSI bold codes
+        assert!(output.contains("\x1b[1m"));
+        assert!(output.contains("Hello"));
+    }
+
+    #[test]
+    fn test_tag_syntax_debug_mode() {
+        let theme = Theme::new().add("title", Style::new().bold());
+
+        #[derive(Serialize)]
+        struct Data {
+            name: String,
+        }
+
+        let output = render_with_output(
+            "[title]{{ name }}[/title]",
+            &Data {
+                name: "Hello".into(),
+            },
+            &theme,
+            OutputMode::TermDebug,
+        )
+        .unwrap();
+
+        // Tags should be preserved in debug mode
+        assert_eq!(output, "[title]Hello[/title]");
+    }
+
+    #[test]
+    fn test_tag_syntax_unknown_tag_passthrough() {
+        // Passthrough with ? marker only applies in Apply mode (Term)
+        let theme = Theme::new().add("known", Style::new().bold());
+
+        #[derive(Serialize)]
+        struct Data {
+            name: String,
+        }
+
+        // In Term mode, unknown tags get ? marker
+        let output = render_with_output(
+            "[unknown]{{ name }}[/unknown]",
+            &Data {
+                name: "Hello".into(),
+            },
+            &theme,
+            OutputMode::Term,
+        )
+        .unwrap();
+
+        // Unknown tags get ? marker in passthrough mode
+        assert!(output.contains("[unknown?]"));
+        assert!(output.contains("[/unknown?]"));
+        assert!(output.contains("Hello"));
+
+        // In Text mode, all tags are stripped (Remove transform)
+        let text_output = render_with_output(
+            "[unknown]{{ name }}[/unknown]",
+            &Data {
+                name: "Hello".into(),
+            },
+            &theme,
+            OutputMode::Text,
+        )
+        .unwrap();
+
+        // Text mode strips all tags
+        assert_eq!(text_output, "Hello");
+    }
+
+    #[test]
+    fn test_tag_syntax_nested() {
+        let theme = Theme::new()
+            .add("bold", Style::new().bold().force_styling(true))
+            .add("red", Style::new().red().force_styling(true));
+
+        #[derive(Serialize)]
+        struct Data {
+            word: String,
+        }
+
+        let output = render_with_output(
+            "[bold][red]{{ word }}[/red][/bold]",
+            &Data {
+                word: "test".into(),
+            },
+            &theme,
+            OutputMode::Term,
+        )
+        .unwrap();
+
+        // Should contain both bold and red ANSI codes
+        assert!(output.contains("\x1b[1m")); // Bold
+        assert!(output.contains("\x1b[31m")); // Red
+        assert!(output.contains("test"));
+    }
+
+    #[test]
+    fn test_tag_syntax_mixed_with_filter() {
+        let theme = Theme::new()
+            .add("title", Style::new().bold())
+            .add("count", Style::new().cyan());
+
+        #[derive(Serialize)]
+        struct Data {
+            name: String,
+            num: usize,
+        }
+
+        let output = render_with_output(
+            r#"[title]{{ name }}[/title]: {{ num | style("count") }}"#,
+            &Data {
+                name: "Items".into(),
+                num: 42,
+            },
+            &theme,
+            OutputMode::Text,
+        )
+        .unwrap();
+
+        // Both syntaxes should work
+        assert_eq!(output, "Items: 42");
+    }
+
+    #[test]
+    fn test_tag_syntax_in_loop() {
+        let theme = Theme::new().add("item", Style::new().cyan());
+
+        #[derive(Serialize)]
+        struct Data {
+            items: Vec<String>,
+        }
+
+        let output = render_with_output(
+            "{% for item in items %}[item]{{ item }}[/item]\n{% endfor %}",
+            &Data {
+                items: vec!["one".into(), "two".into()],
+            },
+            &theme,
+            OutputMode::Text,
+        )
+        .unwrap();
+
+        assert_eq!(output, "one\ntwo\n");
+    }
+
+    #[test]
+    fn test_tag_syntax_literal_brackets() {
+        // Tags that don't match our pattern should pass through
+        let theme = Theme::new();
+
+        #[derive(Serialize)]
+        struct Data {
+            msg: String,
+        }
+
+        let output = render_with_output(
+            "Array: [1, 2, 3] and {{ msg }}",
+            &Data { msg: "done".into() },
+            &theme,
+            OutputMode::Text,
+        )
+        .unwrap();
+
+        // Non-tag brackets preserved
+        assert_eq!(output, "Array: [1, 2, 3] and done");
     }
 }
