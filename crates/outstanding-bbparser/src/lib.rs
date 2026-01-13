@@ -95,7 +95,9 @@ impl BBParser {
     ///
     /// # Arguments
     ///
-    /// * `styles` - Map of tag names to console styles (should be pre-resolved, no aliases)
+    /// * `styles` - Map of tag names to console styles.
+    ///
+    ///   Note: These styles are used directly; no alias resolution or recursive lookups are performed by this crate.
     /// * `transform` - How to handle matched tags
     pub fn new(styles: HashMap<String, Style>, transform: TagTransform) -> Self {
         Self {
