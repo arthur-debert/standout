@@ -16,15 +16,15 @@ fn test_output_modes() {
 
     // Test Keep (Debug)
     let parser = BBParser::new(styles.clone(), TagTransform::Keep);
-    assert_eq!(parser.process(input), input);
+    assert_eq!(parser.parse(input), input);
 
     // Test Remove (Plain)
     let parser = BBParser::new(styles.clone(), TagTransform::Remove);
-    assert_eq!(parser.process(input), "hello world");
+    assert_eq!(parser.parse(input), "hello world");
 
     // Test Apply (Term)
     let parser = BBParser::new(styles.clone(), TagTransform::Apply);
-    let output = parser.process(input);
+    let output = parser.parse(input);
 
     // Check it contains ANSI codes (basic check)
     assert!(output.contains("\x1b[31m")); // Red
@@ -44,7 +44,7 @@ fn test_compact_ansi_output() {
     let parser = BBParser::new(styles, TagTransform::Apply);
 
     let input = "[red]text[/red]";
-    let output = parser.process(input);
+    let output = parser.parse(input);
 
     // Expected efficient output: \x1b[31mtext\x1b[0m
     // Bloated output would have many more escapes.
@@ -80,7 +80,7 @@ fn test_nested_tags_apply() {
     let parser = BBParser::new(styles, TagTransform::Apply);
 
     // [bold][red]hi[/red][/bold]
-    let output = parser.process("[bold][red]hi[/red][/bold]");
+    let output = parser.parse("[bold][red]hi[/red][/bold]");
 
     // Should have bold on outer, red on inner.
     assert!(output.contains("hi"));

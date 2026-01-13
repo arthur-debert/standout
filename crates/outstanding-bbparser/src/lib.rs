@@ -31,6 +31,15 @@
 //! assert_eq!(output, "[bold]hello[/bold]");
 //! ```
 //!
+//! # Unknown Tag Handling
+//!
+//! Tags not found in the styles map can be handled in two ways:
+//!
+//! - [`UnknownTagBehavior::Passthrough`]: Keep tags with a `?` marker: `[foo]` → `[foo?]`
+//! - [`UnknownTagBehavior::Strip`]: Remove tags entirely, keep content: `[foo]text[/foo]` → `text`
+//!
+//! For validation, use [`BBParser::validate`] to check for unknown tags before parsing.
+//!
 //! # Tag Name Syntax
 //!
 //! Tag names follow CSS identifier rules:
@@ -60,22 +69,117 @@ pub enum TagTransform {
     Keep,
 }
 
-/// Configuration for handling unknown tags.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// How to handle tags not found in the styles map.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum UnknownTagBehavior {
-    /// Pass through unknown tags unchanged.
+    /// Keep unknown tags as literal text with a `?` marker.
+    /// `[foo]text[/foo]` → `[foo?]text[/foo?]`
+    ///
+    /// This makes unknown tags visible without breaking output.
+    #[default]
     Passthrough,
 
-    /// Strip unknown tags (keep content, remove tag markers).
+    /// Strip unknown tags entirely, keeping only inner content.
+    /// `[foo]text[/foo]` → `text`
+    ///
+    /// Use this for graceful degradation in production.
     Strip,
-
-    /// Prefix content with an indicator (e.g., "(!?)").
-    Indicate(String),
 }
 
-impl Default for UnknownTagBehavior {
-    fn default() -> Self {
-        Self::Indicate("(!?)".to_string())
+/// The kind of unknown tag encountered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnknownTagKind {
+    /// An opening tag: `[foo]`
+    Open,
+    /// A closing tag: `[/foo]`
+    Close,
+}
+
+/// An error representing an unknown tag in the input.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnknownTagError {
+    /// The tag name that was not found in styles.
+    pub tag: String,
+    /// The kind of tag (open or close).
+    pub kind: UnknownTagKind,
+    /// Byte offset of the opening `[` in the input.
+    pub start: usize,
+    /// Byte offset after the closing `]` in the input.
+    pub end: usize,
+}
+
+impl std::fmt::Display for UnknownTagError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let kind = match self.kind {
+            UnknownTagKind::Open => "opening",
+            UnknownTagKind::Close => "closing",
+        };
+        write!(
+            f,
+            "unknown {} tag '{}' at position {}..{}",
+            kind, self.tag, self.start, self.end
+        )
+    }
+}
+
+impl std::error::Error for UnknownTagError {}
+
+/// A collection of unknown tag errors found during parsing.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UnknownTagErrors {
+    /// The list of unknown tag errors.
+    pub errors: Vec<UnknownTagError>,
+}
+
+impl UnknownTagErrors {
+    /// Creates an empty error collection.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Returns true if no errors were found.
+    pub fn is_empty(&self) -> bool {
+        self.errors.is_empty()
+    }
+
+    /// Returns the number of errors.
+    pub fn len(&self) -> usize {
+        self.errors.len()
+    }
+
+    /// Adds an error to the collection.
+    pub fn push(&mut self, error: UnknownTagError) {
+        self.errors.push(error);
+    }
+}
+
+impl std::fmt::Display for UnknownTagErrors {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "found {} unknown tag(s):", self.errors.len())?;
+        for error in &self.errors {
+            writeln!(f, "  - {}", error)?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for UnknownTagErrors {}
+
+impl IntoIterator for UnknownTagErrors {
+    type Item = UnknownTagError;
+    type IntoIter = std::vec::IntoIter<UnknownTagError>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.errors.into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a UnknownTagErrors {
+    type Item = &'a UnknownTagError;
+    type IntoIter = std::slice::Iter<'a, UnknownTagError>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.errors.iter()
     }
 }
 
@@ -96,9 +200,10 @@ impl BBParser {
     /// # Arguments
     ///
     /// * `styles` - Map of tag names to console styles.
-    ///
-    ///   Note: These styles are used directly; no alias resolution or recursive lookups are performed by this crate.
+    ///   Note: These styles are used directly; no alias resolution is performed.
     /// * `transform` - How to handle matched tags
+    ///
+    /// Unknown tags default to [`UnknownTagBehavior::Passthrough`].
     pub fn new(styles: HashMap<String, Style>, transform: TagTransform) -> Self {
         Self {
             styles,
@@ -108,68 +213,163 @@ impl BBParser {
     }
 
     /// Sets the behavior for unknown tags.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use outstanding_bbparser::{BBParser, TagTransform, UnknownTagBehavior};
+    /// use std::collections::HashMap;
+    ///
+    /// let parser = BBParser::new(HashMap::new(), TagTransform::Remove)
+    ///     .unknown_behavior(UnknownTagBehavior::Strip);
+    ///
+    /// // Unknown tags are stripped
+    /// assert_eq!(parser.parse("[foo]text[/foo]"), "text");
+    /// ```
     pub fn unknown_behavior(mut self, behavior: UnknownTagBehavior) -> Self {
         self.unknown_behavior = behavior;
         self
     }
 
-    /// Parse input into a sequence of events.
-    fn parse_to_events<'a>(&self, input: &'a str) -> Vec<ParseEvent<'a>> {
+    /// Parses and transforms input.
+    ///
+    /// Unknown tags are handled according to the configured [`UnknownTagBehavior`].
+    pub fn parse(&self, input: &str) -> String {
+        let (output, _) = self.parse_internal(input);
+        output
+    }
+
+    /// Parses input and collects any unknown tag errors.
+    ///
+    /// Returns the transformed output AND any errors found.
+    /// The output uses the configured [`UnknownTagBehavior`] for transformation.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use outstanding_bbparser::{BBParser, TagTransform};
+    /// use std::collections::HashMap;
+    ///
+    /// let parser = BBParser::new(HashMap::new(), TagTransform::Remove);
+    /// let (output, errors) = parser.parse_with_diagnostics("[unknown]text[/unknown]");
+    ///
+    /// assert!(!errors.is_empty());
+    /// assert_eq!(errors.len(), 2); // open and close tags
+    /// ```
+    pub fn parse_with_diagnostics(&self, input: &str) -> (String, UnknownTagErrors) {
+        self.parse_internal(input)
+    }
+
+    /// Validates input for unknown tags without producing transformed output.
+    ///
+    /// Returns `Ok(())` if all tags are known, `Err` with details otherwise.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use outstanding_bbparser::{BBParser, TagTransform};
+    /// use std::collections::HashMap;
+    /// use console::Style;
+    ///
+    /// let mut styles = HashMap::new();
+    /// styles.insert("bold".to_string(), Style::new().bold());
+    ///
+    /// let parser = BBParser::new(styles, TagTransform::Apply);
+    ///
+    /// // Known tag passes validation
+    /// assert!(parser.validate("[bold]text[/bold]").is_ok());
+    ///
+    /// // Unknown tag fails validation
+    /// let result = parser.validate("[unknown]text[/unknown]");
+    /// assert!(result.is_err());
+    /// ```
+    pub fn validate(&self, input: &str) -> Result<(), UnknownTagErrors> {
+        let (_, errors) = self.parse_internal(input);
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    /// Internal parsing that returns both output and errors.
+    fn parse_internal(&self, input: &str) -> (String, UnknownTagErrors) {
         let tokens = Tokenizer::new(input).collect::<Vec<_>>();
         let valid_opens = self.compute_valid_tags(&tokens);
         let mut events = Vec::new();
+        let mut errors = UnknownTagErrors::new();
         let mut stack: Vec<&str> = Vec::new();
 
         let mut i = 0;
         while i < tokens.len() {
             match &tokens[i] {
-                Token::Text(text) => {
-                    events.push(ParseEvent::Literal(std::borrow::Cow::Borrowed(text)));
+                Token::Text { content, .. } => {
+                    events.push(ParseEvent::Literal(std::borrow::Cow::Borrowed(content)));
                 }
-                Token::OpenTag(tag) => {
+                Token::OpenTag { name, start, end } => {
                     if valid_opens.contains(&i) {
-                        stack.push(tag);
-                        self.emit_open_tag_event(&mut events, tag);
+                        stack.push(name);
+                        self.emit_open_tag_event(&mut events, &mut errors, name, *start, *end);
                     } else {
                         events.push(ParseEvent::Literal(std::borrow::Cow::Owned(format!(
                             "[{}]",
-                            tag
+                            name
                         ))));
                     }
                 }
-                Token::CloseTag(tag) => {
-                    if stack.last().copied() == Some(*tag) {
+                Token::CloseTag { name, start, end } => {
+                    if stack.last().copied() == Some(*name) {
                         stack.pop();
-                        self.emit_close_tag_event(&mut events, tag);
-                    } else if stack.contains(tag) {
+                        self.emit_close_tag_event(&mut events, &mut errors, name, *start, *end);
+                    } else if stack.contains(name) {
                         while let Some(open) = stack.pop() {
-                            self.emit_close_tag_event(&mut events, open);
-                            if open == *tag {
+                            // For auto-closed tags, we don't have position info
+                            self.emit_close_tag_event(&mut events, &mut errors, open, 0, 0);
+                            if open == *name {
                                 break;
                             }
                         }
                     } else {
                         events.push(ParseEvent::Literal(std::borrow::Cow::Owned(format!(
                             "[/{}]",
-                            tag
+                            name
                         ))));
                     }
                 }
-                Token::InvalidTag(text) => {
-                    events.push(ParseEvent::Literal(std::borrow::Cow::Borrowed(text)));
+                Token::InvalidTag { content, .. } => {
+                    events.push(ParseEvent::Literal(std::borrow::Cow::Borrowed(content)));
                 }
             }
             i += 1;
         }
 
         while let Some(tag) = stack.pop() {
-            self.emit_close_tag_event(&mut events, tag);
+            self.emit_close_tag_event(&mut events, &mut errors, tag, 0, 0);
         }
 
-        events
+        let output = self.render(events);
+        (output, errors)
     }
 
-    fn emit_open_tag_event<'a>(&self, events: &mut Vec<ParseEvent<'a>>, tag: &'a str) {
+    fn emit_open_tag_event<'a>(
+        &self,
+        events: &mut Vec<ParseEvent<'a>>,
+        errors: &mut UnknownTagErrors,
+        tag: &'a str,
+        start: usize,
+        end: usize,
+    ) {
+        let is_known = self.styles.contains_key(tag);
+
+        if !is_known {
+            errors.push(UnknownTagError {
+                tag: tag.to_string(),
+                kind: UnknownTagKind::Open,
+                start,
+                end,
+            });
+        }
+
         match self.transform {
             TagTransform::Keep => {
                 events.push(ParseEvent::Literal(std::borrow::Cow::Owned(format!(
@@ -178,21 +378,48 @@ impl BBParser {
                 ))));
             }
             TagTransform::Remove => {
-                if !self.styles.contains_key(tag) {
-                    self.emit_unknown_prefix_event(events);
-                }
+                // Nothing to emit for known or stripped unknown tags
             }
             TagTransform::Apply => {
-                if self.styles.contains_key(tag) {
+                if is_known {
                     events.push(ParseEvent::StyleStart(tag));
                 } else {
-                    self.emit_unknown_prefix_event(events);
+                    match self.unknown_behavior {
+                        UnknownTagBehavior::Passthrough => {
+                            events.push(ParseEvent::Literal(std::borrow::Cow::Owned(format!(
+                                "[{}?]",
+                                tag
+                            ))));
+                        }
+                        UnknownTagBehavior::Strip => {
+                            // Nothing to emit
+                        }
+                    }
                 }
             }
         }
     }
 
-    fn emit_close_tag_event<'a>(&self, events: &mut Vec<ParseEvent<'a>>, tag: &'a str) {
+    fn emit_close_tag_event<'a>(
+        &self,
+        events: &mut Vec<ParseEvent<'a>>,
+        errors: &mut UnknownTagErrors,
+        tag: &'a str,
+        start: usize,
+        end: usize,
+    ) {
+        let is_known = self.styles.contains_key(tag);
+
+        // Only record error if we have valid position info (not auto-closed)
+        if !is_known && end > 0 {
+            errors.push(UnknownTagError {
+                tag: tag.to_string(),
+                kind: UnknownTagKind::Close,
+                start,
+                end,
+            });
+        }
+
         match self.transform {
             TagTransform::Keep => {
                 events.push(ParseEvent::Literal(std::borrow::Cow::Owned(format!(
@@ -201,22 +428,25 @@ impl BBParser {
                 ))));
             }
             TagTransform::Remove => {
-                // do nothing
+                // Nothing to emit
             }
             TagTransform::Apply => {
-                if self.styles.contains_key(tag) {
+                if is_known {
                     events.push(ParseEvent::StyleEnd(tag));
+                } else {
+                    match self.unknown_behavior {
+                        UnknownTagBehavior::Passthrough => {
+                            events.push(ParseEvent::Literal(std::borrow::Cow::Owned(format!(
+                                "[/{}?]",
+                                tag
+                            ))));
+                        }
+                        UnknownTagBehavior::Strip => {
+                            // Nothing to emit
+                        }
+                    }
                 }
             }
-        }
-    }
-
-    fn emit_unknown_prefix_event<'a>(&self, events: &mut Vec<ParseEvent<'a>>) {
-        if let UnknownTagBehavior::Indicate(ref indicator) = self.unknown_behavior {
-            events.push(ParseEvent::Literal(std::borrow::Cow::Owned(format!(
-                "{} ",
-                indicator
-            ))));
         }
     }
 
@@ -237,20 +467,12 @@ impl BBParser {
                 }
                 ParseEvent::StyleEnd(tag) => {
                     if self.styles.contains_key(tag) {
-                        // Robust popping: only pop if we have styles.
-                        // We assume the parser emitted balanced events for valid tags.
                         style_stack.pop();
                     }
                 }
             }
         }
         result
-    }
-
-    /// Parses and transforms input.
-    pub fn parse(&self, input: &str) -> String {
-        let events = self.parse_to_events(input);
-        self.render(events)
     }
 
     /// Pre-computes which OpenTag tokens have a valid matching CloseTag.
@@ -262,11 +484,11 @@ impl BBParser {
 
         for (i, token) in tokens.iter().enumerate() {
             match token {
-                Token::OpenTag(tag) => {
-                    open_indices_by_tag.entry(tag).or_default().push(i);
+                Token::OpenTag { name, .. } => {
+                    open_indices_by_tag.entry(name).or_default().push(i);
                 }
-                Token::CloseTag(tag) => {
-                    if let Some(indices) = open_indices_by_tag.get_mut(tag) {
+                Token::CloseTag { name, .. } => {
+                    if let Some(indices) = open_indices_by_tag.get_mut(name) {
                         if let Some(open_idx) = indices.pop() {
                             valid_indices.insert(open_idx);
                         }
@@ -288,23 +510,12 @@ impl BBParser {
         if style_stack.is_empty() {
             output.push_str(text);
         } else {
-            // Apply styles in order.
-            // Note: console::Style::apply_to returns a StyledObject.
-            // We need to chain them.
             let mut current = text.to_string();
             for style in style_stack {
                 current = style.apply_to(current).to_string();
             }
             output.push_str(&current);
         }
-    }
-}
-
-// Better approach: process in one pass with style application
-impl BBParser {
-    /// Legacy alias for `parse`.
-    pub fn process(&self, input: &str) -> String {
-        self.parse(input)
     }
 }
 
@@ -318,13 +529,29 @@ enum ParseEvent<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Token<'a> {
     /// Plain text content.
-    Text(&'a str),
+    Text {
+        content: &'a str,
+        start: usize,
+        end: usize,
+    },
     /// Opening tag: `[tagname]`
-    OpenTag(&'a str),
+    OpenTag {
+        name: &'a str,
+        start: usize,
+        end: usize,
+    },
     /// Closing tag: `[/tagname]`
-    CloseTag(&'a str),
+    CloseTag {
+        name: &'a str,
+        start: usize,
+        end: usize,
+    },
     /// Invalid tag syntax (passed through as text).
-    InvalidTag(&'a str),
+    InvalidTag {
+        content: &'a str,
+        start: usize,
+        end: usize,
+    },
 }
 
 /// Tokenizer for BBCode-style tags.
@@ -353,16 +580,11 @@ impl<'a> Tokenizer<'a> {
         }
 
         // Rest can be letter, digit, underscore, or hyphen
-        // But hyphen cannot be followed by nothing (handled by the pattern)
         for c in chars {
             if !c.is_ascii_lowercase() && !c.is_ascii_digit() && c != '_' && c != '-' {
                 return false;
             }
         }
-
-        // Cannot end with hyphen followed by digit pattern at start
-        // Actually, the rule is: cannot START with hyphen-digit
-        // We already check first char, so we're good
 
         true
     }
@@ -377,6 +599,7 @@ impl<'a> Iterator for Tokenizer<'a> {
         }
 
         let remaining = &self.input[self.pos..];
+        let start_pos = self.pos;
 
         // Look for the next '['
         if let Some(bracket_pos) = remaining.find('[') {
@@ -384,7 +607,11 @@ impl<'a> Iterator for Tokenizer<'a> {
                 // There's text before the bracket
                 let text = &remaining[..bracket_pos];
                 self.pos += bracket_pos;
-                return Some(Token::Text(text));
+                return Some(Token::Text {
+                    content: text,
+                    start: start_pos,
+                    end: self.pos,
+                });
             }
 
             // We're at a '['
@@ -392,34 +619,59 @@ impl<'a> Iterator for Tokenizer<'a> {
             if let Some(close_bracket) = remaining.find(']') {
                 let tag_content = &remaining[1..close_bracket];
                 let full_tag = &remaining[..=close_bracket];
+                let end_pos = start_pos + close_bracket + 1;
 
                 // Check for closing tag
                 if let Some(tag_name) = tag_content.strip_prefix('/') {
                     if Self::is_valid_tag_name(tag_name) {
-                        self.pos += close_bracket + 1;
-                        Some(Token::CloseTag(tag_name))
+                        self.pos = end_pos;
+                        Some(Token::CloseTag {
+                            name: tag_name,
+                            start: start_pos,
+                            end: end_pos,
+                        })
                     } else {
-                        // Invalid tag name - treat as text
-                        self.pos += close_bracket + 1;
-                        Some(Token::InvalidTag(full_tag))
+                        self.pos = end_pos;
+                        Some(Token::InvalidTag {
+                            content: full_tag,
+                            start: start_pos,
+                            end: end_pos,
+                        })
                     }
                 } else if Self::is_valid_tag_name(tag_content) {
-                    self.pos += close_bracket + 1;
-                    Some(Token::OpenTag(tag_content))
+                    self.pos = end_pos;
+                    Some(Token::OpenTag {
+                        name: tag_content,
+                        start: start_pos,
+                        end: end_pos,
+                    })
                 } else {
-                    // Invalid tag name - treat as text
-                    self.pos += close_bracket + 1;
-                    Some(Token::InvalidTag(full_tag))
+                    self.pos = end_pos;
+                    Some(Token::InvalidTag {
+                        content: full_tag,
+                        start: start_pos,
+                        end: end_pos,
+                    })
                 }
             } else {
                 // No closing bracket - rest is text
-                self.pos = self.input.len();
-                Some(Token::Text(remaining))
+                let end_pos = self.input.len();
+                self.pos = end_pos;
+                Some(Token::Text {
+                    content: remaining,
+                    start: start_pos,
+                    end: end_pos,
+                })
             }
         } else {
             // No more brackets - rest is text
-            self.pos = self.input.len();
-            Some(Token::Text(remaining))
+            let end_pos = self.input.len();
+            self.pos = end_pos;
+            Some(Token::Text {
+                content: remaining,
+                start: start_pos,
+                end: end_pos,
+            })
         }
     }
 }
@@ -487,7 +739,6 @@ mod tests {
         #[test]
         fn unknown_tags_preserved() {
             let parser = BBParser::new(test_styles(), TagTransform::Keep);
-            // Unknown but valid tag syntax - should be preserved
             assert_eq!(
                 parser.parse("[unknown]text[/unknown]"),
                 "[unknown]text[/unknown]"
@@ -534,16 +785,252 @@ mod tests {
         }
 
         #[test]
-        fn unknown_tags_show_indicator() {
+        fn unknown_tags_stripped() {
             let parser = BBParser::new(test_styles(), TagTransform::Remove);
-            assert_eq!(parser.parse("[unknown]text[/unknown]"), "(!?) text");
+            // Default is Passthrough, but Remove mode ignores unknown_behavior for output
+            assert_eq!(parser.parse("[unknown]text[/unknown]"), "text");
+        }
+    }
+
+    // ==================== Unknown Tag Behavior Tests ====================
+
+    mod unknown_tag_behavior {
+        use super::*;
+
+        #[test]
+        fn passthrough_adds_question_mark_in_apply_mode() {
+            let parser = BBParser::new(test_styles(), TagTransform::Apply)
+                .unknown_behavior(UnknownTagBehavior::Passthrough);
+            assert_eq!(
+                parser.parse("[unknown]text[/unknown]"),
+                "[unknown?]text[/unknown?]"
+            );
         }
 
         #[test]
-        fn unknown_tags_strip_with_config() {
-            let parser = BBParser::new(test_styles(), TagTransform::Remove)
+        fn passthrough_is_default() {
+            let parser = BBParser::new(test_styles(), TagTransform::Apply);
+            assert_eq!(
+                parser.parse("[unknown]text[/unknown]"),
+                "[unknown?]text[/unknown?]"
+            );
+        }
+
+        #[test]
+        fn strip_removes_unknown_tags_in_apply_mode() {
+            let parser = BBParser::new(test_styles(), TagTransform::Apply)
                 .unknown_behavior(UnknownTagBehavior::Strip);
             assert_eq!(parser.parse("[unknown]text[/unknown]"), "text");
+        }
+
+        #[test]
+        fn passthrough_nested_with_known() {
+            let parser = BBParser::new(test_styles(), TagTransform::Apply)
+                .unknown_behavior(UnknownTagBehavior::Passthrough);
+            let result = parser.parse("[bold][unknown]text[/unknown][/bold]");
+            assert!(result.contains("[unknown?]"));
+            assert!(result.contains("[/unknown?]"));
+            assert!(result.contains("text"));
+        }
+
+        #[test]
+        fn strip_nested_with_known() {
+            let mut styles = HashMap::new();
+            styles.insert("bold".to_string(), Style::new().bold().force_styling(true));
+            let parser = BBParser::new(styles, TagTransform::Apply)
+                .unknown_behavior(UnknownTagBehavior::Strip);
+            let result = parser.parse("[bold][unknown]text[/unknown][/bold]");
+            // Should have bold styling but no unknown tag markers
+            assert!(!result.contains("[unknown"));
+            assert!(result.contains("text"));
+        }
+
+        #[test]
+        fn keep_mode_ignores_unknown_behavior() {
+            // In Keep mode, all tags are preserved as-is regardless of unknown_behavior
+            let parser = BBParser::new(test_styles(), TagTransform::Keep)
+                .unknown_behavior(UnknownTagBehavior::Strip);
+            assert_eq!(
+                parser.parse("[unknown]text[/unknown]"),
+                "[unknown]text[/unknown]"
+            );
+        }
+
+        #[test]
+        fn remove_mode_always_strips_tags() {
+            // In Remove mode, all tags are stripped regardless of unknown_behavior
+            let parser = BBParser::new(test_styles(), TagTransform::Remove)
+                .unknown_behavior(UnknownTagBehavior::Passthrough);
+            assert_eq!(parser.parse("[unknown]text[/unknown]"), "text");
+        }
+    }
+
+    // ==================== Validation Tests ====================
+
+    mod validation {
+        use super::*;
+
+        #[test]
+        fn validate_all_known_tags_passes() {
+            let parser = BBParser::new(test_styles(), TagTransform::Apply);
+            assert!(parser.validate("[bold]text[/bold]").is_ok());
+        }
+
+        #[test]
+        fn validate_nested_known_tags_passes() {
+            let parser = BBParser::new(test_styles(), TagTransform::Apply);
+            assert!(parser.validate("[bold][red]text[/red][/bold]").is_ok());
+        }
+
+        #[test]
+        fn validate_unknown_tag_fails() {
+            let parser = BBParser::new(test_styles(), TagTransform::Apply);
+            let result = parser.validate("[unknown]text[/unknown]");
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn validate_returns_correct_error_count() {
+            let parser = BBParser::new(test_styles(), TagTransform::Apply);
+            let result = parser.validate("[unknown]text[/unknown]");
+            let errors = result.unwrap_err();
+            assert_eq!(errors.len(), 2); // open and close
+        }
+
+        #[test]
+        fn validate_error_contains_tag_name() {
+            let parser = BBParser::new(test_styles(), TagTransform::Apply);
+            let result = parser.validate("[foobar]text[/foobar]");
+            let errors = result.unwrap_err();
+            assert!(errors.errors.iter().all(|e| e.tag == "foobar"));
+        }
+
+        #[test]
+        fn validate_error_distinguishes_open_and_close() {
+            let parser = BBParser::new(test_styles(), TagTransform::Apply);
+            let result = parser.validate("[unknown]text[/unknown]");
+            let errors = result.unwrap_err();
+
+            let open_count = errors
+                .errors
+                .iter()
+                .filter(|e| e.kind == UnknownTagKind::Open)
+                .count();
+            let close_count = errors
+                .errors
+                .iter()
+                .filter(|e| e.kind == UnknownTagKind::Close)
+                .count();
+
+            assert_eq!(open_count, 1);
+            assert_eq!(close_count, 1);
+        }
+
+        #[test]
+        fn validate_error_has_correct_positions() {
+            let parser = BBParser::new(test_styles(), TagTransform::Apply);
+            let input = "[unknown]text[/unknown]";
+            let result = parser.validate(input);
+            let errors = result.unwrap_err();
+
+            let open_error = errors
+                .errors
+                .iter()
+                .find(|e| e.kind == UnknownTagKind::Open)
+                .unwrap();
+            assert_eq!(open_error.start, 0);
+            assert_eq!(open_error.end, 9); // "[unknown]"
+
+            let close_error = errors
+                .errors
+                .iter()
+                .find(|e| e.kind == UnknownTagKind::Close)
+                .unwrap();
+            assert_eq!(close_error.start, 13);
+            assert_eq!(close_error.end, 23); // "[/unknown]"
+        }
+
+        #[test]
+        fn validate_multiple_unknown_tags() {
+            let parser = BBParser::new(test_styles(), TagTransform::Apply);
+            let result = parser.validate("[foo]a[/foo][bar]b[/bar]");
+            let errors = result.unwrap_err();
+            assert_eq!(errors.len(), 4); // 2 opens + 2 closes
+
+            let tags: std::collections::HashSet<_> =
+                errors.errors.iter().map(|e| e.tag.as_str()).collect();
+            assert!(tags.contains("foo"));
+            assert!(tags.contains("bar"));
+        }
+
+        #[test]
+        fn validate_mixed_known_and_unknown() {
+            let parser = BBParser::new(test_styles(), TagTransform::Apply);
+            let result = parser.validate("[bold][unknown]text[/unknown][/bold]");
+            let errors = result.unwrap_err();
+            assert_eq!(errors.len(), 2); // only unknown tag errors
+
+            for error in &errors.errors {
+                assert_eq!(error.tag, "unknown");
+            }
+        }
+
+        #[test]
+        fn validate_plain_text_passes() {
+            let parser = BBParser::new(test_styles(), TagTransform::Apply);
+            assert!(parser.validate("plain text without tags").is_ok());
+        }
+
+        #[test]
+        fn validate_empty_string_passes() {
+            let parser = BBParser::new(test_styles(), TagTransform::Apply);
+            assert!(parser.validate("").is_ok());
+        }
+    }
+
+    // ==================== Parse With Diagnostics Tests ====================
+
+    mod parse_with_diagnostics {
+        use super::*;
+
+        #[test]
+        fn returns_output_and_errors() {
+            let parser = BBParser::new(test_styles(), TagTransform::Apply)
+                .unknown_behavior(UnknownTagBehavior::Passthrough);
+            let (output, errors) = parser.parse_with_diagnostics("[unknown]text[/unknown]");
+
+            assert_eq!(output, "[unknown?]text[/unknown?]");
+            assert_eq!(errors.len(), 2);
+        }
+
+        #[test]
+        fn output_uses_strip_behavior() {
+            let parser = BBParser::new(test_styles(), TagTransform::Apply)
+                .unknown_behavior(UnknownTagBehavior::Strip);
+            let (output, errors) = parser.parse_with_diagnostics("[unknown]text[/unknown]");
+
+            assert_eq!(output, "text");
+            assert_eq!(errors.len(), 2);
+        }
+
+        #[test]
+        fn no_errors_for_known_tags() {
+            let parser = BBParser::new(test_styles(), TagTransform::Apply);
+            let (_, errors) = parser.parse_with_diagnostics("[bold]text[/bold]");
+            assert!(errors.is_empty());
+        }
+
+        #[test]
+        fn errors_iterable() {
+            let parser = BBParser::new(test_styles(), TagTransform::Apply);
+            let (_, errors) = parser.parse_with_diagnostics("[a]x[/a][b]y[/b]");
+
+            let mut count = 0;
+            for error in &errors {
+                assert!(error.tag == "a" || error.tag == "b");
+                count += 1;
+            }
+            assert_eq!(count, 4);
         }
     }
 
@@ -626,7 +1113,6 @@ mod tests {
         #[test]
         fn unclosed_tag_passthrough() {
             let parser = BBParser::new(test_styles(), TagTransform::Keep);
-            // Unclosed tag should be treated as literal text
             assert_eq!(parser.parse("[bold]hello"), "[bold]hello");
         }
 
@@ -639,7 +1125,6 @@ mod tests {
         #[test]
         fn mismatched_tags() {
             let parser = BBParser::new(test_styles(), TagTransform::Keep);
-            // [bold] opened, [/red] closes nothing, [/bold] closes bold
             assert_eq!(
                 parser.parse("[bold]hello[/red][/bold]"),
                 "[bold]hello[/red][/bold]"
@@ -649,10 +1134,7 @@ mod tests {
         #[test]
         fn overlapping_tags_auto_close() {
             let parser = BBParser::new(test_styles(), TagTransform::Keep);
-            // [bold][red]...[/bold] - red was opened inside bold, bold closes first
-            // This should auto-close red when bold closes
             let result = parser.parse("[bold][red]hello[/bold][/red]");
-            // The parser should handle this gracefully
             assert!(result.contains("hello"));
         }
 
@@ -665,14 +1147,12 @@ mod tests {
         #[test]
         fn brackets_in_content() {
             let parser = BBParser::new(test_styles(), TagTransform::Remove);
-            // Regular brackets that aren't tags
             assert_eq!(parser.parse("[bold]array[0][/bold]"), "array[0]");
         }
 
         #[test]
         fn invalid_tag_syntax_passthrough() {
             let parser = BBParser::new(test_styles(), TagTransform::Keep);
-            // These should be treated as literal text
             assert_eq!(parser.parse("[123]text[/123]"), "[123]text[/123]");
             assert_eq!(parser.parse("[-bad]text[/-bad]"), "[-bad]text[/-bad]");
             assert_eq!(parser.parse("[Bad]text[/Bad]"), "[Bad]text[/Bad]");
@@ -735,7 +1215,14 @@ mod tests {
         #[test]
         fn tokenize_plain_text() {
             let tokens: Vec<_> = Tokenizer::new("hello world").collect();
-            assert_eq!(tokens, vec![Token::Text("hello world")]);
+            assert_eq!(
+                tokens,
+                vec![Token::Text {
+                    content: "hello world",
+                    start: 0,
+                    end: 11
+                }]
+            );
         }
 
         #[test]
@@ -744,9 +1231,21 @@ mod tests {
             assert_eq!(
                 tokens,
                 vec![
-                    Token::OpenTag("bold"),
-                    Token::Text("hello"),
-                    Token::CloseTag("bold"),
+                    Token::OpenTag {
+                        name: "bold",
+                        start: 0,
+                        end: 6
+                    },
+                    Token::Text {
+                        content: "hello",
+                        start: 6,
+                        end: 11
+                    },
+                    Token::CloseTag {
+                        name: "bold",
+                        start: 11,
+                        end: 18
+                    },
                 ]
             );
         }
@@ -757,11 +1256,31 @@ mod tests {
             assert_eq!(
                 tokens,
                 vec![
-                    Token::OpenTag("a"),
-                    Token::OpenTag("b"),
-                    Token::Text("x"),
-                    Token::CloseTag("b"),
-                    Token::CloseTag("a"),
+                    Token::OpenTag {
+                        name: "a",
+                        start: 0,
+                        end: 3
+                    },
+                    Token::OpenTag {
+                        name: "b",
+                        start: 3,
+                        end: 6
+                    },
+                    Token::Text {
+                        content: "x",
+                        start: 6,
+                        end: 7
+                    },
+                    Token::CloseTag {
+                        name: "b",
+                        start: 7,
+                        end: 11
+                    },
+                    Token::CloseTag {
+                        name: "a",
+                        start: 11,
+                        end: 15
+                    },
                 ]
             );
         }
@@ -772,9 +1291,21 @@ mod tests {
             assert_eq!(
                 tokens,
                 vec![
-                    Token::InvalidTag("[123]"),
-                    Token::Text("text"),
-                    Token::InvalidTag("[/123]"),
+                    Token::InvalidTag {
+                        content: "[123]",
+                        start: 0,
+                        end: 5
+                    },
+                    Token::Text {
+                        content: "text",
+                        start: 5,
+                        end: 9
+                    },
+                    Token::InvalidTag {
+                        content: "[/123]",
+                        start: 9,
+                        end: 15
+                    },
                 ]
             );
         }
@@ -785,11 +1316,31 @@ mod tests {
             assert_eq!(
                 tokens,
                 vec![
-                    Token::Text("a"),
-                    Token::OpenTag("b"),
-                    Token::Text("c"),
-                    Token::CloseTag("b"),
-                    Token::Text("d"),
+                    Token::Text {
+                        content: "a",
+                        start: 0,
+                        end: 1
+                    },
+                    Token::OpenTag {
+                        name: "b",
+                        start: 1,
+                        end: 4
+                    },
+                    Token::Text {
+                        content: "c",
+                        start: 4,
+                        end: 5
+                    },
+                    Token::CloseTag {
+                        name: "b",
+                        start: 5,
+                        end: 9
+                    },
+                    Token::Text {
+                        content: "d",
+                        start: 9,
+                        end: 10
+                    },
                 ]
             );
         }
@@ -803,14 +1354,15 @@ mod tests {
         #[test]
         fn plain_text_unchanged() {
             let parser = BBParser::new(test_styles(), TagTransform::Apply);
-            assert_eq!(parser.process("hello world"), "hello world");
+            assert_eq!(parser.parse("hello world"), "hello world");
         }
 
         #[test]
-        fn unknown_tag_shows_indicator() {
+        fn unknown_tag_passthrough_with_marker() {
             let parser = BBParser::new(test_styles(), TagTransform::Apply);
-            let result = parser.process("[unknown]text[/unknown]");
-            assert!(result.starts_with("(!?)"));
+            let result = parser.parse("[unknown]text[/unknown]");
+            assert!(result.contains("[unknown?]"));
+            assert!(result.contains("[/unknown?]"));
             assert!(result.contains("text"));
         }
 
@@ -820,10 +1372,49 @@ mod tests {
             styles.insert("bold".to_string(), Style::new().bold().force_styling(true));
 
             let parser = BBParser::new(styles, TagTransform::Apply);
-            let result = parser.process("[bold]hello[/bold]");
+            let result = parser.parse("[bold]hello[/bold]");
 
-            // Should contain ANSI bold code
             assert!(result.contains("\x1b[1m") || result.contains("hello"));
+        }
+    }
+
+    // ==================== Error Display Tests ====================
+
+    mod error_display {
+        use super::*;
+
+        #[test]
+        fn unknown_tag_error_display() {
+            let error = UnknownTagError {
+                tag: "foo".to_string(),
+                kind: UnknownTagKind::Open,
+                start: 0,
+                end: 5,
+            };
+            let display = format!("{}", error);
+            assert!(display.contains("foo"));
+            assert!(display.contains("opening"));
+            assert!(display.contains("0..5"));
+        }
+
+        #[test]
+        fn unknown_tag_errors_display() {
+            let mut errors = UnknownTagErrors::new();
+            errors.push(UnknownTagError {
+                tag: "foo".to_string(),
+                kind: UnknownTagKind::Open,
+                start: 0,
+                end: 5,
+            });
+            errors.push(UnknownTagError {
+                tag: "foo".to_string(),
+                kind: UnknownTagKind::Close,
+                start: 9,
+                end: 15,
+            });
+
+            let display = format!("{}", errors);
+            assert!(display.contains("2 unknown tag"));
         }
     }
 }
@@ -833,13 +1424,10 @@ mod proptests {
     use super::*;
     use proptest::prelude::*;
 
-    // Strategy for valid tag names using regex
     fn valid_tag_name() -> impl Strategy<Value = String> {
-        // CSS identifier: starts with letter or underscore, followed by alphanumeric, underscore, or hyphen
         "[a-z_][a-z0-9_-]{0,10}"
     }
 
-    // Strategy for plain text (no brackets)
     fn plain_text() -> impl Strategy<Value = String> {
         "[a-zA-Z0-9 .,!?:;'\"]{0,50}"
             .prop_filter("no brackets", |s| !s.contains('[') && !s.contains(']'))
@@ -901,6 +1489,17 @@ mod proptests {
             let result = parser.parse(&input);
 
             prop_assert_eq!(result, content);
+        }
+
+        #[test]
+        fn validate_finds_unknown_tags(tag in valid_tag_name(), content in plain_text()) {
+            let parser = BBParser::new(HashMap::new(), TagTransform::Apply);
+            let input = format!("[{}]{}[/{}]", tag, content, tag);
+            let result = parser.validate(&input);
+
+            prop_assert!(result.is_err());
+            let errors = result.unwrap_err();
+            prop_assert_eq!(errors.len(), 2); // open + close
         }
 
         #[test]
