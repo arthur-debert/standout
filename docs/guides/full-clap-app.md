@@ -4,7 +4,7 @@ This guide walks through building a task manager CLI. The goal: keep your handle
 
 ## What We're Building
 
-`taskr` - a simple task manager with four commands: `add`, `list`, and `complete`.
+`taskr` - a simple task manager with three commands: `add`, `list`, and `complete`.
 
 ## Project Setup
 
@@ -65,11 +65,12 @@ pub struct TodoResult {
 
 ## Define the CLI
 
-Doc comments become help text automatically.
+Doc comments become help text automatically. The `Dispatch` derive generates command routing by convention.
 
 ```rust
 // src/cli.rs
 use clap::{Parser, Subcommand};
+use outstanding_clap::Dispatch;
 
 /// A simple task manager
 #[derive(Parser)]
@@ -79,7 +80,10 @@ pub struct Cli {
     pub command: Commands,
 }
 
-#[derive(Subcommand)]
+/// Maps variants to handlers by naming convention:
+/// Add → handlers::add, List → handlers::list, etc.
+#[derive(Subcommand, Dispatch)]
+#[dispatch(handlers = handlers)]
 pub enum Commands {
     /// Add a new task
     Add {
@@ -95,7 +99,6 @@ pub enum Commands {
         /// Task IDs to complete
         ids: Vec<u32>,
     },
-
 }
 ```
 
@@ -202,20 +205,16 @@ mod storage;
 
 use clap::CommandFactory;
 use outstanding::Theme;
-use outstanding_clap::{dispatch, Outstanding};
+use outstanding_clap::Outstanding;
 
-use crate::cli::Cli;
+use crate::cli::{Cli, Commands};
 
 fn main() {
     let theme = Theme::from_yaml(include_str!("../theme.yaml")).unwrap();
 
     Outstanding::builder()
         .theme(theme)
-        .commands(dispatch! {
-            add => handlers::add,
-            list => handlers::list,
-            complete => handlers::complete,
-        })
+        .commands(Commands::dispatch_config())
         .run_and_print(Cli::command(), std::env::args());
 }
 ```
@@ -262,7 +261,7 @@ $ taskr list --output=json
 3. Structured data output:
     1. YAML, JSON, CSV formats
     1. Useful for integration testing , or piping / feeding into more tools, data exports, etc.
-4. Boilerplate free dispatch
+4. Convention-based dispatch with `#[derive(Dispatch)]`
 5. Keep Clap benefits: rich and declarative cli parser declaration, help text and help.
 
 ---
@@ -272,6 +271,6 @@ $ taskr list --output=json
 1. **One result type** - `TodoResult` with message + data
 2. **Handlers return data** - No formatting, no IO
 3. **One template** - Handles the message + list pattern
-4. **Framework dispatches** - `dispatch!` macro routes commands
+4. **Convention-based dispatch** - `#[derive(Dispatch)]` routes commands by naming convention
 
 That's it. Logic in handlers, presentation in templates, routing handled by Outstanding.
