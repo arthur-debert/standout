@@ -272,3 +272,7 @@ pub use setup::{OutstandingApp, RenderSetup, SetupError};
 // Macro re-exports (when `macros` feature is enabled)
 #[cfg(feature = "macros")]
 pub use outstanding_macros::{embed_styles, embed_templates};
+
+// CLI integration (when `clap` feature is enabled)
+#[cfg(feature = "clap")]
+pub mod cli;

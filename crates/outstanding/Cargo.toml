@@ -24,9 +24,15 @@ unicode-width = "0.2"
 outstanding-bbparser = { version = "1.0.0", path = "../outstanding-bbparser" }
 outstanding-macros = { version = "1.0.0", path = "../outstanding-macros", optional = true }
 
+# Optional dependencies for clap integration (feature = "clap")
+clap = { version = "4", optional = true }
+anyhow = { version = "1", optional = true }
+terminal_size = { version = "0.4", optional = true }
+
 [features]
 default = []
 macros = ["outstanding-macros"]
+clap = ["dep:clap", "dep:anyhow", "dep:terminal_size"]
 
 [dev-dependencies]
 proptest = "1"
