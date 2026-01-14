@@ -8,9 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 - **Added**:
-  - **Tag-based style syntax** - More ergonomic `[name]content[/name]` syntax for applying styles in templates
+  - **Tag-based style syntax** - Ergonomic `[name]content[/name]` syntax for applying styles in templates
     - Two-pass rendering: MiniJinja first, then BBParser style tag processing
-    - Works alongside existing filter syntax: `{{ value | style("name") }}`
     - Output mode support: tags become ANSI codes (Term), stripped (Text), or preserved (TermDebug)
     - Unknown tags show `[tag?]` marker for easy debugging
   - **Template validation** - `validate_template()` function to catch unknown style tags
@@ -22,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - Position tracking for error reporting
     - CSS identifier rules for tag names
 
+- **Removed**:
+  - **`style` filter** - The MiniJinja filter syntax `{{ value | style("name") }}` has been removed
+    - Use tag syntax instead: `[name]{{ value }}[/name]`
+
 - **Example**:
 
   ```rust
@@ -31,8 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       .add("title", Style::new().bold())
       .add("count", Style::new().cyan());
 
-  // Tag syntax for static text, filter for dynamic values
-  let template = r#"[title]Report[/title]: {{ count | style("count") }} items"#;
+  // Tag syntax for all styled content
+  let template = r#"[title]Report[/title]: [count]{{ count }}[/count] items"#;
 
   let output = render_with_output(template, &data, &theme, OutputMode::Term)?;
   ```

@@ -75,8 +75,8 @@ use crate::theme::Theme;
 ///     .add("count", Style::new().cyan());
 ///
 /// let mut renderer = Renderer::new(theme).unwrap();
-/// renderer.add_template("header", r#"{{ title | style("title") }}"#).unwrap();
-/// renderer.add_template("stats", r#"Count: {{ n | style("count") }}"#).unwrap();
+/// renderer.add_template("header", r#"[title]{{ title }}[/title]"#).unwrap();
+/// renderer.add_template("stats", r#"Count: [count]{{ n }}[/count]"#).unwrap();
 ///
 /// #[derive(Serialize)]
 /// struct Header { title: String }
@@ -162,7 +162,7 @@ impl Renderer {
         let styles = theme.resolve_styles(Some(color_mode));
 
         let mut env = Environment::new();
-        register_filters(&mut env, styles.clone(), mode);
+        register_filters(&mut env);
         Ok(Self {
             env,
             registry: TemplateRegistry::new(),
@@ -183,7 +183,7 @@ impl Renderer {
     /// # Example
     ///
     /// ```rust,ignore
-    /// renderer.add_template("header", r#"{{ title | style("title") }}"#)?;
+    /// renderer.add_template("header", r#"[title]{{ title }}[/title]"#)?;
     /// ```
     pub fn add_template(&mut self, name: &str, source: &str) -> Result<(), Error> {
         // Add to minijinja environment for compilation
@@ -477,7 +477,7 @@ mod tests {
         let mut renderer = Renderer::with_output(theme, OutputMode::Text).unwrap();
 
         renderer
-            .add_template("test", r#"{{ message | style("ok") }}"#)
+            .add_template("test", r#"[ok]{{ message }}[/ok]"#)
             .unwrap();
 
         let output = renderer
@@ -513,10 +513,10 @@ mod tests {
 
         let mut renderer = Renderer::with_output(theme, OutputMode::Text).unwrap();
         renderer
-            .add_template("tmpl_a", r#"A: {{ message | style("a") }}"#)
+            .add_template("tmpl_a", r#"A: [a]{{ message }}[/a]"#)
             .unwrap();
         renderer
-            .add_template("tmpl_b", r#"B: {{ message | style("b") }}"#)
+            .add_template("tmpl_b", r#"B: [b]{{ message }}[/b]"#)
             .unwrap();
 
         let data = SimpleData {

@@ -10,8 +10,7 @@
 //!
 //! # Two-Pass Rendering
 //!
-//! Templates support both the traditional filter syntax (`{{ value | style("name") }}`)
-//! and the more ergonomic tag syntax (`[name]content[/name]`).
+//! Templates use tag-based syntax for styling: `[name]content[/name]`
 //!
 //! The rendering process works in two passes:
 //! 1. **MiniJinja pass**: Variable substitution and template logic
@@ -120,7 +119,7 @@ pub fn validate_template<T: Serialize>(
 
     // First render with MiniJinja to get the final output
     let mut env = Environment::new();
-    register_filters(&mut env, styles.clone(), OutputMode::Text);
+    register_filters(&mut env);
 
     env.add_template_owned("_inline".to_string(), template.to_string())?;
 
@@ -159,7 +158,7 @@ pub fn validate_template<T: Serialize>(
 ///
 /// let theme = Theme::new().add("ok", Style::new().green());
 /// let output = render(
-///     r#"{{ message | style("ok") }}"#,
+///     r#"[ok]{{ message }}[/ok]"#,
 ///     &Data { message: "Success!".into() },
 ///     &theme,
 /// ).unwrap();
@@ -178,7 +177,7 @@ pub fn render<T: Serialize>(template: &str, data: &T, theme: &Theme) -> Result<S
 ///
 /// * `template` - A minijinja template string
 /// * `data` - Any serializable data to pass to the template
-/// * `theme` - Theme definitions to use for the `style` filter
+/// * `theme` - Theme definitions to use for styling
 /// * `mode` - Output mode: `Auto`, `Term`, or `Text`
 ///
 /// # Example
@@ -195,7 +194,7 @@ pub fn render<T: Serialize>(template: &str, data: &T, theme: &Theme) -> Result<S
 ///
 /// // Force plain text output
 /// let plain = render_with_output(
-///     r#"{{ status | style("ok") }}"#,
+///     r#"[ok]{{ status }}[/ok]"#,
 ///     &Data { status: "done".into() },
 ///     &theme,
 ///     OutputMode::Text,
@@ -204,7 +203,7 @@ pub fn render<T: Serialize>(template: &str, data: &T, theme: &Theme) -> Result<S
 ///
 /// // Force terminal output (with ANSI codes)
 /// let term = render_with_output(
-///     r#"{{ status | style("ok") }}"#,
+///     r#"[ok]{{ status }}[/ok]"#,
 ///     &Data { status: "done".into() },
 ///     &theme,
 ///     OutputMode::Term,
@@ -255,7 +254,7 @@ pub fn render_with_output<T: Serialize>(
 ///
 /// // Force dark mode rendering
 /// let dark = render_with_mode(
-///     r#"{{ status | style("panel") }}"#,
+///     r#"[panel]{{ status }}[/panel]"#,
 ///     &Data { status: "test".into() },
 ///     &theme,
 ///     OutputMode::Term,
@@ -264,7 +263,7 @@ pub fn render_with_output<T: Serialize>(
 ///
 /// // Force light mode rendering
 /// let light = render_with_mode(
-///     r#"{{ status | style("panel") }}"#,
+///     r#"[panel]{{ status }}[/panel]"#,
 ///     &Data { status: "test".into() },
 ///     &theme,
 ///     OutputMode::Term,
@@ -287,7 +286,7 @@ pub fn render_with_mode<T: Serialize>(
     let styles = theme.resolve_styles(Some(color_mode));
 
     let mut env = Environment::new();
-    register_filters(&mut env, styles.clone(), output_mode);
+    register_filters(&mut env);
 
     env.add_template_owned("_inline".to_string(), template.to_string())?;
     let tmpl = env.get_template("_inline")?;
@@ -329,7 +328,7 @@ pub fn render_with_mode<T: Serialize>(
 ///
 /// // Terminal output uses the template
 /// let term = render_or_serialize(
-///     r#"{{ title | style("title") }}: {{ count }}"#,
+///     r#"[title]{{ title }}[/title]: {{ count }}"#,
 ///     &data,
 ///     &theme,
 ///     OutputMode::Text,
@@ -338,7 +337,7 @@ pub fn render_with_mode<T: Serialize>(
 ///
 /// // JSON output serializes directly
 /// let json = render_or_serialize(
-///     r#"{{ title | style("title") }}: {{ count }}"#,
+///     r#"[title]{{ title }}[/title]: {{ count }}"#,
 ///     &data,
 ///     &theme,
 ///     OutputMode::Json,
@@ -538,7 +537,7 @@ pub fn render_with_context<T: Serialize>(
         .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string()))?;
 
     let mut env = Environment::new();
-    register_filters(&mut env, styles.clone(), mode);
+    register_filters(&mut env);
 
     env.add_template_owned("_inline".to_string(), template.to_string())?;
     let tmpl = env.get_template("_inline")?;
@@ -736,7 +735,7 @@ mod tests {
         };
 
         let output = render_with_output(
-            r#"{{ message | style("red") }}"#,
+            r#"[red]{{ message }}[/red]"#,
             &data,
             &theme,
             OutputMode::Text,
@@ -755,7 +754,7 @@ mod tests {
         };
 
         let output = render_with_output(
-            r#"{{ message | style("green") }}"#,
+            r#"[green]{{ message }}[/green]"#,
             &data,
             &theme,
             OutputMode::Term,
@@ -774,32 +773,34 @@ mod tests {
         };
 
         let output = render_with_output(
-            r#"{{ message | style("unknown") }}"#,
+            r#"[unknown]{{ message }}[/unknown]"#,
             &data,
             &theme,
             OutputMode::Term,
         )
         .unwrap();
 
-        assert_eq!(output, "(!?) hello");
+        // Unknown tags in passthrough mode get ? marker on both open and close tags
+        assert_eq!(output, "[unknown?]hello[/unknown?]");
     }
 
     #[test]
-    fn test_render_unknown_style_shows_indicator_no_color() {
+    fn test_render_unknown_style_stripped_in_text_mode() {
         let theme = Theme::new();
         let data = SimpleData {
             message: "hello".into(),
         };
 
         let output = render_with_output(
-            r#"{{ message | style("unknown") }}"#,
+            r#"[unknown]{{ message }}[/unknown]"#,
             &data,
             &theme,
             OutputMode::Text,
         )
         .unwrap();
 
-        assert_eq!(output, "(!?) hello");
+        // In text mode (Remove), unknown tags are stripped like known tags
+        assert_eq!(output, "hello");
     }
 
     #[test]
@@ -810,7 +811,7 @@ mod tests {
             count: 2,
         };
 
-        let template = r#"{% for item in items %}{{ item | style("item") }}
+        let template = r#"{% for item in items %}[item]{{ item }}[/item]
 {% endfor %}"#;
 
         let output = render_with_output(template, &data, &theme, OutputMode::Text).unwrap();
@@ -825,7 +826,7 @@ mod tests {
             count: 42,
         };
 
-        let template = r#"Total: {{ count | style("count") }} items"#;
+        let template = r#"Total: [count]{{ count }}[/count] items"#;
         let output = render_with_output(template, &data, &theme, OutputMode::Text).unwrap();
 
         assert_eq!(output, "Total: 42 items");
@@ -839,7 +840,7 @@ mod tests {
         struct Empty {}
 
         let output = render_with_output(
-            r#"{{ "Header" | style("header") }}"#,
+            r#"[header]Header[/header]"#,
             &Empty {},
             &theme,
             OutputMode::Text,
@@ -872,7 +873,7 @@ mod tests {
     }
 
     #[test]
-    fn test_style_filter_with_nested_data() {
+    fn test_style_tag_with_nested_data() {
         #[derive(Serialize)]
         struct Item {
             name: String,
@@ -898,7 +899,7 @@ mod tests {
             ],
         };
 
-        let template = r#"{% for item in items %}{{ item.name | style("name") }}={{ item.value }}
+        let template = r#"{% for item in items %}[name]{{ item.name }}[/name]={{ item.value }}
 {% endfor %}"#;
 
         let output = render_with_output(template, &data, &theme, OutputMode::Text).unwrap();
@@ -923,7 +924,7 @@ mod tests {
         };
 
         let output = render_with_output(
-            r#"{{ name | style("title") }}: {{ value | style("count") }}"#,
+            r#"[title]{{ name }}[/title]: [count]{{ value }}[/count]"#,
             &data,
             &theme,
             OutputMode::TermDebug,
@@ -934,7 +935,7 @@ mod tests {
     }
 
     #[test]
-    fn test_render_with_output_term_debug_missing_style() {
+    fn test_render_with_output_term_debug_preserves_tags() {
         let theme = Theme::new().add("known", Style::new().bold());
 
         #[derive(Serialize)]
@@ -946,18 +947,20 @@ mod tests {
             message: "hello".into(),
         };
 
+        // In TermDebug (Keep mode), unknown tags are preserved as-is
         let output = render_with_output(
-            r#"{{ message | style("unknown") }}"#,
+            r#"[unknown]{{ message }}[/unknown]"#,
             &data,
             &theme,
             OutputMode::TermDebug,
         )
         .unwrap();
 
-        assert_eq!(output, "(!?) hello");
+        assert_eq!(output, "[unknown]hello[/unknown]");
 
+        // Known tags are also preserved as-is in debug mode
         let output = render_with_output(
-            r#"{{ message | style("known") }}"#,
+            r#"[known]{{ message }}[/known]"#,
             &data,
             &theme,
             OutputMode::TermDebug,
@@ -1002,7 +1005,7 @@ mod tests {
         let data = json!({"name": "test"});
 
         let output = render_or_serialize(
-            r#"{{ name | style("bold") }}"#,
+            r#"[bold]{{ name }}[/bold]"#,
             &data,
             &theme,
             OutputMode::Term,
@@ -1041,7 +1044,7 @@ mod tests {
             .add("alias", "base");
 
         let output = render_with_output(
-            r#"{{ "text" | style("alias") }}"#,
+            r#"[alias]text[/alias]"#,
             &serde_json::json!({}),
             &theme,
             OutputMode::Text,
@@ -1059,7 +1062,7 @@ mod tests {
             .add("timestamp", "disabled");
 
         let output = render_with_output(
-            r#"{{ "12:00" | style("timestamp") }}"#,
+            r#"[timestamp]12:00[/timestamp]"#,
             &serde_json::json!({}),
             &theme,
             OutputMode::Text,
@@ -1074,7 +1077,7 @@ mod tests {
         let theme = Theme::new().add("orphan", "missing");
 
         let result = render_with_output(
-            r#"{{ "text" | style("orphan") }}"#,
+            r#"[orphan]text[/orphan]"#,
             &serde_json::json!({}),
             &theme,
             OutputMode::Text,
@@ -1091,7 +1094,7 @@ mod tests {
         let theme = Theme::new().add("a", "b").add("b", "a");
 
         let result = render_with_output(
-            r#"{{ "text" | style("a") }}"#,
+            r#"[a]text[/a]"#,
             &serde_json::json!({}),
             &theme,
             OutputMode::Text,
@@ -1117,7 +1120,7 @@ mod tests {
         assert!(theme.validate().is_ok());
 
         let output = render_with_output(
-            r#"{{ time | style("timestamp") }} - {{ name | style("title") }}"#,
+            r#"[timestamp]{{ time }}[/timestamp] - [title]{{ name }}[/title]"#,
             &serde_json::json!({"time": "12:00", "name": "Report"}),
             &theme,
             OutputMode::Text,
@@ -1505,7 +1508,7 @@ mod tests {
 
         // Force dark mode
         let dark_output = render_with_mode(
-            r#"{{ status | style("status") }}"#,
+            r#"[status]{{ status }}[/status]"#,
             &data,
             &theme,
             OutputMode::Term,
@@ -1515,7 +1518,7 @@ mod tests {
 
         // Force light mode
         let light_output = render_with_mode(
-            r#"{{ status | style("status") }}"#,
+            r#"[status]{{ status }}[/status]"#,
             &data,
             &theme,
             OutputMode::Term,
@@ -1682,7 +1685,7 @@ mod tests {
     }
 
     #[test]
-    fn test_tag_syntax_mixed_with_filter() {
+    fn test_tag_syntax_multiple_styles() {
         let theme = Theme::new()
             .add("title", Style::new().bold())
             .add("count", Style::new().cyan());
@@ -1694,7 +1697,7 @@ mod tests {
         }
 
         let output = render_with_output(
-            r#"[title]{{ name }}[/title]: {{ num | style("count") }}"#,
+            r#"[title]{{ name }}[/title]: [count]{{ num }}[/count]"#,
             &Data {
                 name: "Items".into(),
                 num: 42,
@@ -1704,7 +1707,6 @@ mod tests {
         )
         .unwrap();
 
-        // Both syntaxes should work
         assert_eq!(output, "Items: 42");
     }
 

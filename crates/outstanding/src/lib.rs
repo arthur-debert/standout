@@ -19,9 +19,7 @@
 //! - [`ColorMode`]: Light or dark color mode enum
 //! - [`OutputMode`]: Control output formatting (Auto/Term/Text/TermDebug)
 //! - [`topics`]: Help topics system for extended documentation
-//! - **Style syntax**: Two ways to apply styles in templates:
-//!   - Filter: `{{ value | style("name") }}` for dynamic values
-//!   - Tags: `[name]content[/name]` for static text (more readable)
+//! - **Style syntax**: Tag-based styling `[name]content[/name]`
 //! - [`Renderer`]: Pre-compile templates for repeated rendering
 //! - [`validate_template`]: Check templates for unknown style tags
 //!
@@ -43,9 +41,9 @@
 //!     .add("count", Style::new().cyan());
 //!
 //! let template = r#"
-//! {{ title | style("title") }}
+//! [title]{{ title }}[/title]
 //! ---------------------------
-//! Total items: {{ total | style("count") }}
+//! Total items: [count]{{ total }}[/count]
 //! "#;
 //!
 //! let output = render(
@@ -58,8 +56,7 @@
 //!
 //! ## Tag-Based Styling
 //!
-//! For static text, the tag syntax `[name]content[/name]` is often more readable
-//! than the filter syntax. Both can be used in the same template:
+//! Use tag syntax `[name]content[/name]` for styling both static and dynamic content:
 //!
 //! ```rust
 //! use outstanding::{render_with_output, Theme, OutputMode};
@@ -73,8 +70,7 @@
 //!     .add("title", Style::new().bold())
 //!     .add("count", Style::new().cyan());
 //!
-//! // Mix tag and filter syntax
-//! let template = r#"[title]Report[/title]: {{ count | style("count") }} items by {{ name }}"#;
+//! let template = r#"[title]Report[/title]: [count]{{ count }}[/count] items by {{ name }}"#;
 //!
 //! let output = render_with_output(
 //!     template,
@@ -111,7 +107,7 @@
 //!
 //! // Rendering automatically detects OS color mode
 //! let output = outstanding::render(
-//!     r#"{{ "active" | style("panel") }}"#,
+//!     r#"[panel]active[/panel]"#,
 //!     &serde_json::json!({}),
 //!     &theme,
 //! ).unwrap();
@@ -142,9 +138,10 @@
 //! ## Rendering Strategy
 //!
 //! 1. Build a [`Theme`] using the fluent builder API or YAML.
-//! 2. Load/define templates using regular MiniJinja syntax (`{{ value }}`, `{% for %}`, etc.).
+//! 2. Load/define templates using regular MiniJinja syntax (`{{ value }}`, `{% for %}`, etc.)
+//!    with tag-based styling (`[name]content[/name]`).
 //! 3. Call [`render`] for ad-hoc rendering or create a [`Renderer`] if you have many templates.
-//! 4. Outstanding injects the `style` filter, auto-detects colors, and returns the final string.
+//! 4. Outstanding processes style tags, auto-detects colors, and returns the final string.
 //!
 //! Everything from the theme inward is pure Rust data: no code outside Outstanding needs
 //! to touch stdout/stderr or ANSI escape sequences directly.
@@ -164,7 +161,7 @@
 //!     .add("value", Style::new().green());
 //!
 //! let mut renderer = Renderer::new(theme).unwrap();
-//! renderer.add_template("row", "{{ label | style(\"label\") }}: {{ value | style(\"value\") }}").unwrap();
+//! renderer.add_template("row", "[label]{{ label }}[/label]: [value]{{ value }}[/value]").unwrap();
 //! let rendered = renderer.render("row", &Entry { label: "Count".into(), value: 42 }).unwrap();
 //! assert_eq!(rendered, "Count: 42");
 //! ```
