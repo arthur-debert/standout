@@ -10,8 +10,8 @@
 //! - **Help topics system** for extended documentation
 //! - **Pager support** for long content
 //!
-//! This crate is **CLI-agnostic** - it doesn't care how you parse arguments.
-//! For easy integration with clap, see the `outstanding-clap` crate.
+//! This crate is **CLI-agnostic** at its core - it doesn't care how you parse arguments.
+//! For clap integration, enable the `clap` feature and see the `cli` module.
 //!
 //! ## Core Concepts
 //!
@@ -194,17 +194,26 @@
 //!
 //! ## Integration with Clap
 //!
-//! For clap-based CLIs, use the `outstanding-clap` crate which handles:
+//! The `cli` module (requires `clap` feature) provides full clap integration with:
+//! - Command dispatch with automatic template rendering
 //! - Help command interception (`help`, `help <topic>`, `help topics`)
-//! - Output flag injection (`--output=auto|term|text`)
+//! - Output flag injection (`--output=auto|term|text|json`)
 //! - Styled help rendering
 //!
 //! ```rust,ignore
 //! use clap::Command;
-//! use outstanding_clap::Outstanding;
+//! use outstanding::cli::{App, HandlerResult, Output};
 //!
-//! // Simplest usage - all features enabled by default
-//! let matches = Outstanding::run(Command::new("my-app"));
+//! // Simple parsing with styled help
+//! let matches = App::parse(Command::new("my-app"));
+//!
+//! // Full application with command dispatch
+//! App::builder()
+//!     .command("list", |_m, _ctx| {
+//!         Ok(Output::Render(json!({"items": ["a", "b"]})))
+//!     }, "{% for item in items %}{{ item }}\n{% endfor %}")
+//!     .build()?
+//!     .run(cmd, std::env::args());
 //! ```
 
 // Internal modules
@@ -238,9 +247,9 @@ pub use output::{write_binary_output, write_output, OutputDestination, OutputMod
 // Render module exports
 pub use render::{
     render,
-    render_or_serialize,
-    render_or_serialize_with_context,
-    render_or_serialize_with_spec,
+    render_auto,
+    render_auto_with_context,
+    render_auto_with_spec,
     render_with_context,
     render_with_mode,
     render_with_output,
@@ -266,9 +275,13 @@ pub use embedded::{
     EmbeddedSource, EmbeddedStyles, EmbeddedTemplates, StylesheetResource, TemplateResource,
 };
 
-// Setup builder (unified API)
-pub use setup::{OutstandingApp, RenderSetup, SetupError};
+// Setup error type
+pub use setup::SetupError;
 
 // Macro re-exports (when `macros` feature is enabled)
 #[cfg(feature = "macros")]
 pub use outstanding_macros::{embed_styles, embed_templates};
+
+// CLI integration (when `clap` feature is enabled)
+#[cfg(feature = "clap")]
+pub mod cli;

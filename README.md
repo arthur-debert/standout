@@ -1,124 +1,118 @@
-# outstanding
+# Outstanding
 
-Outstanding is a non-interactive CLI output framework that decouples your application logic from terminal presentation.
+**Create Outstanding Shell Applications in Rust.**
+
+Outstanding is a library for building finely crafted, non-interactive command line applications. It enforces a clean separation between your application logic and its presentation, ensuring your CLI remains testable and maintainable as it grows.
+
+## The Problem
+
+If you're building a CLI in Rust, your time should be spent on core logic, not fiddling with `print!` statements and ANSI escape codes.
+
+As applications grow, mixing logic with output formatting leads to:
+- **Untestable Code**: You can't unit test logic that writes directly to stdout.
+- **Fragile Integration Tests**: Parsing text output to verify correctness is brittle.
+- **Inconsistent UX**: Styling inconsistencies creep in over time.
+
+## The Solution
+
+Outstanding handles the boilerplate between your `clap` definition and your terminal output.
+
+1.  **Define Logic**: Write pure functions that receive arguments and return data.
+2.  **Define Presentation**: Use templates (MiniJinja) and styles (YAML) to control appearance.
+3.  **Let Framework Handle the Rest**: Outstanding runs the pipeline, applying themes, formatting tables, or serializing to JSON/YAML based on flags.
 
 ## Features
 
-- **Template rendering** with MiniJinja + styled output
-- **Themes** for named style definitions (colors, bold, etc.)
-- **Automatic terminal capability detection** (TTY, CLICOLOR, etc.)
-- **Output mode control** (Auto/Term/Text/TermDebug)
-- **Help topics system** for extended documentation
-- **Pager support** for long content
-
-This crate is **CLI-agnostic** - it doesn't care how you parse arguments.
-For easy integration with clap, see the `outstanding-clap` crate.
-
-## Installation
-
-```toml
-[dependencies]
-outstanding = "0.3"
-
-# For clap integration:
-outstanding-clap = "0.3"
-```
+- **Application Life Cicle**:
+    -   **Formal Logic/Presentation Split**: Decouples your Rust code from terminal formatting.
+    - **End to end handling**: from clap arg parsing, to running the logic handlers and finally rendering it's results with rich output.
+    - **Declarative API** for annotating your functions.
+    - **Auto Dispatch** from cli input to the execution life cicle
+- **Rendering Layer**:
+    -   **File-Based Templates**: Uses [MiniJinja](https://github.com/mitsuhiko/minijinja) for powerful templating, including partials for reuse. See [Rendering System](docs/guides/rendering-system.md).
+    -   **Rich Styling**: Integrates stylesheets with semantic tagging (e.g., `[title]{{ post.title }}[/title]`) for maintainable designs.
+    -   **Adaptive Themes**: Supports [light/dark modes](docs/guides/rendering-system.md#adaptive-styles) and switchable themes automatically.
+    -   **Live Reloading**: Edit templates and styles while your app runs [during development](docs/guides/rendering-system.md#hot-reloading) for rapid iteration.
+    -   **Smart Output**: Delivers [rich terminal output](docs/guides/output-modes.md) that gracefully degrades to plain text based on capabilities.
+    -   **Automatic Structured Data**: Get JSON, CSV, and YAML output for free by leveraging your pure data structures. See [Structured Modes](docs/guides/output-modes.md#structured-modes).
 
 ## Quick Start
 
-```rust
-use outstanding::{render, Theme, ThemeChoice};
-use console::Style;
-use serde::Serialize;
+### 1. The Logic
+Write a handler that takes `ArgMatches` and returns serializable data.
 
+```rust
 #[derive(Serialize)]
-struct Summary {
-    title: String,
-    total: usize,
+struct TodoResult {
+    todos: Vec<Todo>,
 }
 
-let theme = Theme::new()
-    .add("title", Style::new().bold())
-    .add("count", Style::new().cyan());
-
-let template = r#"
-[title]{{ title }}[/title]
----------------------------
-Total items: [count]{{ total }}[/count]
-"#;
-
-let output = render(
-    template,
-    &Summary { title: "Report".into(), total: 3 },
-    ThemeChoice::from(&theme),
-).unwrap();
-println!("{}", output);
-```
-
-## Output Modes
-
-Control how output is rendered with `OutputMode`:
-
-- `Auto` - Detect terminal capabilities (default)
-- `Term` - Always use ANSI colors/styles
-- `Text` - Plain text, no ANSI codes
-- `TermDebug` - Render styles as `[name]text[/name]` for debugging
-
-```rust
-use outstanding::{render_with_output, OutputMode};
-
-let output = render_with_output(template, &data, theme, OutputMode::Text).unwrap();
-```
-
-## Help Topics
-
-The topics module provides extended documentation for CLI apps:
-
-```rust
-use outstanding::topics::{Topic, TopicRegistry, TopicType, render_topic};
-
-let mut registry = TopicRegistry::new();
-registry.add_topic(Topic::new(
-    "Storage",
-    "Notes are stored in ~/.notes/",
-    TopicType::Text,
-    Some("storage".to_string()),
-));
-
-// Load topics from files
-registry.add_from_directory_if_exists("docs/topics").ok();
-
-// Render a topic
-if let Some(topic) = registry.get_topic("storage") {
-    let output = render_topic(topic, None).unwrap();
-    println!("{}", output);
+fn list_handler(_m: &ArgMatches, _ctx: &CommandContext) -> HandlerResult<TodoResult> {
+    let todos = storage::list()?;
+    Ok(Output::Render(TodoResult { todos }))
 }
 ```
 
-## Clap Integration
+### 2. The Presentation
+Write a template (`list.jinja`) with semantic style tags.
 
-For clap-based CLIs, use `outstanding-clap`:
-
-```rust
-use clap::Command;
-use outstanding_clap::Outstanding;
-
-// Simplest usage - all features enabled
-let matches = Outstanding::run(Command::new("my-app"));
-
-// With topics
-let matches = Outstanding::builder()
-    .topics_dir("docs/topics")
-    .run(Command::new("my-app"));
+```jinja
+[title]My Todos[/title]
+{% for todo in todos %}
+  - {{ todo.title }} ([status]{{ todo.status }}[/status])
+{% endfor %}
 ```
 
-See the [outstanding-clap README](crates/outstanding-clap/README.md) for more details.
+### 3. The Setup
+Wire it up in your `main.rs`.
+
+```rust
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let app = App::builder()
+        .command("list", list_handler, "list.jinja")
+        .templates(embed_templates!("src/templates"))
+        .styles(embed_styles!("src/styles"))
+        .build()?;
+
+    app.run(Cli::command(), std::env::args());
+    Ok(())
+}
+```
+
+## Installation
+
+Add `outstanding` to your `Cargo.toml`:
+
+```bash
+cargo add outstanding
+```
+
+Ensure you have `outstanding-macros` if you want to use the embedding features.
 
 ## Documentation
 
-- [Styling Guide](docs/styling.md) - Themes, style aliasing, adaptive themes, output modes
-- [Templates Guide](docs/templates.md) - MiniJinja syntax, filters, data structures
+Learn more about building with Outstanding:
+
+-   **Guides**
+    -   [App Configuration](docs/guides/app-configuration.md)
+    -   [Execution Model](docs/guides/execution-model.md)
+    -   [Handler Contract](docs/guides/handler-contract.md)
+    -   [Rendering System](docs/guides/rendering-system.md)
+    -   [Output Modes](docs/guides/output-modes.md)
+    -   [Topics System](docs/guides/topics-system.md)
+
+-   **How-Tos**
+    -   [Partial Adoption](docs/howtos/partial-adoption.md)
+    -   [Format Tables](docs/howtos/tables.md)
+    -   [Render Only](docs/howtos/render-only.md)
+
+## Contributing
+
+Contributions are very welcome , be it a feature request, a question and even feedback.
+Use the issue tracker to report bugs and feature requests.
+
+For code contributions, the standar practices apply : tests for changed code, passing test suite, Pull Request with code and motivation.
 
 ## License
 
-MIT
+MIT 

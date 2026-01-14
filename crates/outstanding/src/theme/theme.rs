@@ -414,15 +414,6 @@ impl Theme {
         styles
     }
 
-    /// Returns the underlying styles for the default mode (no override).
-    ///
-    /// This is provided for backward compatibility. Prefer using
-    /// [`resolve_styles`](Self::resolve_styles) with an explicit mode.
-    #[deprecated(since = "0.8.0", note = "Use resolve_styles(mode) instead")]
-    pub fn styles(&self) -> Styles {
-        self.resolve_styles(None)
-    }
-
     /// Validates that all style aliases in this theme resolve correctly.
     ///
     /// This is called automatically at render time, but can be called
