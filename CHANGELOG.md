@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-01-14
+
 ## [1.0.0] - 2026-01-13
 
 ### 🚀 First Stable Release
@@ -281,6 +283,7 @@ let output = render_with_output(template, &data, &theme, OutputMode::Term)?;
   - Archive variant support in clap integration
 
 [Unreleased]: https://github.com/arthur-debert/outstanding-rs/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/arthur-debert/outstanding-rs/compare/v0.15.0...v1.0.0
 [1.0.0]: https://github.com/arthur-debert/outstanding-rs/compare/v0.14.0...v1.0.0
 [0.14.0]: https://github.com/arthur-debert/outstanding-rs/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/arthur-debert/outstanding-rs/compare/v0.12.0...v0.13.0
