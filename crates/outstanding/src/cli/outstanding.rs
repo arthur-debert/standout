@@ -4,12 +4,13 @@
 //! outstanding with clap-based CLIs.
 
 use crate::context::{ContextProvider, ContextRegistry, RenderContext};
+use crate::render::TemplateRegistry;
 use crate::topics::{
     display_with_pager, render_topic, render_topics_list, Topic, TopicRegistry, TopicRenderConfig,
 };
 use crate::{
     render_or_serialize, render_or_serialize_with_context, write_binary_output, write_output,
-    EmbeddedStyles, OutputDestination, OutputMode, Theme,
+    EmbeddedStyles, EmbeddedTemplates, OutputDestination, OutputMode, Theme,
 };
 use clap::{Arg, ArgAction, ArgMatches, Command};
 use minijinja::Value;
@@ -497,6 +498,7 @@ pub struct OutstandingBuilder {
     output_file_flag: Option<String>,
     theme: Option<Theme>,
     embedded_styles: Option<EmbeddedStyles>,
+    embedded_templates: Option<EmbeddedTemplates>,
     default_theme_name: Option<String>,
     commands: HashMap<String, DispatchFn>,
     command_hooks: HashMap<String, Hooks>,
@@ -522,6 +524,7 @@ impl OutstandingBuilder {
             output_file_flag: Some("output-file-path".to_string()),
             theme: None,
             embedded_styles: None,
+            embedded_templates: None,
             default_theme_name: None,
             commands: HashMap::new(),
             command_hooks: HashMap::new(),
@@ -620,6 +623,29 @@ impl OutstandingBuilder {
     /// Sets a custom theme for help rendering.
     pub fn theme(mut self, theme: Theme) -> Self {
         self.theme = Some(theme);
+        self
+    }
+
+    /// Sets embedded templates from `embed_templates!` macro.
+    ///
+    /// Use this to load templates from embedded sources. In debug mode,
+    /// if the source path exists, templates are loaded from disk for hot-reload.
+    /// In release mode, embedded content is used.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use outstanding::{embed_templates, cli::Outstanding};
+    ///
+    /// Outstanding::builder()
+    ///     .templates(embed_templates!("src/templates"))
+    ///     .styles(embed_styles!("src/styles"))
+    ///     .default_theme("default")
+    ///     .commands(Commands::dispatch_config())
+    ///     .run_and_print(cmd, args);
+    /// ```
+    pub fn templates(mut self, templates: EmbeddedTemplates) -> Self {
+        self.embedded_templates = Some(templates);
         self
     }
 
