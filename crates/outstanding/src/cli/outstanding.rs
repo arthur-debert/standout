@@ -5,6 +5,7 @@
 
 use crate::context::{ContextProvider, ContextRegistry, RenderContext};
 use crate::render::TemplateRegistry;
+use crate::setup::SetupError;
 use crate::topics::{
     display_with_pager, render_topic, render_topics_list, Topic, TopicRegistry, TopicRenderConfig,
 };
@@ -1457,19 +1458,34 @@ impl OutstandingBuilder {
 
     /// Builds the Outstanding instance.
     ///
-    /// The built instance includes registered hooks for use with `run_command()`.
-    pub fn build(self) -> Outstanding {
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - A `default_theme()` was specified but the theme wasn't found in the stylesheet registry
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let outstanding = Outstanding::builder()
+    ///     .styles(embed_styles!("src/styles"))
+    ///     .default_theme("dark")
+    ///     .build()?;
+    /// ```
+    pub fn build(self) -> Result<Outstanding, SetupError> {
         // Resolve theme: explicit theme takes precedence, then stylesheet registry
         let theme = if let Some(theme) = self.theme {
             Some(theme)
         } else if let Some(mut registry) = self.stylesheet_registry {
             let theme_name = self.default_theme_name.as_deref().unwrap_or("default");
-            registry.get(theme_name).ok()
+            let theme = registry
+                .get(theme_name)
+                .map_err(|_| SetupError::ThemeNotFound(theme_name.to_string()))?;
+            Some(theme)
         } else {
             None
         };
 
-        Outstanding {
+        Ok(Outstanding {
             registry: self.registry,
             output_flag: self.output_flag,
             output_file_flag: self.output_file_flag,
@@ -1477,12 +1493,19 @@ impl OutstandingBuilder {
             theme,
             command_hooks: self.command_hooks,
             template_registry: self.template_registry,
-        }
+        })
     }
 
     /// Builds and runs the CLI in one step.
+    ///
+    /// # Panics
+    ///
+    /// Panics if building fails (e.g., theme not found). For proper error handling,
+    /// use `build()` followed by `run_with()` instead.
     pub fn run(self, cmd: Command) -> clap::ArgMatches {
-        self.build().run_with(cmd)
+        self.build()
+            .expect("Failed to build Outstanding")
+            .run_with(cmd)
     }
 }
 
@@ -1516,20 +1539,23 @@ mod tests {
 
     #[test]
     fn test_builder_output_flag_enabled_by_default() {
-        let outstanding = Outstanding::builder().build();
+        let outstanding = Outstanding::builder().build().unwrap();
         assert!(outstanding.output_flag.is_some());
         assert_eq!(outstanding.output_flag.as_deref(), Some("output"));
     }
 
     #[test]
     fn test_no_output_flag() {
-        let outstanding = Outstanding::builder().no_output_flag().build();
+        let outstanding = Outstanding::builder().no_output_flag().build().unwrap();
         assert!(outstanding.output_flag.is_none());
     }
 
     #[test]
     fn test_custom_output_flag_name() {
-        let outstanding = Outstanding::builder().output_flag(Some("format")).build();
+        let outstanding = Outstanding::builder()
+            .output_flag(Some("format"))
+            .build()
+            .unwrap();
         assert_eq!(outstanding.output_flag.as_deref(), Some("format"));
     }
 
@@ -1994,7 +2020,8 @@ mod tests {
 
         let outstanding = Outstanding::builder()
             .hooks("list", Hooks::new().pre_dispatch(|_, _| Ok(())))
-            .build();
+            .build()
+            .unwrap();
 
         assert!(outstanding.get_hooks("list").is_some());
         assert!(outstanding.get_hooks("other").is_none());
@@ -2021,7 +2048,8 @@ mod tests {
                     }
                 }),
             )
-            .build();
+            .build()
+            .unwrap();
 
         let cmd = Command::new("app").subcommand(Command::new("test"));
         let matches = cmd.try_get_matches_from(["app", "test"]).unwrap();
@@ -2048,7 +2076,8 @@ mod tests {
                 "test",
                 Hooks::new().pre_dispatch(|_, _ctx| Err(HookError::pre_dispatch("access denied"))),
             )
-            .build();
+            .build()
+            .unwrap();
 
         let cmd = Command::new("app").subcommand(Command::new("test"));
         let matches = cmd.try_get_matches_from(["app", "test"]).unwrap();
@@ -2076,7 +2105,7 @@ mod tests {
             msg: String,
         }
 
-        let outstanding = Outstanding::builder().build();
+        let outstanding = Outstanding::builder().build().unwrap();
 
         let cmd = Command::new("app").subcommand(Command::new("test"));
         let matches = cmd.try_get_matches_from(["app", "test"]).unwrap();
@@ -2099,7 +2128,7 @@ mod tests {
 
     #[test]
     fn test_run_command_silent() {
-        let outstanding = Outstanding::builder().build();
+        let outstanding = Outstanding::builder().build().unwrap();
 
         let cmd = Command::new("app").subcommand(Command::new("test"));
         let matches = cmd.try_get_matches_from(["app", "test"]).unwrap();
@@ -2129,7 +2158,8 @@ mod tests {
                     Ok(output)
                 }),
             )
-            .build();
+            .build()
+            .unwrap();
 
         let cmd = Command::new("app").subcommand(Command::new("export"));
         let matches = cmd.try_get_matches_from(["app", "export"]).unwrap();
@@ -2329,7 +2359,8 @@ mod tests {
                     Ok(data)
                 }),
             )
-            .build();
+            .build()
+            .unwrap();
 
         let cmd = Command::new("app").subcommand(Command::new("test"));
         let matches = cmd.try_get_matches_from(["app", "test"]).unwrap();
@@ -2367,7 +2398,8 @@ mod tests {
                     Ok(data)
                 }),
             )
-            .build();
+            .build()
+            .unwrap();
 
         let cmd = Command::new("app").subcommand(Command::new("test"));
         let matches = cmd.try_get_matches_from(["app", "test"]).unwrap();

@@ -68,6 +68,9 @@ pub use hooks::{HookError, HookPhase, Hooks, Output};
 // Re-export derive macros from outstanding-macros
 pub use outstanding_macros::Dispatch;
 
+// Re-export error types
+pub use crate::setup::SetupError;
+
 /// Runs a clap command with styled help output.
 ///
 /// This is the simplest entry point for basic CLIs without topics.
