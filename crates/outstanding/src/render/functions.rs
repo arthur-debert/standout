@@ -1,12 +1,36 @@
 //! Core rendering functions.
 //!
-//! This module provides the main rendering entry points:
+//! # Function Hierarchy
 //!
-//! - [`render`]: Simple rendering with automatic color detection
-//! - [`render_with_output`]: Rendering with explicit output mode
-//! - [`render_with_mode`]: Rendering with explicit output mode and color mode
-//! - [`render_with_context`]: Rendering with injected context objects
-//! - [`render_or_serialize`]: Render or serialize to JSON based on mode
+//! The render functions form a layered hierarchy, from simple to fully explicit:
+//!
+//! ## Basic Rendering (template → styled string)
+//!
+//! | Function | Output Mode | Color Mode | Use When |
+//! |----------|-------------|------------|----------|
+//! | [`render`] | Auto-detect | Auto-detect | Simple cases, let Outstanding decide |
+//! | [`render_with_output`] | Explicit | Auto-detect | Honoring `--output` CLI flag |
+//! | [`render_with_mode`] | Explicit | Explicit | Tests, or forcing light/dark mode |
+//!
+//! ## Render OR Serialize (auto-dispatch based on mode)
+//!
+//! For structured modes (Json, Yaml, Csv, Xml), these skip templating and
+//! serialize data directly. For text modes, they render the template.
+//!
+//! | Function | Extra Features |
+//! |----------|----------------|
+//! | [`render_or_serialize`] | Basic auto-dispatch |
+//! | [`render_or_serialize_with_spec`] | CSV column specification |
+//! | [`render_or_serialize_with_context`] | Context injection |
+//!
+//! ## With Context Injection
+//!
+//! Inject additional values (beyond handler data) into templates:
+//!
+//! | Function | Structured Output |
+//! |----------|-------------------|
+//! | [`render_with_context`] | No (template only) |
+//! | [`render_or_serialize_with_context`] | Yes (auto-dispatch) |
 //!
 //! # Two-Pass Rendering
 //!
