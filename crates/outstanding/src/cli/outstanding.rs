@@ -41,6 +41,8 @@ pub struct Outstanding {
     pub(crate) output_mode: OutputMode,
     pub(crate) theme: Option<Theme>,
     pub(crate) command_hooks: HashMap<String, Hooks>,
+    /// Template registry for embedded templates (None means use file-based resolution)
+    pub(crate) template_registry: Option<TemplateRegistry>,
 }
 
 impl Outstanding {
@@ -59,6 +61,7 @@ impl Outstanding {
             output_mode: OutputMode::Auto,
             theme: None,
             command_hooks: HashMap::new(),
+            template_registry: None,
         }
     }
 
@@ -71,6 +74,7 @@ impl Outstanding {
             output_mode: OutputMode::Auto,
             theme: None,
             command_hooks: HashMap::new(),
+            template_registry: None,
         }
     }
 
@@ -497,8 +501,10 @@ pub struct OutstandingBuilder {
     output_flag: Option<String>,
     output_file_flag: Option<String>,
     theme: Option<Theme>,
-    embedded_styles: Option<EmbeddedStyles>,
-    embedded_templates: Option<EmbeddedTemplates>,
+    /// Stylesheet registry (built from embedded styles)
+    stylesheet_registry: Option<crate::stylesheet::StylesheetRegistry>,
+    /// Template registry (built from embedded templates)
+    template_registry: Option<TemplateRegistry>,
     default_theme_name: Option<String>,
     commands: HashMap<String, DispatchFn>,
     command_hooks: HashMap<String, Hooks>,
@@ -523,8 +529,8 @@ impl OutstandingBuilder {
             output_flag: Some("output".to_string()), // Enabled by default
             output_file_flag: Some("output-file-path".to_string()),
             theme: None,
-            embedded_styles: None,
-            embedded_templates: None,
+            stylesheet_registry: None,
+            template_registry: None,
             default_theme_name: None,
             commands: HashMap::new(),
             command_hooks: HashMap::new(),
@@ -632,6 +638,10 @@ impl OutstandingBuilder {
     /// if the source path exists, templates are loaded from disk for hot-reload.
     /// In release mode, embedded content is used.
     ///
+    /// Templates set here will be used to resolve template paths when registering
+    /// commands. Call this method *before* `.commands()` or `.group()` to ensure
+    /// templates are available for resolution.
+    ///
     /// # Example
     ///
     /// ```rust,ignore
@@ -645,7 +655,7 @@ impl OutstandingBuilder {
     ///     .run_and_print(cmd, args);
     /// ```
     pub fn templates(mut self, templates: EmbeddedTemplates) -> Self {
-        self.embedded_templates = Some(templates);
+        self.template_registry = Some(TemplateRegistry::from(templates));
         self
     }
 
@@ -667,7 +677,28 @@ impl OutstandingBuilder {
     ///     .run_and_print(cmd, args);
     /// ```
     pub fn styles(mut self, styles: EmbeddedStyles) -> Self {
-        self.embedded_styles = Some(styles);
+        self.stylesheet_registry = Some(crate::stylesheet::StylesheetRegistry::from(styles));
+        self
+    }
+
+    /// Adds a stylesheet directory for runtime loading.
+    ///
+    /// Stylesheets from directories are loaded immediately and merged with any
+    /// embedded stylesheets. Directory styles take precedence over embedded
+    /// styles with the same name.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// Outstanding::builder()
+    ///     .styles(embed_styles!("src/styles"))
+    ///     .styles_dir("~/.myapp/themes")  // User overrides
+    /// ```
+    pub fn styles_dir<P: AsRef<std::path::Path>>(mut self, path: P) -> Self {
+        let registry = self
+            .stylesheet_registry
+            .get_or_insert_with(crate::stylesheet::StylesheetRegistry::new);
+        let _ = registry.add_dir(path);
         self
     }
 
@@ -693,6 +724,9 @@ impl OutstandingBuilder {
     /// path is derived from the command path:
     /// - Command `db.migrate` → `{template_dir}/db/migrate{template_ext}`
     ///
+    /// This is for file-based template loading at render time. For embedded
+    /// templates, use `.templates()` instead.
+    ///
     /// # Example
     ///
     /// ```rust,ignore
@@ -703,6 +737,27 @@ impl OutstandingBuilder {
     /// ```
     pub fn template_dir(mut self, path: impl Into<PathBuf>) -> Self {
         self.template_dir = Some(path.into());
+        self
+    }
+
+    /// Adds a template directory to the registry for runtime loading.
+    ///
+    /// Templates from directories are loaded immediately and merged with any
+    /// embedded templates. Directory templates take precedence over embedded
+    /// templates with the same name.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// Outstanding::builder()
+    ///     .templates(embed_templates!("src/templates"))
+    ///     .templates_dir("~/.myapp/templates")  // User overrides
+    /// ```
+    pub fn templates_dir<P: AsRef<std::path::Path>>(mut self, path: P) -> Self {
+        let registry = self
+            .template_registry
+            .get_or_insert_with(TemplateRegistry::new);
+        let _ = registry.add_template_dir(path);
         self
     }
 
@@ -917,16 +972,30 @@ impl OutstandingBuilder {
         }
     }
 
-    /// Resolves a template path from a command path using conventions.
+    /// Resolves a template from a command path using conventions.
+    ///
+    /// Resolution order:
+    /// 1. If template_registry is set, look up by command path (e.g., "db/migrate.j2")
+    /// 2. If template_dir is set, return the file path for runtime loading
+    /// 3. Otherwise return empty string (JSON serialization fallback)
     fn resolve_template(&self, command_path: &str) -> String {
-        if let Some(ref dir) = self.template_dir {
-            let file_path = command_path.replace('.', "/");
-            format!("{}/{}{}", dir.display(), file_path, self.template_ext)
-        } else {
-            // No template_dir configured, return empty template
-            // (will use JSON serialization in structured modes)
-            String::new()
+        let file_path = command_path.replace('.', "/");
+        let template_name = format!("{}{}", file_path, self.template_ext);
+
+        // First, try to get content from embedded templates
+        if let Some(ref registry) = self.template_registry {
+            if let Ok(content) = registry.get_content(&template_name) {
+                return content;
+            }
         }
+
+        // Fall back to file path if template_dir is configured
+        if let Some(ref dir) = self.template_dir {
+            return format!("{}/{}", dir.display(), template_name);
+        }
+
+        // No template found - will use JSON serialization in structured modes
+        String::new()
     }
 
     /// Configures the name of the output flag.
@@ -1390,12 +1459,10 @@ impl OutstandingBuilder {
     ///
     /// The built instance includes registered hooks for use with `run_command()`.
     pub fn build(self) -> Outstanding {
-        // Resolve theme: explicit theme takes precedence, then embedded styles
+        // Resolve theme: explicit theme takes precedence, then stylesheet registry
         let theme = if let Some(theme) = self.theme {
             Some(theme)
-        } else if let Some(embedded) = self.embedded_styles {
-            // Convert embedded styles to stylesheet registry
-            let mut registry: crate::stylesheet::StylesheetRegistry = embedded.into();
+        } else if let Some(mut registry) = self.stylesheet_registry {
             let theme_name = self.default_theme_name.as_deref().unwrap_or("default");
             registry.get(theme_name).ok()
         } else {
@@ -1409,6 +1476,7 @@ impl OutstandingBuilder {
             output_mode: OutputMode::Auto,
             theme,
             command_hooks: self.command_hooks,
+            template_registry: self.template_registry,
         }
     }
 
