@@ -1,0 +1,293 @@
+# How To: Adopt Outstanding Alongside Existing Clap Code
+
+Outstanding supports gradual adoption. You can add it to one command at a time, keeping existing dispatch logic for everything else.
+
+## The Core Pattern: RunResult::NoMatch
+
+When Outstanding doesn't have a handler for a command, `dispatch` returns `RunResult::NoMatch` containing the parsed `ArgMatches`:
+
+```rust
+pub enum RunResult {
+    Handled(String),           // Handler ran, output ready
+    Binary(Vec<u8>, String),   // Binary output (bytes, filename)
+    NoMatch(ArgMatches),       // No handler found
+}
+```
+
+Use `NoMatch` to fall back to your own dispatch.
+
+## Pattern 1: Outstanding First, Fallback Second
+
+Try Outstanding dispatch first. If no match, use your existing code:
+
+```rust
+use outstanding::cli::{App, RunResult, OutputMode};
+use clap::Command;
+
+fn main() {
+    let cli = Command::new("myapp")
+        .subcommand(Command::new("list"))     // Outstanding handles
+        .subcommand(Command::new("status"))   // Your existing code
+        .subcommand(Command::new("config"));  // Your existing code
+
+    // Build Outstanding for just the commands you want
+    let app = App::builder()
+        .command("list", list_handler, "list.j2")
+        .build()
+        .expect("Failed to build app");
+
+    // Try Outstanding first
+    let cmd = cli.clone();
+    match app.run_to_string(cmd, std::env::args()) {
+        RunResult::Handled(output) => {
+            println!("{}", output);
+        }
+        RunResult::Binary(bytes, filename) => {
+            std::fs::write(&filename, bytes).ok();
+            eprintln!("Wrote {} bytes to {}", bytes.len(), filename);
+        }
+        RunResult::NoMatch(matches) => {
+            // Fall back to your existing dispatch
+            match matches.subcommand() {
+                Some(("status", sub)) => handle_status(sub),
+                Some(("config", sub)) => handle_config(sub),
+                _ => eprintln!("Unknown command"),
+            }
+        }
+    }
+}
+```
+
+## Pattern 2: Existing Code First, Outstanding Fallback
+
+Your dispatch handles known commands, Outstanding handles new ones:
+
+```rust
+fn main() {
+    let cli = build_cli();
+    let matches = cli.get_matches();
+
+    // Your existing dispatch first
+    match matches.subcommand() {
+        Some(("legacy-cmd", sub)) => {
+            handle_legacy(sub);
+            return;
+        }
+        Some(("old-feature", sub)) => {
+            handle_old_feature(sub);
+            return;
+        }
+        _ => {
+            // Not handled by existing code
+        }
+    }
+
+    // Outstanding handles everything else
+    let app = build_outstanding_app();
+    match app.dispatch(matches, OutputMode::Auto) {
+        RunResult::Handled(output) => println!("{}", output),
+        RunResult::Binary(bytes, filename) => {
+            std::fs::write(&filename, bytes).ok();
+        }
+        _ => {}
+    }
+}
+```
+
+## Pattern 3: Outstanding Inside Your Match
+
+Call Outstanding for specific commands within your existing match:
+
+```rust
+fn main() {
+    let cli = build_cli();
+    let matches = cli.get_matches();
+
+    match matches.subcommand() {
+        Some(("status", sub)) => handle_status(sub),
+        Some(("config", sub)) => handle_config(sub),
+
+        // Use Outstanding just for these
+        Some(("list", _)) | Some(("show", _)) => {
+            let app = build_outstanding_app();
+            if let RunResult::Handled(output) = app.dispatch(matches, OutputMode::Auto) {
+                println!("{}", output);
+            }
+        }
+
+        _ => eprintln!("Unknown command"),
+    }
+}
+```
+
+## Adding Outstanding to One Command
+
+Minimal setup for a single command:
+
+```rust
+let app = App::builder()
+    .command("list", |matches, ctx| {
+        let items = fetch_items()?;
+        Ok(Output::Render(ListOutput { items }))
+    }, "{% for item in items %}- {{ item }}\n{% endfor %}")
+    .build()?;
+```
+
+No embedded files required. The template is inline. No theme means style tags show `?` markers, but rendering still works.
+
+## Sharing Clap Command Definition
+
+Outstanding augments your `clap::Command` with `--output` and help. You can share the definition:
+
+```rust
+fn build_cli() -> Command {
+    Command::new("myapp")
+        .subcommand(Command::new("list").about("List items"))
+        .subcommand(Command::new("status").about("Show status"))
+}
+
+fn main() {
+    let cli = build_cli();
+
+    let app = App::builder()
+        .command("list", list_handler, "list.j2")
+        .build()?;
+
+    // Outstanding augments the command, then dispatches
+    match app.run_to_string(cli, std::env::args()) {
+        RunResult::Handled(output) => println!("{}", output),
+        RunResult::NoMatch(matches) => {
+            // matches from the augmented command (has --output, etc.)
+            match matches.subcommand() {
+                Some(("status", sub)) => handle_status(sub),
+                _ => {}
+            }
+        }
+    }
+}
+```
+
+## Gradual Migration Strategy
+
+1. **Start with one command**: Pick a command with complex output. Add Outstanding for just that command.
+
+2. **Keep existing tests passing**: Your dispatch logic stays the same for unhandled commands.
+
+3. **Add more commands over time**: Register additional handlers as you refactor.
+
+4. **Add themes when ready**: Start with inline templates, add YAML stylesheets later.
+
+5. **Eventually remove legacy dispatch**: Once all commands are migrated, simplify to `app.run()`.
+
+## Using run() vs run_to_string()
+
+`run()` prints directly and returns a boolean:
+
+```rust
+let handled = app.run(cli, args);
+if !handled {
+    // Fall back
+}
+```
+
+`run_to_string()` returns `RunResult` for more control:
+
+```rust
+match app.run_to_string(cli, args) {
+    RunResult::Handled(output) => { /* process output */ }
+    RunResult::NoMatch(matches) => { /* access matches */ }
+}
+```
+
+Use `run_to_string()` when you need the output string or `ArgMatches` for fallback.
+
+## Accessing the --output Flag in Fallback
+
+Outstanding adds `--output` globally. In fallback code, you can still access it:
+
+```rust
+RunResult::NoMatch(matches) => {
+    // Get the output mode Outstanding parsed
+    let mode = matches.get_one::<String>("_output_mode")
+        .map(|s| s.as_str())
+        .unwrap_or("auto");
+
+    match matches.subcommand() {
+        Some(("status", sub)) => {
+            if mode == "json" {
+                println!("{}", serde_json::to_string(&status_data)?);
+            } else {
+                print_status_text(&status_data);
+            }
+        }
+        _ => {}
+    }
+}
+```
+
+## Disabling Outstanding's Flags
+
+If `--output` conflicts with your existing flags:
+
+```rust
+App::builder()
+    .no_output_flag()       // Don't add --output
+    .no_output_file_flag()  // Don't add --output-file-path
+    .command("list", handler, template)
+    .build()?
+```
+
+## Example: Hybrid Application
+
+Complete example with both Outstanding and manual handlers:
+
+```rust
+use outstanding::cli::{App, HandlerResult, Output, RunResult, OutputMode, CommandContext};
+use clap::{Command, Arg, ArgMatches};
+use serde::Serialize;
+
+#[derive(Serialize)]
+struct ListOutput { items: Vec<String> }
+
+fn list_handler(_m: &ArgMatches, _ctx: &CommandContext) -> HandlerResult<ListOutput> {
+    Ok(Output::Render(ListOutput {
+        items: vec!["one".into(), "two".into()],
+    }))
+}
+
+fn handle_status(matches: &ArgMatches) {
+    println!("Status: OK");
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let cli = Command::new("myapp")
+        .subcommand(Command::new("list").about("List items (Outstanding)"))
+        .subcommand(Command::new("status").about("Show status (legacy)"));
+
+    let app = App::builder()
+        .command("list", list_handler, "{% for i in items %}- {{ i }}\n{% endfor %}")
+        .build()?;
+
+    match app.run_to_string(cli, std::env::args()) {
+        RunResult::Handled(output) => println!("{}", output),
+        RunResult::Binary(bytes, filename) => {
+            std::fs::write(&filename, bytes)?;
+        }
+        RunResult::NoMatch(matches) => {
+            match matches.subcommand() {
+                Some(("status", sub)) => handle_status(sub),
+                _ => eprintln!("Unknown command"),
+            }
+        }
+    }
+
+    Ok(())
+}
+```
+
+Run it:
+```bash
+myapp list              # Outstanding handles, renders template
+myapp list --output=json # Outstanding handles, JSON output
+myapp status            # Fallback to handle_status()
+```
