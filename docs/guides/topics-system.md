@@ -1,6 +1,9 @@
 # The Topics System
 
-Outstanding includes a help topics system for documenting concepts that don't fit into command help. Topics provide extended documentation accessible via `myapp help <topic>`.
+Outstanding provides a dedicated help topics system because command help (`--help`) is a poor place for conceptual documentation.
+
+Arguments and flags describe *mechanics*, but complex applications need longer-form guides for *concepts*—configuration formats, authentication flows, or troubleshooting. The Topics system integrates these directly into your CLI, accessible via `myapp help <topic>`, keeping users in the terminal.
+
 
 ## What Topics Are For
 

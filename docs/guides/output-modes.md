@@ -1,6 +1,9 @@
 # Output Modes
 
-Outstanding supports multiple output formats through a single handler. The same code produces styled terminal output, plain text, or structured data like JSON—controlled by `--output` flag or programmatically.
+Outstanding supports multiple output formats through a single handler because modern CLI tools serve two masters: human operators and machine automation.
+
+The same handler logic produces styled terminal output for eyes, plain text for logs, or structured JSON for `jq` pipelines—controlled entirely by the user's `--output` flag. This frees you from writing separate "API" and "CLI" logic.
+
 
 ## The OutputMode Enum
 
@@ -128,7 +131,9 @@ Same handler, same types—different output format. This enables:
 
 ### CSV Output
 
-CSV mode flattens nested JSON automatically. For more control, use `FlatDataSpec`:
+CSV mode flattens nested JSON automatically. For more control, use `FlatDataSpec`.
+
+See [Tables and Columns](../howtos/tables.md) for detailed CSV configuration.
 
 ```rust
 let spec = FlatDataSpec::builder()

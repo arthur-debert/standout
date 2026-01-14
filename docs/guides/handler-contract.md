@@ -1,6 +1,12 @@
 # The Handler Contract
 
-Handlers are where your application logic lives. Outstanding's handler contract is designed to keep your code testable, your types explicit, and error handling natural.
+Handlers are where your application logic lives. Outstanding's handler contract is designed to be **explicit** rather than permissive. By enforcing `Send + Sync` and serializable return types, the framework guarantees that your code remains testable, parallel-safe, and decoupled from output formatting.
+
+Instead of fighting with generic `Any` types or global state, you work with a clear contract: inputs are immutable references, output is a `Result`.
+
+See also:
+- [Output Modes](output-modes.md) for how the output enum interacts with formats.
+
 
 ## The Handler Trait
 
@@ -162,6 +168,8 @@ fn interactive_handler(matches: &ArgMatches, ctx: &CommandContext) -> HandlerRes
 ```
 
 **command_path**: The subcommand chain as a vector, e.g., `["db", "migrate"]`. Useful for logging or conditional logic.
+
+See [Execution Model](execution-model.md) for more on command paths.
 
 `CommandContext` is intentionally minimal. Application-specific context (config, connections) should be captured in struct handlers or closures:
 

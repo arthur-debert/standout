@@ -1,6 +1,9 @@
 # How To: Use Only the Rendering Layer
 
-Outstanding's rendering layer is fully decoupled from CLI integration. You can use templates, styles, and output modes without `App`, `AppBuilder`, or clap.
+Outstanding's rendering layer is fully decoupled from its CLI integration (App, Clap, Dispatch). This means you can use the template engine, theme system, and structured output logic in any context—servers, TUI apps, or even other CLI frameworks.
+
+This decoupling allows you to maintain consistent styling and logic across different parts of your ecosystem.
+
 
 ## When to Use This
 

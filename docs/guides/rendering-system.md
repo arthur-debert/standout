@@ -1,6 +1,9 @@
 # The Rendering System
 
-Outstanding's rendering layer transforms your handler's data into styled terminal output. The system is designed for separation of concerns: logic produces data, templates define structure, styles control appearance.
+Outstanding's rendering layer separates presentation from logic by using a two-pass architecture. This allows you to use standard tools (MiniJinja) for structure while keeping styling strictly separated and easy to debug.
+
+Instead of mixing ANSI codes into your logic or templates, you define *what* something is (semantic tags like `[error]`) and let the theme decide *how* it looks.
+
 
 ## Two-Pass Rendering
 
@@ -47,9 +50,12 @@ The tag syntax was chosen over Jinja filters because it reads naturally and does
 
 ### Unknown Style Tags
 
-When a tag references a style not in the theme:
+### Unknown Style Tags
+
+When a tag references a style not in the theme, Outstanding prioritizes developer visibility without crashing production apps.
 
 - **Term mode**: Unknown tags get a `?` marker: `[unknown?]text[/unknown?]`
+
 - **Text mode**: Tags stripped like any other
 - **TermDebug mode**: Tags preserved as-is
 
@@ -65,7 +71,12 @@ if let Err(e) = result {
 
 ## Themes and Styles
 
+## Themes and Styles
+
 A `Theme` is a named collection of styles mapping style names to console formatting.
+
+See [App Configuration](app-configuration.md) for how to embed and load themes.
+
 
 ### Programmatic Themes
 

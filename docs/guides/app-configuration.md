@@ -1,6 +1,15 @@
 # App Configuration
 
-`AppBuilder` configures Outstanding before creating the runtime `App`. This guide covers the full setup: embedding resources, registering commands, configuring themes, and customizing behavior.
+`AppBuilder` is the unified entry point for configuring your application. Instead of scattering configuration across multiple structs (`Outstanding`, `RenderSetup`, `Theme`), everything from command registration to theme selection happens in one fluent interface.
+
+This design ensures that your application defines its entire environment—commands, styles, templates, and hooks—before the runtime starts, preventing configuration race conditions and simplifying testing.
+
+This guide covers the full setup: embedding resources, registering commands, configuring themes, and customizing behavior.
+
+See also:
+- [Rendering System](rendering-system.md) for details on templates and styles.
+- [Topics System](topics-system.md) for help topics.
+
 
 ## Basic Setup
 

@@ -1,6 +1,9 @@
 # How To: Adopt Outstanding Alongside Existing Clap Code
 
-Outstanding supports gradual adoption. You can add it to one command at a time, keeping existing dispatch logic for everything else.
+Adopting a new framework shouldn't require rewriting your entire application. Outstanding is designed for **gradual adoption**, allowing you to migrate one command at a time without breaking existing functionality.
+
+This guide shows how to run Outstanding alongside your existing manual dispatch or Clap loop.
+
 
 ## The Core Pattern: RunResult::NoMatch
 

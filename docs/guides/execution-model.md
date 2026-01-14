@@ -1,11 +1,15 @@
 # Execution Model
 
-Outstanding manages a pipeline from CLI input to rendered output. Understanding this flow helps you know where to hook in, what data is available at each stage, and how to extend behavior without fighting the framework.
+Outstanding manages a strict linear pipeline from CLI input to rendered output. This explicitly separated flow ensures that logic (Handlers) remains decoupled from presentation (Templates) and side-effects (Hooks).
+
+Understanding this model allows you to extend the framework predictably—knowing exactly where to intercept execution, what data is available, and how to test each stage in isolation.
+
 
 ## The Pipeline
 
 ```
 Clap Parsing → Dispatch → Handler → Hooks → Rendering → Output
+{{ ... }}
 ```
 
 Each stage has a clear responsibility:
@@ -23,6 +27,10 @@ Each stage has a clear responsibility:
 **Output**: The result is written to stdout or a file.
 
 This pipeline is what Outstanding manages for you—the glue code between "I have a clap definition" and "I want rich, testable output."
+
+- See [Handler Contract](handler-contract.md) for handler details.
+- See [Rendering System](rendering-system.md) for the render phase.
+
 
 ## Command Paths
 
@@ -130,6 +138,9 @@ App::builder()
         .pre_dispatch(require_admin))
     .build()?
 ```
+
+See [App Configuration](app-configuration.md) for more on registration.
+
 
 ### Error Handling
 

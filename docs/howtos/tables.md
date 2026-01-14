@@ -2,6 +2,9 @@
 
 Outstanding provides utilities for formatting columnar data with proper alignment, truncation, and Unicode handling.
 
+See [Rendering System](../guides/rendering-system.md) for how filters fit into templates.
+
+
 ## Quick Start: Template Filters
 
 For simple tables, use filters directly in templates:
