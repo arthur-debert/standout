@@ -114,7 +114,7 @@ pub fn validate_template<T: Serialize>(
     template: &str,
     data: &T,
     theme: &Theme,
-) -> Result<(), outstanding_bbparser::UnknownTagErrors> {
+) -> Result<(), Box<dyn std::error::Error>> {
     let color_mode = detect_color_mode();
     let styles = theme.resolve_styles(Some(color_mode));
 
@@ -122,22 +122,15 @@ pub fn validate_template<T: Serialize>(
     let mut env = Environment::new();
     register_filters(&mut env, styles.clone(), OutputMode::Text);
 
-    if env
-        .add_template_owned("_inline".to_string(), template.to_string())
-        .is_err()
-    {
-        // Template syntax error - not our concern for tag validation
-        return Ok(());
-    }
+    env.add_template_owned("_inline".to_string(), template.to_string())?;
 
-    if let Ok(tmpl) = env.get_template("_inline") {
-        if let Ok(minijinja_output) = tmpl.render(data) {
-            // Now validate the style tags
-            let resolved_styles = styles.to_resolved_map();
-            let parser = BBParser::new(resolved_styles, TagTransform::Remove);
-            return parser.validate(&minijinja_output);
-        }
-    }
+    let tmpl = env.get_template("_inline")?;
+    let minijinja_output = tmpl.render(data)?;
+
+    // Now validate the style tags
+    let resolved_styles = styles.to_resolved_map();
+    let parser = BBParser::new(resolved_styles, TagTransform::Remove);
+    parser.validate(&minijinja_output)?;
 
     Ok(())
 }
@@ -1803,7 +1796,10 @@ mod tests {
         );
 
         assert!(result.is_err());
-        let errors = result.unwrap_err();
+        let err = result.unwrap_err();
+        let errors = err
+            .downcast_ref::<outstanding_bbparser::UnknownTagErrors>()
+            .expect("Expected UnknownTagErrors");
         assert_eq!(errors.len(), 2); // open and close tags
     }
 
@@ -1827,7 +1823,10 @@ mod tests {
         );
 
         assert!(result.is_err());
-        let errors = result.unwrap_err();
+        let err = result.unwrap_err();
+        let errors = err
+            .downcast_ref::<outstanding_bbparser::UnknownTagErrors>()
+            .expect("Expected UnknownTagErrors");
         assert_eq!(errors.len(), 4); // foo open/close + bar open/close
     }
 
@@ -1865,9 +1864,36 @@ mod tests {
         );
 
         assert!(result.is_err());
-        let errors = result.unwrap_err();
+        let err = result.unwrap_err();
+        let errors = err
+            .downcast_ref::<outstanding_bbparser::UnknownTagErrors>()
+            .expect("Expected UnknownTagErrors");
         // Only unknown tags should be reported
         assert_eq!(errors.len(), 2);
         assert!(errors.errors.iter().any(|e| e.tag == "unknown"));
+    }
+
+    #[test]
+    fn test_validate_template_syntax_error_fails() {
+        let theme = Theme::new();
+        #[derive(Serialize)]
+        struct Data {}
+
+        // Missing closing braces
+        let result = validate_template("{{ unclosed", &Data {}, &theme);
+        assert!(result.is_err());
+
+        let err = result.unwrap_err();
+        // Should NOT be UnknownTagErrors
+        assert!(err
+            .downcast_ref::<outstanding_bbparser::UnknownTagErrors>()
+            .is_none());
+        // Should be a minijinja error
+        let msg = err.to_string();
+        assert!(
+            msg.contains("syntax error") || msg.contains("unexpected"),
+            "Got: {}",
+            msg
+        );
     }
 }
