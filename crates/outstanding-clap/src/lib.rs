@@ -302,26 +302,6 @@ pub use ::outstanding::{
 // Re-export derive macros
 pub use outstanding_macros::Dispatch;
 
-// ============================================================================
-// BACKWARDS COMPATIBILITY (deprecated)
-// ============================================================================
-
-/// Alias for Outstanding (deprecated, use Outstanding instead)
-#[deprecated(since = "0.4.0", note = "Use Outstanding instead")]
-pub type TopicHelper = Outstanding;
-
-/// Alias for OutstandingBuilder (deprecated, use OutstandingBuilder instead)
-#[deprecated(since = "0.4.0", note = "Use OutstandingBuilder instead")]
-pub type TopicHelperBuilder = OutstandingBuilder;
-
-/// Alias for HelpResult (deprecated, use HelpResult instead)
-#[deprecated(since = "0.4.0", note = "Use HelpResult instead")]
-pub type TopicHelpResult = HelpResult;
-
-/// Alias for HelpConfig (deprecated, use HelpConfig instead)
-#[deprecated(since = "0.4.0", note = "Use HelpConfig instead")]
-pub type Config = HelpConfig;
-
 /// Runs a clap command with styled help output.
 ///
 /// This is the simplest entry point for basic CLIs without topics.
