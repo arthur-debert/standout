@@ -266,8 +266,8 @@ pub use embedded::{
     EmbeddedSource, EmbeddedStyles, EmbeddedTemplates, StylesheetResource, TemplateResource,
 };
 
-// Setup builder (unified API)
-pub use setup::{OutstandingApp, RenderSetup, SetupError};
+// Setup error type
+pub use setup::SetupError;
 
 // Macro re-exports (when `macros` feature is enabled)
 #[cfg(feature = "macros")]

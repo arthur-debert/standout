@@ -2,7 +2,7 @@
 //!
 //! This module provides types that hold both embedded content (for release builds)
 //! and source paths (for debug hot-reload). The macros `embed_templates!` and
-//! `embed_styles!` return these types, and the `RenderSetup` builder consumes them.
+//! `embed_styles!` return these types, and `Outstanding::builder()` consumes them.
 //!
 //! # Design
 //!
@@ -16,16 +16,17 @@
 //! # Example
 //!
 //! ```rust,ignore
-//! use outstanding::{embed_templates, embed_styles, RenderSetup};
+//! use outstanding::{embed_templates, embed_styles};
+//! use outstanding::cli::Outstanding;
 //!
-//! let app = RenderSetup::new()
+//! let app = Outstanding::builder()
 //!     .templates(embed_templates!("src/templates"))
 //!     .styles(embed_styles!("src/styles"))
 //!     .build()?;
 //!
 //! // In debug: reads from "src/templates" if it exists
 //! // In release: uses embedded content
-//! let output = app.render("list", &data)?;
+//! let output = app.render("list", &data, OutputMode::Term)?;
 //! ```
 
 use std::marker::PhantomData;

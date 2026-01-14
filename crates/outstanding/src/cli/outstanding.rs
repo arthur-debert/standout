@@ -34,7 +34,25 @@ pub(crate) fn get_terminal_width() -> Option<usize> {
 
 /// Main entry point for outstanding-clap integration.
 ///
-/// Handles help interception, output flag, topic rendering, and command hooks.
+/// Handles help interception, output flag, topic rendering, command hooks,
+/// and template rendering.
+///
+/// # Rendering Templates
+///
+/// When configured with templates and styles, `Outstanding` can render templates
+/// directly:
+///
+/// ```rust,ignore
+/// use outstanding::cli::Outstanding;
+/// use outstanding::OutputMode;
+///
+/// let app = Outstanding::builder()
+///     .templates(embed_templates!("src/templates"))
+///     .styles(embed_styles!("src/styles"))
+///     .build()?;
+///
+/// let output = app.render("list", &data, OutputMode::Term)?;
+/// ```
 pub struct Outstanding {
     pub(crate) registry: TopicRegistry,
     pub(crate) output_flag: Option<String>,
@@ -44,6 +62,8 @@ pub struct Outstanding {
     pub(crate) command_hooks: HashMap<String, Hooks>,
     /// Template registry for embedded templates (None means use file-based resolution)
     pub(crate) template_registry: Option<TemplateRegistry>,
+    /// Stylesheet registry for accessing themes
+    pub(crate) stylesheet_registry: Option<crate::stylesheet::StylesheetRegistry>,
 }
 
 impl Outstanding {
@@ -63,6 +83,7 @@ impl Outstanding {
             theme: None,
             command_hooks: HashMap::new(),
             template_registry: None,
+            stylesheet_registry: None,
         }
     }
 
@@ -76,6 +97,7 @@ impl Outstanding {
             theme: None,
             command_hooks: HashMap::new(),
             template_registry: None,
+            stylesheet_registry: None,
         }
     }
 
@@ -102,6 +124,145 @@ impl Outstanding {
     /// Returns the hooks registered for a specific command path.
     pub fn get_hooks(&self, path: &str) -> Option<&Hooks> {
         self.command_hooks.get(path)
+    }
+
+    /// Returns the default theme, if configured.
+    pub fn theme(&self) -> Option<&Theme> {
+        self.theme.as_ref()
+    }
+
+    /// Gets a theme by name from the stylesheet registry.
+    ///
+    /// This allows using themes other than the default at runtime.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no stylesheet registry is configured or if the theme
+    /// is not found.
+    pub fn get_theme(&mut self, name: &str) -> Result<Theme, SetupError> {
+        self.stylesheet_registry
+            .as_mut()
+            .ok_or_else(|| SetupError::Config("No stylesheet registry configured".into()))?
+            .get(name)
+            .map_err(|_| SetupError::ThemeNotFound(name.to_string()))
+    }
+
+    /// Returns the names of all available templates.
+    ///
+    /// Returns an empty iterator if no template registry is configured.
+    pub fn template_names(&self) -> impl Iterator<Item = &str> {
+        self.template_registry
+            .as_ref()
+            .map(|r| r.names())
+            .into_iter()
+            .flatten()
+    }
+
+    /// Returns the names of all available themes.
+    ///
+    /// Returns an empty vector if no stylesheet registry is configured.
+    pub fn theme_names(&self) -> Vec<String> {
+        self.stylesheet_registry
+            .as_ref()
+            .map(|r| r.names().map(String::from).collect())
+            .unwrap_or_default()
+    }
+
+    /// Renders a template with the given data.
+    ///
+    /// Uses the default theme configured at setup time.
+    ///
+    /// # Arguments
+    ///
+    /// * `template` - Template name (e.g., "list" for "list.j2")
+    /// * `data` - Serializable data to render
+    /// * `mode` - Output mode (Term, Text, Json, etc.)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - No template registry is configured
+    /// - The template is not found
+    /// - Rendering fails
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let output = app.render("list", &items, OutputMode::Term)?;
+    /// ```
+    pub fn render<T: Serialize>(
+        &self,
+        template: &str,
+        data: &T,
+        mode: OutputMode,
+    ) -> Result<String, SetupError> {
+        // For JSON/YAML/XML/CSV modes, serialize directly
+        if mode.is_structured() {
+            return self.serialize_data(data, mode);
+        }
+
+        // Get template registry
+        let registry = self
+            .template_registry
+            .as_ref()
+            .ok_or_else(|| SetupError::Config("No template registry configured".into()))?;
+
+        // Build MiniJinja environment with all templates
+        let mut env = minijinja::Environment::new();
+        crate::render::filters::register_filters(&mut env);
+
+        for name in registry.names() {
+            if let Ok(content) = registry.get_content(name) {
+                env.add_template_owned(name.to_string(), content)
+                    .map_err(|e| SetupError::Template(e.to_string()))?;
+            }
+        }
+
+        let tmpl = env
+            .get_template(template)
+            .map_err(|e| SetupError::Template(e.to_string()))?;
+        tmpl.render(data)
+            .map_err(|e| SetupError::Template(e.to_string()))
+    }
+
+    /// Serializes data to structured format (JSON, YAML, XML, CSV).
+    fn serialize_data<T: Serialize>(
+        &self,
+        data: &T,
+        mode: OutputMode,
+    ) -> Result<String, SetupError> {
+        match mode {
+            OutputMode::Json => {
+                serde_json::to_string_pretty(data).map_err(|e| SetupError::Template(e.to_string()))
+            }
+            OutputMode::Yaml => {
+                serde_yaml::to_string(data).map_err(|e| SetupError::Template(e.to_string()))
+            }
+            OutputMode::Xml => {
+                quick_xml::se::to_string(data).map_err(|e| SetupError::Template(e.to_string()))
+            }
+            OutputMode::Csv => {
+                let value =
+                    serde_json::to_value(data).map_err(|e| SetupError::Template(e.to_string()))?;
+                let (headers, rows) = crate::util::flatten_json_for_csv(&value);
+
+                let mut wtr = csv::Writer::from_writer(Vec::new());
+                wtr.write_record(&headers)
+                    .map_err(|e| SetupError::Template(e.to_string()))?;
+                for row in rows {
+                    wtr.write_record(&row)
+                        .map_err(|e| SetupError::Template(e.to_string()))?;
+                }
+                let bytes = wtr
+                    .into_inner()
+                    .map_err(|e| SetupError::Template(e.to_string()))?;
+                String::from_utf8(bytes).map_err(|e| SetupError::Template(e.to_string()))
+            }
+            _ => Err(SetupError::Config(format!(
+                "serialize_data called with non-structured mode: {:?}",
+                mode
+            ))),
+        }
     }
 
     /// Executes a command handler with hooks applied automatically.
@@ -1471,11 +1632,11 @@ impl OutstandingBuilder {
     ///     .default_theme("dark")
     ///     .build()?;
     /// ```
-    pub fn build(self) -> Result<Outstanding, SetupError> {
+    pub fn build(mut self) -> Result<Outstanding, SetupError> {
         // Resolve theme: explicit theme takes precedence, then stylesheet registry
         let theme = if let Some(theme) = self.theme {
             Some(theme)
-        } else if let Some(mut registry) = self.stylesheet_registry {
+        } else if let Some(ref mut registry) = self.stylesheet_registry {
             let theme_name = self.default_theme_name.as_deref().unwrap_or("default");
             let theme = registry
                 .get(theme_name)
@@ -1493,6 +1654,7 @@ impl OutstandingBuilder {
             theme,
             command_hooks: self.command_hooks,
             template_registry: self.template_registry,
+            stylesheet_registry: self.stylesheet_registry,
         })
     }
 
