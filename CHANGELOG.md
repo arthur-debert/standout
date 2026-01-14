@@ -7,77 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.15.0] - 2026-01-13
+## [1.0.0] - 2026-01-13
 
-- **Added**:
-  - **Tag-based style syntax** - Ergonomic `[name]content[/name]` syntax for applying styles in templates
-    - Two-pass rendering: MiniJinja first, then BBParser style tag processing
-    - Output mode support: tags become ANSI codes (Term), stripped (Text), or preserved (TermDebug)
-    - Unknown tags show `[tag?]` marker for easy debugging
-  - **Template validation** - `validate_template()` function to catch unknown style tags
-    - Returns detailed error info with tag name and position
-    - Re-exported `UnknownTagError`, `UnknownTagErrors`, `UnknownTagKind` types
-  - **New `outstanding-bbparser` crate** - Standalone BBCode-style tag parser for terminal styling
-    - `BBParser` with configurable `TagTransform` (Apply/Remove/Keep)
-    - `UnknownTagBehavior` (Passthrough with `?` marker, or Strip)
-    - Position tracking for error reporting
-    - CSS identifier rules for tag names
+### 🚀 First Stable Release
 
-- **Removed**:
-  - **`style` filter** - The MiniJinja filter syntax `{{ value | style("name") }}` has been removed
-    - Use tag syntax instead: `[name]{{ value }}[/name]`
+Outstanding reaches 1.0 with a cleaner, more ergonomic template syntax.
 
-- **Example**:
+### ⚠️ BREAKING CHANGE: Tag-Based Styling
 
-  ```rust
-  use outstanding::{render_with_output, Theme, OutputMode};
+**The MiniJinja `style` filter has been replaced with BBCode-style tags.**
 
-  let theme = Theme::new()
-      .add("title", Style::new().bold())
-      .add("count", Style::new().cyan());
+```diff
+- {{ title | style("heading") }}
++ [heading]{{ title }}[/heading]
 
-  // Tag syntax for all styled content
-  let template = r#"[title]Report[/title]: [count]{{ count }}[/count] items"#;
+- {{ "Error:" | style("error") }} {{ message }}
++ [error]Error:[/error] {{ message }}
+```
 
-  let output = render_with_output(template, &data, &theme, OutputMode::Term)?;
-  ```
+**Migration is straightforward:** wrap your content with `[name]...[/name]` tags instead of piping through the `style` filter.
 
-- **Added**:
-  - **`#[derive(Dispatch)]` macro** - Convention-based command dispatch for clap `Subcommand` enums
-    - Generates `dispatch_config()` method that maps variants to handlers automatically
-    - PascalCase variants map to snake_case handlers (e.g., `AddTask` → `handlers::add_task`)
-    - Container attribute: `#[dispatch(handlers = path)]` specifies handler module
-    - Variant attributes for customization:
-      - `#[dispatch(handler = custom_fn)]` - Override handler for specific variant
-      - `#[dispatch(template = "path.j2")]` - Set template for variant
-      - `#[dispatch(nested)]` - Delegate to nested subcommand's `dispatch_config()`
-      - `#[dispatch(skip)]` - Skip variant (no handler registration)
-    - Hook support: `pre_dispatch`, `post_dispatch`, `post_output` per variant
-  - Re-exported `Dispatch` from `outstanding-clap` for ergonomic imports
+### Added
 
-- **Example**:
+- **Tag-based style syntax** - Ergonomic `[name]content[/name]` syntax for applying styles
+  - Two-pass rendering: MiniJinja first, then BBParser style tag processing
+  - Output mode support: tags become ANSI codes (Term), stripped (Text), or preserved (TermDebug)
+  - Unknown tags show `[tag?]` marker for easy debugging
+- **Template validation** - `validate_template()` function to catch unknown style tags
+  - Returns detailed error info with tag name and position
+  - Re-exported `UnknownTagError`, `UnknownTagErrors`, `UnknownTagKind` types
+- **New `outstanding-bbparser` crate** - Standalone BBCode-style tag parser for terminal styling
+  - `BBParser` with configurable `TagTransform` (Apply/Remove/Keep)
+  - `UnknownTagBehavior` (Passthrough with `?` marker, or Strip)
+  - Strict validation for unbalanced/unexpected close tags
+  - Optimized nested style application (reduced ANSI bloat)
+  - CSS identifier rules for tag names
+- **`#[derive(Dispatch)]` macro** - Convention-based command dispatch for clap `Subcommand` enums
+  - Generates `dispatch_config()` method that maps variants to handlers automatically
+  - PascalCase variants map to snake_case handlers (e.g., `AddTask` → `handlers::add_task`)
+  - Container attribute: `#[dispatch(handlers = path)]` specifies handler module
+  - Variant attributes: `handler`, `template`, `nested`, `skip`
+  - Hook support: `pre_dispatch`, `post_dispatch`, `post_output` per variant
 
-  ```rust
-  use clap::Subcommand;
-  use outstanding_clap::{Dispatch, Outstanding};
+### Removed
 
-  #[derive(Subcommand, Dispatch)]
-  #[dispatch(handlers = handlers)]
-  enum Commands {
-      Add { text: String },      // → handlers::add
-      List,                      // → handlers::list
+- **`style` filter** - Use tag syntax `[name]{{ value }}[/name]` instead
 
-      #[dispatch(handler = custom::complete_task)]
-      Complete { id: u32 },      // → custom::complete_task
+### Example
 
-      #[dispatch(nested)]
-      Admin(AdminCommands),      // → delegates to AdminCommands::dispatch_config()
-  }
+```rust
+use outstanding::{render_with_output, Theme, OutputMode};
+use console::Style;
 
-  Outstanding::builder()
-      .commands(Commands::dispatch_config())
-      .run_and_print(cmd, args);
-  ```
+let theme = Theme::new()
+    .add("title", Style::new().bold())
+    .add("count", Style::new().cyan());
+
+// Tag syntax for all styled content
+let template = r#"[title]Report[/title]: [count]{{ count }}[/count] items"#;
+
+let output = render_with_output(template, &data, &theme, OutputMode::Term)?;
+```
 
 ## [0.14.0] - 2026-01-12
 
@@ -290,8 +280,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Command handler system with `dispatch_from` convenience method
   - Archive variant support in clap integration
 
-[Unreleased]: https://github.com/arthur-debert/outstanding-rs/compare/v0.15.0...HEAD
-[0.15.0]: https://github.com/arthur-debert/outstanding-rs/compare/v0.14.0...v0.15.0
+[Unreleased]: https://github.com/arthur-debert/outstanding-rs/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/arthur-debert/outstanding-rs/compare/v0.14.0...v1.0.0
 [0.14.0]: https://github.com/arthur-debert/outstanding-rs/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/arthur-debert/outstanding-rs/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/arthur-debert/outstanding-rs/compare/v0.11.1...v0.12.0
