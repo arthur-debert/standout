@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING: Reorganized rendering modules into `src/rendering/`** - All rendering-related code is now consolidated under the `rendering` module for clearer organization and potential future extraction to a standalone crate.
+  - `render/` → `rendering/template/`
+  - `theme/` → `rendering/theme/`
+  - `style/` → `rendering/style/`
+  - `stylesheet/` → merged into `rendering/style/`
+  - `table/` → `rendering/table/`
+  - `output.rs` → `rendering/output.rs`
+  - `context.rs` → `rendering/context.rs`
+
+- **BREAKING: Merged `stylesheet` module into `style`** - The `stylesheet` module has been absorbed into `style`. All YAML parsing functionality is now accessed through the `style` module.
+  - `use outstanding::stylesheet::*` → `use outstanding::style::*`
+  - Types like `StylesheetRegistry`, `parse_stylesheet`, `ThemeVariants` are now in `style`
+
+### Added
+
+- **`rendering::prelude` module** - Convenient imports for standalone rendering:
+  ```rust
+  use outstanding::rendering::prelude::*;
+  ```
+  Includes: `render`, `render_auto`, `render_with_output`, `render_with_mode`, `render_with_vars`, `Theme`, `ColorMode`, `OutputMode`, `Renderer`, `Style`
+
+- **`render_with_vars()` function** - Simplified context injection for adding key-value pairs to templates without the full `ContextRegistry` system:
+  ```rust
+  let mut vars = HashMap::new();
+  vars.insert("version", "1.0.0");
+  let output = render_with_vars(template, &data, &theme, mode, vars)?;
+  ```
+
 ## [2.0.0] - 2026-01-14
 
 ## [1.0.0] - 2026-01-14
