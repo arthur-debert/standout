@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-01-15
+
 ### Fixed
 
 - **Fixed broken `clap` feature** - The `clap` feature was completely broken due to incorrect internal imports introduced during the rendering module reorganization:
@@ -330,7 +332,8 @@ let output = render_with_output(template, &data, &theme, OutputMode::Term)?;
   - Command handler system with `dispatch_from` convenience method
   - Archive variant support in clap integration
 
-[Unreleased]: https://github.com/arthur-debert/outstanding-rs/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/arthur-debert/outstanding-rs/compare/v2.1.1...HEAD
+[2.1.1]: https://github.com/arthur-debert/outstanding-rs/compare/v2.1.0...v2.1.1
 [2.1.0]: https://github.com/arthur-debert/outstanding-rs/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/arthur-debert/outstanding-rs/compare/v1.0.0...v2.0.0
 [1.0.0]: https://github.com/arthur-debert/outstanding-rs/compare/v0.15.0...v1.0.0
