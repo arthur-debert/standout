@@ -10,8 +10,8 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use super::app::get_terminal_width;
 use super::dispatch::{DispatchFn, DispatchOutput};
-use super::outstanding::get_terminal_width;
 use crate::cli::handler::{
     CommandContext, FnHandler, Handler, HandlerResult, Output as HandlerOutput,
 };
@@ -29,6 +29,7 @@ use crate::cli::hooks::Hooks;
 /// are captured at dispatch time rather than at registration time.
 pub(crate) trait CommandRecipe: Send + Sync {
     /// Returns the template for this command, if explicitly set.
+    #[allow(dead_code)]
     fn template(&self) -> Option<&str>;
 
     /// Returns hooks for this command, if set.
@@ -36,6 +37,7 @@ pub(crate) trait CommandRecipe: Send + Sync {
     fn hooks(&self) -> Option<&Hooks>;
 
     /// Takes ownership of hooks (for registration with AppBuilder).
+    #[allow(dead_code)]
     fn take_hooks(&mut self) -> Option<Hooks>;
 
     /// Creates a dispatch closure with the given configuration.
@@ -165,6 +167,7 @@ where
     T: Serialize + Send + Sync + 'static,
 {
     handler: Arc<H>,
+    #[allow(dead_code)]
     template: Option<String>,
     hooks: Option<Hooks>,
     _phantom: std::marker::PhantomData<T>,
@@ -184,6 +187,7 @@ where
         }
     }
 
+    #[allow(dead_code)]
     pub fn with_template(mut self, template: String) -> Self {
         self.template = Some(template);
         self
@@ -274,16 +278,19 @@ where
 /// The inner config is wrapped in a Mutex to allow interior mutability.
 pub(crate) struct ErasedConfigRecipe {
     config: std::sync::Mutex<Option<Box<dyn ErasedCommandConfig + Send>>>,
+    #[allow(dead_code)]
     template: Option<String>,
+    #[allow(dead_code)]
     hooks: std::sync::Mutex<Option<Hooks>>,
 }
 
 impl ErasedConfigRecipe {
-    pub fn new(mut config: Box<dyn ErasedCommandConfig + Send>) -> Self {
-        let template = config.template().map(String::from);
-        let hooks = config.take_hooks();
+    /// Creates a new recipe from an existing boxed handler (for group registration).
+    pub fn from_handler(mut handler: Box<dyn ErasedCommandConfig + Send>) -> Self {
+        let template = handler.template().map(String::from);
+        let hooks = handler.take_hooks();
         Self {
-            config: std::sync::Mutex::new(Some(config)),
+            config: std::sync::Mutex::new(Some(handler)),
             template,
             hooks: std::sync::Mutex::new(hooks),
         }
