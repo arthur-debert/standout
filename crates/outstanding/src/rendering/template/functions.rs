@@ -751,6 +751,31 @@ pub fn render_auto_with_context<T: Serialize>(
         match mode {
             OutputMode::Json => serde_json::to_string_pretty(data)
                 .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())),
+            OutputMode::Yaml => serde_yaml::to_string(data)
+                .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())),
+            OutputMode::Xml => quick_xml::se::to_string(data)
+                .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())),
+            OutputMode::Csv => {
+                let value = serde_json::to_value(data).map_err(|e| {
+                    Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
+                })?;
+                let (headers, rows) = crate::util::flatten_json_for_csv(&value);
+
+                let mut wtr = csv::Writer::from_writer(Vec::new());
+                wtr.write_record(&headers).map_err(|e| {
+                    Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
+                })?;
+                for row in rows {
+                    wtr.write_record(&row).map_err(|e| {
+                        Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
+                    })?;
+                }
+                let bytes = wtr.into_inner().map_err(|e| {
+                    Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
+                })?;
+                String::from_utf8(bytes)
+                    .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string()))
+            }
             _ => unreachable!("is_structured() returned true for non-structured mode"),
         }
     } else {
@@ -2012,5 +2037,32 @@ mod tests {
             "Got: {}",
             msg
         );
+    }
+
+    #[test]
+    fn test_render_auto_with_context_yaml_mode() {
+        use crate::context::{ContextRegistry, RenderContext};
+        use serde_json::json;
+
+        let theme = Theme::new();
+        let data = json!({"name": "test", "count": 42});
+
+        // Setup context registry (though strictly not used for structured output)
+        let registry = ContextRegistry::new();
+        let render_ctx = RenderContext::new(OutputMode::Yaml, Some(80), &theme, &data);
+
+        // This call previously panicked
+        let output = render_auto_with_context(
+            "unused template",
+            &data,
+            &theme,
+            OutputMode::Yaml,
+            &registry,
+            &render_ctx,
+        )
+        .unwrap();
+
+        assert!(output.contains("name: test"));
+        assert!(output.contains("count: 42"));
     }
 }
