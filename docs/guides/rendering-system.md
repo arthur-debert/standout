@@ -303,6 +303,22 @@ use outstanding::{render_with_output, OutputMode};
 let output = render_with_output(template, &data, &theme, OutputMode::Text)?;
 ```
 
+### With Extra Variables
+
+```rust
+use outstanding::{render_with_vars, OutputMode};
+use std::collections::HashMap;
+
+// Inject simple key-value pairs into the template context
+let mut vars = HashMap::new();
+vars.insert("version", "1.0.0");
+
+let output = render_with_vars(
+    "{{ name }} v{{ version }}",
+    &data, &theme, OutputMode::Text, vars,
+)?;
+```
+
 ### Auto-Dispatch (Template vs Serialize)
 
 ```rust
@@ -325,6 +341,21 @@ let output = render_with_mode(
     ColorMode::Dark,
 )?;
 ```
+
+## Rendering Prelude
+
+For convenient imports when using the rendering layer standalone:
+
+```rust
+use outstanding::rendering::prelude::*;
+
+let theme = Theme::new()
+    .add("title", Style::new().bold());
+
+let output = render("[title]{{ name }}[/title]", &data, &theme)?;
+```
+
+The prelude includes: `render`, `render_auto`, `render_with_output`, `render_with_mode`, `render_with_vars`, `Theme`, `ColorMode`, `OutputMode`, `Renderer`, and `Style`.
 
 ## Hot Reloading
 

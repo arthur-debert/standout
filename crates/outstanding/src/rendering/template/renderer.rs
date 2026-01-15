@@ -37,11 +37,11 @@ use minijinja::{Environment, Error};
 use outstanding_bbparser::{BBParser, TagTransform, UnknownTagBehavior};
 use serde::Serialize;
 
+use super::super::output::OutputMode;
+use super::super::style::Styles;
+use super::super::theme::Theme;
 use super::filters::register_filters;
 use super::registry::{walk_template_dir, ResolvedTemplate, TemplateRegistry};
-use crate::output::OutputMode;
-use crate::style::Styles;
-use crate::theme::Theme;
 
 /// A renderer with pre-registered templates.
 ///
@@ -158,7 +158,7 @@ impl Renderer {
             .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string()))?;
 
         // Detect color mode and resolve styles for that mode
-        let color_mode = crate::theme::detect_color_mode();
+        let color_mode = super::super::theme::detect_color_mode();
         let styles = theme.resolve_styles(Some(color_mode));
 
         let mut env = Environment::new();
