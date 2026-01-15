@@ -208,10 +208,38 @@ Use at startup or in tests to fail fast on typos.
 
 ## Context Injection
 
-Add extra values to template context:
+### Simple Variables with `render_with_vars`
+
+For adding simple key-value pairs to the template context:
 
 ```rust
-use outstanding::{render_with_context, ContextRegistry, RenderContext};
+use outstanding::{render_with_vars, Theme, OutputMode};
+use std::collections::HashMap;
+
+let theme = Theme::new();
+
+let mut vars = HashMap::new();
+vars.insert("version", "1.0.0");
+vars.insert("app_name", "MyApp");
+
+let output = render_with_vars(
+    "{{ name }} - {{ app_name }} v{{ version }}",
+    &data,
+    &theme,
+    OutputMode::Text,
+    vars,
+)?;
+```
+
+This is the recommended approach for most use cases.
+
+### Full Context System
+
+For dynamic context computed at render time:
+
+```rust
+use outstanding::{render_with_context, Theme, OutputMode};
+use outstanding::context::{ContextRegistry, RenderContext};
 use minijinja::Value;
 
 let mut context = ContextRegistry::new();
@@ -220,13 +248,12 @@ context.add_provider("timestamp", |_ctx: &RenderContext| {
     Value::from(chrono::Utc::now().to_rfc3339())
 });
 
-let render_ctx = RenderContext {
-    output_mode: OutputMode::Term,
-    terminal_width: Some(80),
-    theme: &theme,
-    data: &serde_json::to_value(&data)?,
-    extras: Default::default(),
-};
+let render_ctx = RenderContext::new(
+    OutputMode::Term,
+    Some(80),
+    &theme,
+    &serde_json::to_value(&data)?,
+);
 
 let output = render_with_context(
     template,

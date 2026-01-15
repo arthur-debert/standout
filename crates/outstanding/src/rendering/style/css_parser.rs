@@ -459,7 +459,7 @@ mod tests {
         // Ensure "error" style exists
         assert!(base.contains_key("error"));
 
-        let style = base.get("error").unwrap();
+        let style = base.get("error").unwrap().clone().force_styling(true);
         let styled = style.apply_to("text").to_string();
         // Check for red (31) and bold (1).
         assert!(styled.contains("\x1b[31m"));
@@ -477,7 +477,7 @@ mod tests {
 
         // Light (base) -> Red
         if let StyleValue::Concrete(s) = light.get("text").unwrap() {
-            let out = s.apply_to("x").to_string();
+            let out = s.clone().force_styling(true).apply_to("x").to_string();
             assert!(out.contains("\x1b[31m")); // Red
         } else {
             panic!("Expected Concrete style for light mode");
@@ -485,7 +485,7 @@ mod tests {
 
         // Dark -> White
         if let StyleValue::Concrete(s) = dark.get("text").unwrap() {
-            let out = s.apply_to("x").to_string();
+            let out = s.clone().force_styling(true).apply_to("x").to_string();
             assert!(out.contains("\x1b[37m")); // White
         } else {
             panic!("Expected Concrete style for dark mode");
@@ -525,7 +525,7 @@ mod tests {
         // or adding accessors to StyleValue/StyleAttributes.
         // But successful parsing covers the code paths.
         // We can verify effect by applying to string.
-        let style = base.get("all-props").unwrap();
+        let style = base.get("all-props").unwrap().clone().force_styling(true);
         let out = style.apply_to("text").to_string();
 
         assert!(out.contains("\x1b[31m")); // fg red
@@ -553,7 +553,7 @@ mod tests {
         "#;
         let variants = parse_css(css).unwrap();
         let base = variants.base();
-        let style = base.get("aliases").unwrap();
+        let style = base.get("aliases").unwrap().clone().force_styling(true);
         let out = style.apply_to("text").to_string();
 
         assert!(out.contains("\x1b[42m")); // bg green
@@ -567,7 +567,7 @@ mod tests {
     fn test_text_decoration_line_through() {
         let css = ".strike { text-decoration: line-through; }";
         let variants = parse_css(css).unwrap();
-        let style = variants.base().get("strike").unwrap();
+        let style = variants.base().get("strike").unwrap().clone().force_styling(true);
         let out = style.apply_to("text").to_string();
         assert!(out.contains("\x1b[9m"));
     }
