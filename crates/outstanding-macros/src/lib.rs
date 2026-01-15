@@ -26,22 +26,11 @@
 //! - **Release builds**: Use embedded content, zero file I/O
 //! - **Debug builds**: Hot-reload from disk if source path exists
 //!
-//! # Usage with RenderSetup
+//! # Examples
 //!
-//! The recommended way to use these macros is with [`RenderSetup`]:
-//!
-//! ```rust,ignore
-//! use outstanding::{embed_templates, embed_styles, RenderSetup};
-//!
-//! let app = RenderSetup::new()
-//!     .templates(embed_templates!("src/templates"))
-//!     .styles(embed_styles!("src/styles"))
-//!     .build()?;
-//!
-//! // In debug: reads from disk for hot-reload (if path exists)
-//! // In release: uses embedded content
-//! let output = app.render("list", &data)?;
-//! ```
+//! For working examples, see:
+//! - `outstanding/tests/embed_macros.rs` - embedding macros
+//! - `outstanding/tests/dispatch_derive.rs` - dispatch derive macro
 //!
 //! [`EmbeddedSource`]: outstanding::EmbeddedSource
 //! [`RenderSetup`]: outstanding::RenderSetup
@@ -75,19 +64,7 @@ use syn::{parse_macro_input, DeriveInput, LitStr};
 /// - **Release builds**: Uses embedded content (zero file I/O)
 /// - **Debug builds**: Reads from disk if source path exists (hot-reload)
 ///
-/// # Example
-///
-/// ```rust,ignore
-/// use outstanding::{embed_templates, RenderSetup};
-///
-/// // Recommended: use with RenderSetup
-/// let app = RenderSetup::new()
-///     .templates(embed_templates!("src/templates"))
-///     .build()?;
-///
-/// // Or convert directly to registry
-/// let registry: TemplateRegistry = embed_templates!("src/templates").into();
-/// ```
+/// For working examples, see `outstanding/tests/embed_macros.rs`.
 ///
 /// # Compile-Time Errors
 ///
@@ -125,19 +102,7 @@ pub fn embed_templates(input: TokenStream) -> TokenStream {
 /// - **Release builds**: Uses embedded content (zero file I/O)
 /// - **Debug builds**: Reads from disk if source path exists (hot-reload)
 ///
-/// # Example
-///
-/// ```rust,ignore
-/// use outstanding::{embed_styles, RenderSetup};
-///
-/// // Recommended: use with RenderSetup
-/// let app = RenderSetup::new()
-///     .styles(embed_styles!("src/styles"))
-///     .build()?;
-///
-/// // Or convert directly to registry
-/// let registry: StylesheetRegistry = embed_styles!("src/styles").into();
-/// ```
+/// For working examples, see `outstanding/tests/embed_macros.rs`.
 ///
 /// # Compile-Time Errors
 ///
@@ -160,52 +125,14 @@ pub fn embed_styles(input: TokenStream) -> TokenStream {
 /// This macro eliminates boilerplate command-to-handler mappings by using
 /// naming conventions with explicit overrides when needed.
 ///
-/// # Motivation
-///
-/// Without this macro, you must explicitly map every command:
-///
-/// ```rust,ignore
-/// dispatch! {
-///     add => handlers::add,
-///     list => handlers::list,
-///     complete => handlers::complete,
-/// }
-/// ```
-///
-/// With `#[derive(Dispatch)]`, the mapping becomes implicit:
-///
-/// ```rust,ignore
-/// #[derive(Subcommand, Dispatch)]
-/// #[dispatch(handlers = handlers)]
-/// enum Commands {
-///     Add(AddArgs),      // → handlers::add
-///     List(ListArgs),    // → handlers::list
-///     Complete(Args),    // → handlers::complete
-/// }
-/// ```
+/// For working examples, see `outstanding/tests/dispatch_derive.rs`.
 ///
 /// # Convention-Based Defaults
 ///
 /// - **Handler**: `{handlers_module}::{variant_snake_case}`
+///   - `Add` → `handlers::add`
+///   - `ListAll` → `handlers::list_all`
 /// - **Template**: `{variant_snake_case}.j2`
-///
-/// # Explicit Overrides
-///
-/// ```rust,ignore
-/// #[derive(Subcommand, Dispatch)]
-/// #[dispatch(handlers = handlers)]
-/// enum Commands {
-///     #[dispatch(template = "custom/add.j2")]
-///     Add(AddArgs),
-///
-///     #[dispatch(
-///         handler = custom::list_all,
-///         pre_dispatch = validate_auth,
-///         post_dispatch = log_action,
-///     )]
-///     List(ListArgs),
-/// }
-/// ```
 ///
 /// # Container Attributes
 ///
@@ -228,33 +155,7 @@ pub fn embed_styles(input: TokenStream) -> TokenStream {
 /// # Generated Code
 ///
 /// Generates a `dispatch_config()` method returning a closure for
-/// `App::builder().commands()`:
-///
-/// ```rust,ignore
-/// App::builder()
-///     .commands(Commands::dispatch_config())
-///     .build()?
-///     .run(Cli::command(), std::env::args());
-/// ```
-///
-/// # Nested Subcommands
-///
-/// Nested enums are handled recursively, but must use `#[dispatch(nested)]`:
-///
-/// ```rust,ignore
-/// #[derive(Subcommand, Dispatch)]
-/// #[dispatch(handlers = handlers)]
-/// enum Commands {
-///     #[dispatch(nested)]
-///     Db(DbCommands),  // Delegates to DbCommands::dispatch_config()
-/// }
-///
-/// #[derive(Subcommand, Dispatch)]
-/// #[dispatch(handlers = handlers::db)]
-/// enum DbCommands {
-///     Migrate(MigrateArgs),  // → handlers::db::migrate
-/// }
-/// ```
+/// use with `App::builder().commands()`.
 #[proc_macro_derive(Dispatch, attributes(dispatch))]
 pub fn dispatch_derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);

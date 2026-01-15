@@ -22,16 +22,7 @@
 //! and [`outstanding::TemplateRegistry`] / [`outstanding::StylesheetRegistry`]
 //! for the registry APIs that handle both runtime and embedded resources.
 //!
-//! # Example
-//!
-//! ```rust,ignore
-//! use outstanding::embed_templates;
-//!
-//! // At compile time: walks directory, reads files
-//! // At runtime: registry applies extension priority and normalization
-//! let templates = embed_templates!("./templates");
-//! let content = templates.get_content("report/summary")?;
-//! ```
+//! For working examples, see `outstanding/tests/embed_macros.rs`.
 
 use proc_macro2::TokenStream;
 use quote::quote;
