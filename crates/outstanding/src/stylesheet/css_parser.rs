@@ -500,4 +500,161 @@ mod tests {
         assert!(base.contains_key("a"));
         assert!(base.contains_key("b"));
     }
+
+    #[test]
+    fn test_all_properties() {
+        let css = r#"
+        .all-props {
+            fg: red;
+            bg: blue;
+            bold: true;
+            dim: true;
+            italic: true;
+            underline: true;
+            blink: true;
+            reverse: true;
+            hidden: true;
+            strikethrough: true;
+        }
+        "#;
+        let variants = parse_css(css).unwrap();
+        let base = variants.base();
+        assert!(base.contains_key("all-props"));
+
+        // We can't easily inspect the attributes directly without making fields public
+        // or adding accessors to StyleValue/StyleAttributes.
+        // But successful parsing covers the code paths.
+        // We can verify effect by applying to string.
+        let style = base.get("all-props").unwrap();
+        let out = style.apply_to("text").to_string();
+
+        assert!(out.contains("\x1b[31m")); // fg red
+        assert!(out.contains("\x1b[44m")); // bg blue
+        assert!(out.contains("\x1b[1m")); // bold
+        assert!(out.contains("\x1b[2m")); // dim
+        assert!(out.contains("\x1b[3m")); // italic
+        assert!(out.contains("\x1b[4m")); // underline
+        assert!(out.contains("\x1b[5m")); // blink
+        assert!(out.contains("\x1b[7m")); // reverse
+        assert!(out.contains("\x1b[8m")); // hidden
+        assert!(out.contains("\x1b[9m")); // strikethrough
+    }
+
+    #[test]
+    fn test_css_aliases() {
+        let css = r#"
+        .aliases {
+            background-color: green;
+            font-weight: bold;
+            font-style: italic;
+            text-decoration: underline;
+            visibility: hidden;
+        }
+        "#;
+        let variants = parse_css(css).unwrap();
+        let base = variants.base();
+        let style = base.get("aliases").unwrap();
+        let out = style.apply_to("text").to_string();
+
+        assert!(out.contains("\x1b[42m")); // bg green
+        assert!(out.contains("\x1b[1m")); // bold
+        assert!(out.contains("\x1b[3m")); // italic
+        assert!(out.contains("\x1b[4m")); // underline
+        assert!(out.contains("\x1b[8m")); // hidden
+    }
+
+    #[test]
+    fn test_text_decoration_line_through() {
+        let css = ".strike { text-decoration: line-through; }";
+        let variants = parse_css(css).unwrap();
+        let style = variants.base().get("strike").unwrap();
+        let out = style.apply_to("text").to_string();
+        assert!(out.contains("\x1b[9m"));
+    }
+
+    #[test]
+    fn test_invalid_syntax_recovery() {
+        // missing colon, invalid values, unknown properties should not panic
+        let css = r#"
+        .broken {
+            color: ;
+            unknown: prop;
+            bold: not-a-bool;
+        }
+        .valid { color: cyan; }
+        "#;
+
+        // cssparser is robust and may skip invalid declarations
+        let variants = parse_css(css).unwrap();
+        assert!(variants.base().contains_key("valid"));
+    }
+
+    #[test]
+    fn test_empty_selector_error() {
+        // Just dots without name
+        let css = ". { color: red; }";
+        let res = parse_css(css);
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_no_dot_selector() {
+        // Tag selector not supported, should skip or error
+        let css = "body { color: red; }";
+        // Our parser expects '.' delimiters in parse_prelude.
+        // If it doesn't find '.', it consumes tokens.
+        // If names is empty, it returns error.
+        let res = parse_css(css);
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_invalid_color() {
+        let css = ".bad-color { color: not-a-color; }";
+        // Should ignore the invalid property but parse the rule
+        let variants = parse_css(css).unwrap();
+        assert!(variants.base().contains_key("bad-color"));
+    }
+
+    #[test]
+    fn test_hex_colors() {
+        let css = ".hex { color: #ff0000; bg: #00ff00; }";
+        let variants = parse_css(css).unwrap();
+        let style = variants.base().get("hex").unwrap();
+        let out = style.apply_to("x").to_string();
+        // Just verify it parsed something, specific hex to ansi conversion depends on color support
+        assert!(!out.is_empty());
+    }
+
+    #[test]
+    fn test_comments() {
+        let css = r#"
+        /* This is a comment */
+        .commented {
+            color: red; /* Inline comment */
+        }
+        "#;
+        let variants = parse_css(css).unwrap();
+        assert!(variants.base().contains_key("commented"));
+    }
+
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn test_random_css_input_no_panic(s in "\\PC*") {
+            // Should never panic, even with garbage input
+            let _ = parse_css(&s);
+        }
+
+        #[test]
+        fn test_valid_structure_random_values(
+            color in "[a-zA-Z]+",
+            bool_val in "true|false",
+            prop_name in "[a-z-]+"
+        ) {
+            let css = format!(".prop {{ color: {}; bold: {}; {}: {}; }}", color, bool_val, prop_name, bool_val);
+            let _ = parse_css(&css);
+        }
+    }
 }

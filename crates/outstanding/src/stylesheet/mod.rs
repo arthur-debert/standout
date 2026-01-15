@@ -122,6 +122,7 @@
 
 mod attributes;
 mod color;
+mod css_parser;
 mod definition;
 mod error;
 mod parser;
@@ -129,6 +130,7 @@ mod registry;
 
 pub use attributes::StyleAttributes;
 pub use color::ColorDef;
+pub use css_parser::parse_css;
 pub use definition::StyleDefinition;
 pub use error::StylesheetError;
 pub use parser::{parse_stylesheet, ThemeVariants};
