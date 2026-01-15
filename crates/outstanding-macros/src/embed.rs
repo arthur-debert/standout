@@ -19,7 +19,7 @@
 //!
 //! These macros are the compile-time counterpart to runtime file loading.
 //! See [`outstanding::file_loader`] for the full file loading infrastructure
-//! and [`outstanding::TemplateRegistry`] / [`outstanding::stylesheet::StylesheetRegistry`]
+//! and [`outstanding::TemplateRegistry`] / [`outstanding::StylesheetRegistry`]
 //! for the registry APIs that handle both runtime and embedded resources.
 //!
 //! # Example
@@ -41,7 +41,7 @@ use syn::LitStr;
 /// Template file extensions (must match outstanding::render::registry::TEMPLATE_EXTENSIONS).
 pub const TEMPLATE_EXTENSIONS: &[&str] = &[".jinja", ".jinja2", ".j2", ".txt"];
 
-/// Stylesheet file extensions (must match outstanding::stylesheet::STYLESHEET_EXTENSIONS).
+/// Stylesheet file extensions (must match outstanding::style::STYLESHEET_EXTENSIONS).
 pub const STYLESHEET_EXTENSIONS: &[&str] = &[".yaml", ".yml"];
 
 /// Generates code to create an EmbeddedTemplates source.

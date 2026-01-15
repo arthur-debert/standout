@@ -567,7 +567,12 @@ mod tests {
     fn test_text_decoration_line_through() {
         let css = ".strike { text-decoration: line-through; }";
         let variants = parse_css(css).unwrap();
-        let style = variants.base().get("strike").unwrap().clone().force_styling(true);
+        let style = variants
+            .base()
+            .get("strike")
+            .unwrap()
+            .clone()
+            .force_styling(true);
         let out = style.apply_to("text").to_string();
         assert!(out.contains("\x1b[9m"));
     }

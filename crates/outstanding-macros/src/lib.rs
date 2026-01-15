@@ -148,7 +148,7 @@ pub fn embed_templates(input: TokenStream) -> TokenStream {
 ///
 /// [`EmbeddedStyles`]: outstanding::EmbeddedStyles
 /// [`RenderSetup`]: outstanding::RenderSetup
-/// [`StylesheetRegistry`]: outstanding::stylesheet::StylesheetRegistry
+/// [`StylesheetRegistry`]: outstanding::StylesheetRegistry
 #[proc_macro]
 pub fn embed_styles(input: TokenStream) -> TokenStream {
     let path_lit = parse_macro_input!(input as LitStr);

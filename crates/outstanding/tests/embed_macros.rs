@@ -6,8 +6,7 @@
 
 #![cfg(feature = "macros")]
 
-use outstanding::stylesheet::StylesheetRegistry;
-use outstanding::{embed_styles, embed_templates, TemplateRegistry};
+use outstanding::{embed_styles, embed_templates, StylesheetRegistry, TemplateRegistry};
 
 // =============================================================================
 // Template embedding tests
