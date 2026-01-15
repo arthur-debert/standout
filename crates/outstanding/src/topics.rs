@@ -65,17 +65,12 @@ use crate::{render_with_output, Error, OutputMode, Theme};
 /// Fixed width for the name column in topic listings.
 const NAME_COLUMN_WIDTH: usize = 14;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum TopicType {
+    #[default]
     Text,
     Markdown,
     Unknown,
-}
-
-impl Default for TopicType {
-    fn default() -> Self {
-        Self::Text
-    }
 }
 
 #[derive(Debug, Clone)]
