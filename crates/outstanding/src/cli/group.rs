@@ -122,6 +122,7 @@ pub(crate) trait ErasedCommandConfig {
         path: &str,
         template: String,
         context_registry: ContextRegistry,
+        theme: Theme,
     ) -> DispatchFn;
 }
 
@@ -339,6 +340,7 @@ where
         _path: &str,
         template: String,
         context_registry: ContextRegistry,
+        theme: Theme,
     ) -> DispatchFn {
         let handler = Arc::new(self.handler);
 
@@ -357,7 +359,6 @@ where
                                 .map_err(|e| format!("Hook error: {}", e))?;
                         }
 
-                        let theme = Theme::new();
                         let render_ctx = RenderContext::new(
                             ctx.output_mode,
                             get_terminal_width(),
@@ -421,6 +422,7 @@ where
         _path: &str,
         template: String,
         context_registry: ContextRegistry,
+        theme: Theme,
     ) -> DispatchFn {
         let handler = Arc::new(self.handler);
 
@@ -439,7 +441,6 @@ where
                                 .map_err(|e| format!("Hook error: {}", e))?;
                         }
 
-                        let theme = Theme::new();
                         let render_ctx = RenderContext::new(
                             ctx.output_mode,
                             get_terminal_width(),

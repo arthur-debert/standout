@@ -985,6 +985,7 @@ impl AppBuilder {
         }
 
         // Register all entries from the group builder
+        let theme = self.theme.clone().unwrap_or_default();
         for (name, entry) in builder.entries {
             match entry {
                 GroupEntry::Command { mut handler } => {
@@ -997,7 +998,12 @@ impl AppBuilder {
                         self.command_hooks.insert(name.clone(), hooks);
                     }
 
-                    let dispatch = handler.register(&name, template, self.context_registry.clone());
+                    let dispatch = handler.register(
+                        &name,
+                        template,
+                        self.context_registry.clone(),
+                        theme.clone(),
+                    );
                     self.commands.insert(name, dispatch);
                 }
                 GroupEntry::Group { builder: nested } => {
@@ -1073,6 +1079,7 @@ impl AppBuilder {
 
         // Register the command
         let context_registry = self.context_registry.clone();
+        let theme = self.theme.clone().unwrap_or_default();
         let dispatch: DispatchFn = Arc::new(
             move |matches: &ArgMatches, ctx: &CommandContext, hooks: Option<&Hooks>| {
                 let result = config.handler.handle(matches, ctx);
@@ -1088,7 +1095,6 @@ impl AppBuilder {
                                 .map_err(|e| format!("Hook error: {}", e))?;
                         }
 
-                        let theme = Theme::new();
                         let render_ctx = RenderContext::new(
                             ctx.output_mode,
                             get_terminal_width(),
@@ -1122,6 +1128,7 @@ impl AppBuilder {
 
     /// Helper to register a group's commands recursively.
     fn register_group(&mut self, prefix: &str, builder: GroupBuilder) {
+        let theme = self.theme.clone().unwrap_or_default();
         for (name, entry) in builder.entries {
             let path = format!("{}.{}", prefix, name);
 
@@ -1139,7 +1146,12 @@ impl AppBuilder {
                     }
 
                     // Register the dispatch function
-                    let dispatch = handler.register(&path, template, self.context_registry.clone());
+                    let dispatch = handler.register(
+                        &path,
+                        template,
+                        self.context_registry.clone(),
+                        theme.clone(),
+                    );
                     self.commands.insert(path, dispatch);
                 }
                 GroupEntry::Group { builder: nested } => {
@@ -1313,6 +1325,7 @@ impl AppBuilder {
         let template = template.to_string();
         let handler = Arc::new(handler);
         let context_registry = self.context_registry.clone();
+        let theme = self.theme.clone().unwrap_or_default();
 
         let dispatch: DispatchFn = Arc::new(
             move |matches: &ArgMatches, ctx: &CommandContext, hooks: Option<&Hooks>| {
@@ -1332,7 +1345,6 @@ impl AppBuilder {
                         }
 
                         // Build render context for context providers
-                        let theme = Theme::new();
                         let render_ctx = RenderContext::new(
                             ctx.output_mode,
                             get_terminal_width(),
@@ -3412,5 +3424,104 @@ mod tests {
         // Without default command, naked invocation should return NoMatch
         let result = builder.dispatch_from(cmd, ["app"]);
         assert!(!result.is_handled());
+    }
+
+    // ============================================================================
+    // Theme Integration Tests (Issue #31)
+    // ============================================================================
+
+    #[test]
+    fn test_theme_passed_to_command_dispatch() {
+        use console::Style;
+        use serde_json::json;
+
+        // Create a theme with a custom "category" style
+        let theme = Theme::new().add("category", Style::new().bold());
+
+        // Build app with theme and a command using the category style
+        let builder = App::builder().theme(theme).command(
+            "list",
+            |_m, _ctx| Ok(HandlerOutput::Render(json!({"name": "test"}))),
+            "[category]{{ name }}[/category]",
+        );
+
+        let cmd = Command::new("app").subcommand(Command::new("list"));
+
+        // Use --output=term to force Term mode where styles are applied
+        let result = builder.dispatch_from(cmd, ["app", "--output=term", "list"]);
+
+        assert!(result.is_handled());
+        let output = result.output().unwrap();
+
+        // If theme is NOT passed, unknown tags show as [category?]...[/category?]
+        // If theme IS passed correctly, the style tag is processed without the ? marker
+        assert!(
+            !output.contains("[category?]"),
+            "Theme was not passed to dispatch - output contains unknown style marker: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_theme_passed_to_command_with_dispatch() {
+        use console::Style;
+        use serde_json::json;
+
+        // Create a theme with a custom "highlight" style
+        let theme = Theme::new().add("highlight", Style::new().bold());
+
+        // Build app with theme using command_with
+        let builder = App::builder().theme(theme).command_with(
+            "show",
+            |_m, _ctx| Ok(HandlerOutput::Render(json!({"value": "data"}))),
+            |cfg| cfg.template("[highlight]{{ value }}[/highlight]"),
+        );
+
+        let cmd = Command::new("app").subcommand(Command::new("show"));
+
+        // Use --output=term to force Term mode where styles are applied
+        let result = builder.dispatch_from(cmd, ["app", "--output=term", "show"]);
+
+        assert!(result.is_handled());
+        let output = result.output().unwrap();
+
+        assert!(
+            !output.contains("[highlight?]"),
+            "Theme was not passed to command_with dispatch - output: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_theme_passed_to_group_command_dispatch() {
+        use console::Style;
+        use serde_json::json;
+
+        // Create a theme with a custom style
+        let theme = Theme::new().add("emphasis", Style::new().bold());
+
+        // Build app with theme and grouped commands
+        let builder = App::builder().theme(theme).group("db", |g| {
+            g.command_with(
+                "status",
+                |_m, _ctx| Ok(HandlerOutput::Render(json!({"status": "ok"}))),
+                |cfg| cfg.template("[emphasis]{{ status }}[/emphasis]"),
+            )
+        });
+
+        let cmd =
+            Command::new("app").subcommand(Command::new("db").subcommand(Command::new("status")));
+
+        // Use --output=term to force Term mode where styles are applied
+        let result = builder.dispatch_from(cmd, ["app", "--output=term", "db", "status"]);
+
+        assert!(result.is_handled());
+        let output = result.output().unwrap();
+
+        assert!(
+            !output.contains("[emphasis?]"),
+            "Theme was not passed to group dispatch - output: {}",
+            output
+        );
     }
 }
