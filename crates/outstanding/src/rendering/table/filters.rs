@@ -45,7 +45,7 @@ use minijinja::{Environment, Value};
 
 use super::decorator::{BorderStyle, Table};
 use super::formatter::TableFormatter;
-use super::types::{Align, Column, TabularSpec, TruncateAt, Width};
+use super::types::{Align, Column, Overflow, TabularSpec, TruncateAt, Width};
 use super::util::{
     display_width, pad_center, pad_left, pad_right, truncate_end, truncate_middle, truncate_start,
 };
@@ -322,13 +322,72 @@ fn parse_column(value: &Value) -> Result<Column, minijinja::Error> {
 
     // Optional: anchor
     if let Ok(anchor_val) = value.get_attr("anchor") {
-        if !anchor_val.is_none() && !anchor_val.is_undefined()
-            && anchor_val.to_string().to_lowercase() == "right" {
-                col = col.anchor_right();
-            }
+        if !anchor_val.is_none()
+            && !anchor_val.is_undefined()
+            && anchor_val.to_string().to_lowercase() == "right"
+        {
+            col = col.anchor_right();
+        }
+    }
+
+    // Optional: overflow
+    if let Ok(overflow_val) = value.get_attr("overflow") {
+        if !overflow_val.is_none() && !overflow_val.is_undefined() {
+            col = col.overflow(parse_overflow(&overflow_val)?);
+        }
     }
 
     Ok(col)
+}
+
+/// Parse an overflow specification from a template value.
+fn parse_overflow(value: &Value) -> Result<Overflow, minijinja::Error> {
+    // String shorthand: "truncate", "wrap", "clip", "expand"
+    if let Some(s) = value.as_str() {
+        return Ok(match s.to_lowercase().as_str() {
+            "wrap" => Overflow::wrap(),
+            "clip" => Overflow::Clip,
+            "expand" => Overflow::Expand,
+            "truncate_start" => Overflow::truncate(TruncateAt::Start),
+            "truncate_middle" => Overflow::truncate(TruncateAt::Middle),
+            _ => Overflow::truncate(TruncateAt::End), // "truncate" or "truncate_end"
+        });
+    }
+
+    // Object form: {"truncate": {"at": "middle", "marker": "..."}} or {"wrap": {"indent": 2}}
+    if let Ok(truncate_obj) = value.get_attr("truncate") {
+        if !truncate_obj.is_none() && !truncate_obj.is_undefined() {
+            let at = if let Ok(at_val) = truncate_obj.get_attr("at") {
+                parse_truncate(&at_val.to_string())
+            } else {
+                TruncateAt::End
+            };
+            let marker = if let Ok(marker_val) = truncate_obj.get_attr("marker") {
+                if !marker_val.is_none() && !marker_val.is_undefined() {
+                    marker_val.to_string()
+                } else {
+                    "…".to_string()
+                }
+            } else {
+                "…".to_string()
+            };
+            return Ok(Overflow::truncate_with_marker(at, marker));
+        }
+    }
+
+    if let Ok(wrap_obj) = value.get_attr("wrap") {
+        if !wrap_obj.is_none() && !wrap_obj.is_undefined() {
+            let indent = if let Ok(indent_val) = wrap_obj.get_attr("indent") {
+                indent_val.as_usize().unwrap_or(0)
+            } else {
+                0
+            };
+            return Ok(Overflow::wrap_with_indent(indent));
+        }
+    }
+
+    // Default to truncate
+    Ok(Overflow::default())
 }
 
 /// Parse a width specification from a template value.
@@ -970,5 +1029,93 @@ mod tests {
         assert_eq!(display_width(&result), 30);
         assert!(result.starts_with("L    "));
         assert!(result.ends_with("R    "));
+    }
+
+    #[test]
+    fn function_tabular_overflow_clip() {
+        let mut env = setup_env();
+        env.add_template(
+            "test",
+            r#"{% set fmt = tabular([{"width": 5, "overflow": "clip"}]) %}{{ fmt.row(["Hello World"]) }}"#,
+        )
+        .unwrap();
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(context!())
+            .unwrap();
+        // Clip truncates without ellipsis
+        assert_eq!(result, "Hello");
+        assert!(!result.contains("…"));
+    }
+
+    #[test]
+    fn function_tabular_overflow_wrap() {
+        let mut env = setup_env();
+        env.add_template(
+            "test",
+            r#"{% set fmt = tabular([{"width": 8, "overflow": "wrap"}]) %}{{ fmt.row(["This wraps"]) }}"#,
+        )
+        .unwrap();
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(context!())
+            .unwrap();
+        // Content fits in 8 chars with wrap mode
+        assert_eq!(display_width(&result), 8);
+    }
+
+    #[test]
+    fn function_tabular_overflow_truncate_middle() {
+        let mut env = setup_env();
+        env.add_template(
+            "test",
+            r#"{% set fmt = tabular([{"width": 10, "overflow": "truncate_middle"}]) %}{{ fmt.row(["abcdefghijklmno"]) }}"#,
+        )
+        .unwrap();
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(context!())
+            .unwrap();
+        assert_eq!(display_width(&result), 10);
+        assert!(result.contains("…"));
+        // Middle truncate keeps start and end
+        assert!(result.starts_with("abcd"));
+    }
+
+    #[test]
+    fn function_tabular_overflow_object_truncate() {
+        let mut env = setup_env();
+        env.add_template(
+            "test",
+            r#"{% set fmt = tabular([{"width": 10, "overflow": {"truncate": {"at": "start", "marker": "..."}}}]) %}{{ fmt.row(["Hello World"]) }}"#,
+        )
+        .unwrap();
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(context!())
+            .unwrap();
+        assert!(result.starts_with("..."));
+        assert_eq!(display_width(&result), 10);
+    }
+
+    #[test]
+    fn function_tabular_overflow_object_wrap() {
+        let mut env = setup_env();
+        env.add_template(
+            "test",
+            r#"{% set fmt = tabular([{"width": 10, "overflow": {"wrap": {"indent": 2}}}]) %}{{ fmt.row(["Short"]) }}"#,
+        )
+        .unwrap();
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(context!())
+            .unwrap();
+        // Content fits, so just padded
+        assert_eq!(display_width(&result), 10);
     }
 }
