@@ -327,8 +327,7 @@ impl Table {
         line = format!(
             "{}{}{}",
             left,
-            std::iter::repeat_n(chars.horizontal, total_content)
-                .collect::<String>(),
+            std::iter::repeat_n(chars.horizontal, total_content).collect::<String>(),
             right
         );
 
@@ -392,6 +391,98 @@ enum LineType {
     Top,
     Middle,
     Bottom,
+}
+
+// ============================================================================
+// MiniJinja Object Implementation
+// ============================================================================
+
+impl minijinja::value::Object for Table {
+    fn get_value(self: &std::sync::Arc<Self>, key: &minijinja::Value) -> Option<minijinja::Value> {
+        match key.as_str()? {
+            "num_columns" => Some(minijinja::Value::from(self.num_columns())),
+            "border" => Some(minijinja::Value::from(format!("{:?}", self.get_border()))),
+            _ => None,
+        }
+    }
+
+    fn enumerate(self: &std::sync::Arc<Self>) -> minijinja::value::Enumerator {
+        minijinja::value::Enumerator::Str(&["num_columns", "border"])
+    }
+
+    fn call_method(
+        self: &std::sync::Arc<Self>,
+        _state: &minijinja::State,
+        name: &str,
+        args: &[minijinja::Value],
+    ) -> Result<minijinja::Value, minijinja::Error> {
+        match name {
+            "row" => {
+                // row([value1, value2, ...]) - format a data row
+                if args.is_empty() {
+                    return Err(minijinja::Error::new(
+                        minijinja::ErrorKind::MissingArgument,
+                        "row() requires an array of values",
+                    ));
+                }
+
+                let values: Vec<String> = match args[0].try_iter() {
+                    Ok(iter) => iter.map(|v| v.to_string()).collect(),
+                    Err(_) => vec![args[0].to_string()],
+                };
+
+                let formatted = self.row(&values);
+                Ok(minijinja::Value::from(formatted))
+            }
+            "header_row" => {
+                // header_row() - format the header row
+                Ok(minijinja::Value::from(self.header_row()))
+            }
+            "separator_row" => {
+                // separator_row() - format a separator row
+                Ok(minijinja::Value::from(self.separator_row()))
+            }
+            "top_border" => {
+                // top_border() - format the top border
+                Ok(minijinja::Value::from(self.top_border()))
+            }
+            "bottom_border" => {
+                // bottom_border() - format the bottom border
+                Ok(minijinja::Value::from(self.bottom_border()))
+            }
+            "render_all" => {
+                // render_all(rows) - render complete table with all rows
+                if args.is_empty() {
+                    return Err(minijinja::Error::new(
+                        minijinja::ErrorKind::MissingArgument,
+                        "render_all() requires an array of rows",
+                    ));
+                }
+
+                let rows_iter = args[0].try_iter().map_err(|_| {
+                    minijinja::Error::new(
+                        minijinja::ErrorKind::InvalidOperation,
+                        "render_all() requires an array of rows",
+                    )
+                })?;
+
+                let rows: Vec<Vec<String>> = rows_iter
+                    .map(|row| {
+                        row.try_iter()
+                            .map(|iter| iter.map(|v| v.to_string()).collect())
+                            .unwrap_or_else(|_| vec![row.to_string()])
+                    })
+                    .collect();
+
+                let formatted = Table::render(self, &rows);
+                Ok(minijinja::Value::from(formatted))
+            }
+            _ => Err(minijinja::Error::new(
+                minijinja::ErrorKind::UnknownMethod,
+                format!("Table has no method '{}'", name),
+            )),
+        }
+    }
 }
 
 #[cfg(test)]

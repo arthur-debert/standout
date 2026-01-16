@@ -1,10 +1,51 @@
-//! MiniJinja filters for tabular output.
+//! MiniJinja filters and functions for tabular output.
 //!
-//! This module provides filters that can be used in templates to format
-//! values for columnar display.
+//! This module provides filters and global functions that can be used in templates
+//! to format values for columnar display.
+//!
+//! ## Filters
+//!
+//! - `col(width, ...)` - Format value to fit column width
+//! - `pad_left(width)` - Right-align with padding
+//! - `pad_right(width)` - Left-align with padding
+//! - `truncate_at(width, pos, ellipsis)` - Truncate at position
+//! - `display_width` - Get display width of a string
+//! - `style_as(style)` - Wrap value in style tags
+//!
+//! ## Global Functions
+//!
+//! - `tabular(columns, separator=?, width=?)` - Create a TabularFormatter
+//! - `table(columns, border=?, header=?, header_style=?)` - Create a Table
+//!
+//! ### Column Definition Format
+//!
+//! Columns are specified as dictionaries with these keys:
+//! - `width`: Number (fixed), `"fill"`, or `{"min": n, "max": m}` (bounded)
+//! - `align`: `"left"` (default), `"right"`, or `"center"`
+//! - `truncate`: `"end"` (default), `"start"`, or `"middle"`
+//! - `key`: Field name for struct extraction
+//! - `header`: Header text for this column
+//! - `style`: Style name to wrap cell content
+//!
+//! ### Example
+//!
+//! ```jinja
+//! {% set fmt = tabular([
+//!     {"width": 10, "key": "name"},
+//!     {"width": "fill", "key": "description"},
+//!     {"width": 8, "align": "right", "key": "count"}
+//! ], separator="  ") %}
+//!
+//! {% for item in items %}
+//! {{ fmt.row([item.name, item.description, item.count]) }}
+//! {% endfor %}
+//! ```
 
 use minijinja::{Environment, Value};
 
+use super::decorator::{BorderStyle, Table};
+use super::formatter::TableFormatter;
+use super::types::{Align, Column, TabularSpec, TruncateAt, Width};
 use super::util::{
     display_width, pad_center, pad_left, pad_right, truncate_end, truncate_middle, truncate_start,
 };
@@ -125,6 +166,249 @@ pub fn register_table_filters(env: &mut Environment<'static>) {
             format!("[{}]{}[/{}]", style, text, style)
         }
     });
+
+    // Register global functions for creating formatters
+    register_table_functions(env);
+}
+
+/// Register global functions for creating table formatters.
+fn register_table_functions(env: &mut Environment<'static>) {
+    // tabular(columns, separator=?, width=?) -> TabularFormatter
+    env.add_function(
+        "tabular",
+        |columns: Value, kwargs: minijinja::value::Kwargs| -> Result<Value, minijinja::Error> {
+            let cols = parse_columns(&columns)?;
+            let separator = kwargs
+                .get::<Option<String>>("separator")?
+                .unwrap_or_default();
+            let width = kwargs.get::<Option<usize>>("width")?.unwrap_or(80);
+            kwargs.assert_all_used()?;
+
+            let mut builder = TabularSpec::builder();
+            for col in cols {
+                builder = builder.column(col);
+            }
+            if !separator.is_empty() {
+                builder = builder.separator(&separator);
+            }
+
+            let spec = builder.build();
+            let formatter = TableFormatter::new(&spec, width);
+            Ok(Value::from_object(formatter))
+        },
+    );
+
+    // table(columns, border=?, header=?, header_style=?, width=?) -> Table
+    env.add_function(
+        "table",
+        |columns: Value, kwargs: minijinja::value::Kwargs| -> Result<Value, minijinja::Error> {
+            let cols = parse_columns(&columns)?;
+            let separator = kwargs
+                .get::<Option<String>>("separator")?
+                .unwrap_or_default();
+            let border = kwargs.get::<Option<String>>("border")?.unwrap_or_default();
+            let header = kwargs.get::<Option<Value>>("header")?;
+            let header_style = kwargs.get::<Option<String>>("header_style")?;
+            let width = kwargs.get::<Option<usize>>("width")?.unwrap_or(80);
+            kwargs.assert_all_used()?;
+
+            let mut builder = TabularSpec::builder();
+            for col in cols {
+                builder = builder.column(col);
+            }
+            if !separator.is_empty() {
+                builder = builder.separator(&separator);
+            }
+
+            let spec = builder.build();
+            let mut table = Table::new(spec, width).border(parse_border_style(&border));
+
+            // Set header if provided
+            if let Some(h) = header {
+                let headers: Vec<String> = h
+                    .try_iter()
+                    .map_err(|_| {
+                        minijinja::Error::new(
+                            minijinja::ErrorKind::InvalidOperation,
+                            "header must be an array of strings",
+                        )
+                    })?
+                    .map(|v| v.to_string())
+                    .collect();
+                table = table.header(headers);
+            }
+
+            // Set header style if provided
+            if let Some(style) = header_style {
+                table = table.header_style(style);
+            }
+
+            Ok(Value::from_object(table))
+        },
+    );
+}
+
+/// Parse column definitions from a template array value.
+fn parse_columns(columns: &Value) -> Result<Vec<Column>, minijinja::Error> {
+    let iter = columns.try_iter().map_err(|_| {
+        minijinja::Error::new(
+            minijinja::ErrorKind::InvalidOperation,
+            "columns must be an array",
+        )
+    })?;
+
+    let mut result = Vec::new();
+    for col_val in iter {
+        let col = parse_column(&col_val)?;
+        result.push(col);
+    }
+    Ok(result)
+}
+
+/// Parse a single column definition from a template value.
+fn parse_column(value: &Value) -> Result<Column, minijinja::Error> {
+    // Get width - required
+    let width_val = value.get_attr("width").map_err(|_| {
+        minijinja::Error::new(
+            minijinja::ErrorKind::InvalidOperation,
+            "column must have a 'width' attribute",
+        )
+    })?;
+
+    let width = parse_width(&width_val)?;
+    let mut col = Column::new(width);
+
+    // Optional: align
+    if let Ok(align_val) = value.get_attr("align") {
+        if !align_val.is_none() && !align_val.is_undefined() {
+            col = col.align(parse_align(&align_val.to_string()));
+        }
+    }
+
+    // Optional: truncate
+    if let Ok(truncate_val) = value.get_attr("truncate") {
+        if !truncate_val.is_none() && !truncate_val.is_undefined() {
+            col = col.truncate(parse_truncate(&truncate_val.to_string()));
+        }
+    }
+
+    // Optional: key
+    if let Ok(key_val) = value.get_attr("key") {
+        if !key_val.is_none() && !key_val.is_undefined() {
+            col = col.key(key_val.to_string());
+        }
+    }
+
+    // Optional: header
+    if let Ok(header_val) = value.get_attr("header") {
+        if !header_val.is_none() && !header_val.is_undefined() {
+            col = col.header(header_val.to_string());
+        }
+    }
+
+    // Optional: style
+    if let Ok(style_val) = value.get_attr("style") {
+        if !style_val.is_none() && !style_val.is_undefined() {
+            col = col.style(style_val.to_string());
+        }
+    }
+
+    // Optional: null_repr
+    if let Ok(null_val) = value.get_attr("null_repr") {
+        if !null_val.is_none() && !null_val.is_undefined() {
+            col = col.null_repr(null_val.to_string());
+        }
+    }
+
+    Ok(col)
+}
+
+/// Parse a width specification from a template value.
+fn parse_width(value: &Value) -> Result<Width, minijinja::Error> {
+    // Number -> Fixed width
+    if let Some(n) = value.as_i64() {
+        return Ok(Width::Fixed(n as usize));
+    }
+
+    // String "fill" -> Fill
+    if let Some(s) = value.as_str() {
+        return match s {
+            "fill" => Ok(Width::Fill),
+            _ => Err(minijinja::Error::new(
+                minijinja::ErrorKind::InvalidOperation,
+                format!(
+                    "unknown width string: '{}' (use number, 'fill', or object)",
+                    s
+                ),
+            )),
+        };
+    }
+
+    // Object with min/max -> Bounded
+    if let (Ok(min), Ok(max)) = (value.get_attr("min"), value.get_attr("max")) {
+        let min_val = min.as_usize().ok_or_else(|| {
+            minijinja::Error::new(
+                minijinja::ErrorKind::InvalidOperation,
+                "min must be a number",
+            )
+        })?;
+        let max_val = max.as_usize().ok_or_else(|| {
+            minijinja::Error::new(
+                minijinja::ErrorKind::InvalidOperation,
+                "max must be a number",
+            )
+        })?;
+        return Ok(Width::Bounded {
+            min: Some(min_val),
+            max: Some(max_val),
+        });
+    }
+
+    // Object with fraction -> Fraction
+    if let Ok(frac) = value.get_attr("fraction") {
+        let frac_val = frac.as_usize().ok_or_else(|| {
+            minijinja::Error::new(
+                minijinja::ErrorKind::InvalidOperation,
+                "fraction must be a number",
+            )
+        })?;
+        return Ok(Width::Fraction(frac_val));
+    }
+
+    Err(minijinja::Error::new(
+        minijinja::ErrorKind::InvalidOperation,
+        "width must be a number, 'fill', or object with min/max or fraction",
+    ))
+}
+
+/// Parse alignment from string.
+fn parse_align(s: &str) -> Align {
+    match s.to_lowercase().as_str() {
+        "right" => Align::Right,
+        "center" => Align::Center,
+        _ => Align::Left,
+    }
+}
+
+/// Parse truncation position from string.
+fn parse_truncate(s: &str) -> TruncateAt {
+    match s.to_lowercase().as_str() {
+        "start" => TruncateAt::Start,
+        "middle" => TruncateAt::Middle,
+        _ => TruncateAt::End,
+    }
+}
+
+/// Parse border style from string.
+fn parse_border_style(s: &str) -> BorderStyle {
+    match s.to_lowercase().as_str() {
+        "ascii" => BorderStyle::Ascii,
+        "light" => BorderStyle::Light,
+        "heavy" => BorderStyle::Heavy,
+        "double" => BorderStyle::Double,
+        "rounded" => BorderStyle::Rounded,
+        _ => BorderStyle::None,
+    }
 }
 
 /// Format a value for a column with specified width, alignment, and truncation.
@@ -450,5 +734,214 @@ mod tests {
             .render(context!(value => "Name"))
             .unwrap();
         assert_eq!(result, "[header]Name      [/header]");
+    }
+
+    // ============================================================================
+    // Template Function Tests (Phase 9)
+    // ============================================================================
+
+    #[test]
+    fn function_tabular_basic() {
+        let mut env = setup_env();
+        env.add_template(
+            "test",
+            r#"{% set fmt = tabular([{"width": 10}, {"width": 8}], separator="  ") %}{{ fmt.row(["Hello", "World"]) }}"#,
+        )
+        .unwrap();
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(context!())
+            .unwrap();
+        assert_eq!(result, "Hello       World   ");
+    }
+
+    #[test]
+    fn function_tabular_in_loop() {
+        let mut env = setup_env();
+        env.add_template(
+            "test",
+            r#"{% set fmt = tabular([{"width": 8}, {"width": 6}], separator="  ") %}{% for item in items %}{{ fmt.row([item.name, item.value]) }}
+{% endfor %}"#,
+        )
+        .unwrap();
+
+        let items = vec![
+            Item {
+                name: "Alice",
+                value: "100",
+            },
+            Item {
+                name: "Bob",
+                value: "200",
+            },
+        ];
+
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(context!(items => items))
+            .unwrap();
+
+        assert!(result.contains("Alice"));
+        assert!(result.contains("Bob"));
+    }
+
+    #[test]
+    fn function_tabular_fill_width() {
+        let mut env = setup_env();
+        env.add_template(
+            "test",
+            r#"{% set fmt = tabular([{"width": 5}, {"width": "fill"}], separator="  ", width=20) %}{{ fmt.row(["A", "B"]) }}"#,
+        )
+        .unwrap();
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(context!())
+            .unwrap();
+        // Total 20, first col 5, sep 2, fill col = 13
+        assert_eq!(display_width(&result), 20);
+    }
+
+    #[test]
+    fn function_tabular_right_align() {
+        let mut env = setup_env();
+        env.add_template(
+            "test",
+            r#"{% set fmt = tabular([{"width": 10, "align": "right"}]) %}{{ fmt.row(["42"]) }}"#,
+        )
+        .unwrap();
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(context!())
+            .unwrap();
+        assert_eq!(result, "        42");
+    }
+
+    #[test]
+    fn function_tabular_with_style() {
+        let mut env = setup_env();
+        env.add_template(
+            "test",
+            r#"{% set fmt = tabular([{"width": 10, "style": "name"}]) %}{{ fmt.row(["Alice"]) }}"#,
+        )
+        .unwrap();
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(context!())
+            .unwrap();
+        assert!(result.contains("[name]"));
+        assert!(result.contains("[/name]"));
+    }
+
+    #[test]
+    fn function_table_basic() {
+        let mut env = setup_env();
+        env.add_template(
+            "test",
+            r#"{% set tbl = table([{"width": 10}, {"width": 8}], separator="  ") %}{{ tbl.row(["Hello", "World"]) }}"#,
+        )
+        .unwrap();
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(context!())
+            .unwrap();
+        // No border, just content
+        assert!(result.contains("Hello"));
+        assert!(result.contains("World"));
+    }
+
+    #[test]
+    fn function_table_with_border() {
+        let mut env = setup_env();
+        env.add_template(
+            "test",
+            r#"{% set tbl = table([{"width": 10}, {"width": 8}], border="light") %}{{ tbl.row(["Hello", "World"]) }}"#,
+        )
+        .unwrap();
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(context!())
+            .unwrap();
+        // Should have light border characters
+        assert!(result.starts_with('│'));
+        assert!(result.ends_with('│'));
+    }
+
+    #[test]
+    fn function_table_with_header() {
+        let mut env = setup_env();
+        env.add_template(
+            "test",
+            r#"{% set tbl = table([{"width": 10}, {"width": 8}], header=["Name", "Value"]) %}{{ tbl.header_row() }}"#,
+        )
+        .unwrap();
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(context!())
+            .unwrap();
+        assert!(result.contains("Name"));
+        assert!(result.contains("Value"));
+    }
+
+    #[test]
+    fn function_table_separator_row() {
+        let mut env = setup_env();
+        env.add_template(
+            "test",
+            r#"{% set tbl = table([{"width": 10}, {"width": 8}], border="light") %}{{ tbl.separator_row() }}"#,
+        )
+        .unwrap();
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(context!())
+            .unwrap();
+        assert!(result.contains('─'));
+        assert!(result.starts_with('├'));
+    }
+
+    #[test]
+    fn function_table_render_all() {
+        let mut env = setup_env();
+        env.add_template(
+            "test",
+            r#"{% set tbl = table([{"width": 10}, {"width": 8}], border="light", header=["Name", "Val"]) %}{{ tbl.render_all([["Alice", "100"], ["Bob", "200"]]) }}"#,
+        )
+        .unwrap();
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(context!())
+            .unwrap();
+
+        let lines: Vec<&str> = result.lines().collect();
+        // Should have borders, header, separator, data rows
+        assert!(lines.len() >= 5);
+        assert!(result.contains("Alice"));
+        assert!(result.contains("Bob"));
+    }
+
+    #[test]
+    fn function_table_with_header_style() {
+        let mut env = setup_env();
+        env.add_template(
+            "test",
+            r#"{% set tbl = table([{"width": 10}], header=["Name"], header_style="title") %}{{ tbl.header_row() }}"#,
+        )
+        .unwrap();
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(context!())
+            .unwrap();
+        assert!(result.contains("[title]"));
+        assert!(result.contains("[/title]"));
     }
 }
