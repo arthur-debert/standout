@@ -41,7 +41,7 @@ use minijinja::value::{Enumerator, Object, Value};
 use std::sync::Arc;
 
 use super::resolve::ResolvedWidths;
-use super::types::{Align, Column, FlatDataSpec, Overflow, TruncateAt};
+use super::types::{Align, Anchor, Column, FlatDataSpec, Overflow, TruncateAt};
 use super::util::{
     display_width, pad_center, pad_left, pad_right, truncate_end, truncate_middle, truncate_start,
     wrap_indent,
@@ -85,6 +85,8 @@ pub struct TableFormatter {
     prefix: String,
     /// Row suffix string.
     suffix: String,
+    /// Total target width for anchor calculations.
+    total_width: usize,
 }
 
 impl TableFormatter {
@@ -96,19 +98,33 @@ impl TableFormatter {
     /// * `total_width` - Total available width including decorations
     pub fn new(spec: &FlatDataSpec, total_width: usize) -> Self {
         let resolved = spec.resolve_widths(total_width);
-        Self::from_resolved(spec, resolved)
+        Self::from_resolved_with_width(spec, resolved, total_width)
     }
 
     /// Create a formatter with pre-resolved widths.
     ///
     /// Use this when you've already calculated widths (e.g., from data).
     pub fn from_resolved(spec: &FlatDataSpec, resolved: ResolvedWidths) -> Self {
+        // Calculate total width from resolved widths + overhead
+        let content_width: usize = resolved.widths.iter().sum();
+        let overhead = spec.decorations.overhead(resolved.widths.len());
+        let total_width = content_width + overhead;
+        Self::from_resolved_with_width(spec, resolved, total_width)
+    }
+
+    /// Create a formatter with pre-resolved widths and explicit total width.
+    pub fn from_resolved_with_width(
+        spec: &FlatDataSpec,
+        resolved: ResolvedWidths,
+        total_width: usize,
+    ) -> Self {
         TableFormatter {
             columns: spec.columns.clone(),
             widths: resolved.widths,
             separator: spec.decorations.column_sep.clone(),
             prefix: spec.decorations.row_prefix.clone(),
             suffix: spec.decorations.row_suffix.clone(),
+            total_width,
         }
     }
 
@@ -116,13 +132,21 @@ impl TableFormatter {
     ///
     /// This is useful for direct construction without a full FlatDataSpec.
     pub fn with_widths(columns: Vec<Column>, widths: Vec<usize>) -> Self {
+        let total_width = widths.iter().sum();
         TableFormatter {
             columns,
             widths,
             separator: String::new(),
             prefix: String::new(),
             suffix: String::new(),
+            total_width,
         }
+    }
+
+    /// Set the total target width (for anchor gap calculations).
+    pub fn total_width(mut self, width: usize) -> Self {
+        self.total_width = width;
+        self
     }
 
     /// Set the column separator.
@@ -171,9 +195,18 @@ impl TableFormatter {
         let mut result = String::new();
         result.push_str(&self.prefix);
 
+        // Find anchor transition point and calculate gap
+        let (anchor_gap, anchor_transition) = self.calculate_anchor_gap();
+
         for (i, col) in self.columns.iter().enumerate() {
+            // Insert separator (or anchor gap at transition point)
             if i > 0 {
-                result.push_str(&self.separator);
+                if anchor_gap > 0 && i == anchor_transition {
+                    // Insert anchor gap instead of separator
+                    result.push_str(&" ".repeat(anchor_gap));
+                } else {
+                    result.push_str(&self.separator);
+                }
             }
 
             let width = self.widths.get(i).copied().unwrap_or(0);
@@ -185,6 +218,44 @@ impl TableFormatter {
 
         result.push_str(&self.suffix);
         result
+    }
+
+    /// Calculate the anchor gap size and transition point.
+    ///
+    /// Returns (gap_size, transition_index) where:
+    /// - gap_size is the number of spaces to insert between left and right groups
+    /// - transition_index is the column index where right-anchored columns start
+    fn calculate_anchor_gap(&self) -> (usize, usize) {
+        // Find first right-anchored column
+        let transition = self
+            .columns
+            .iter()
+            .position(|c| c.anchor == Anchor::Right)
+            .unwrap_or(self.columns.len());
+
+        // If no right-anchored columns or all columns are right-anchored, no gap
+        if transition == 0 || transition == self.columns.len() {
+            return (0, transition);
+        }
+
+        // Calculate current content width
+        let prefix_width = display_width(&self.prefix);
+        let suffix_width = display_width(&self.suffix);
+        let sep_width = display_width(&self.separator);
+        let content_width: usize = self.widths.iter().sum();
+        let num_seps = self.columns.len().saturating_sub(1);
+        let current_total = prefix_width + content_width + (num_seps * sep_width) + suffix_width;
+
+        // Calculate gap - the extra space available to push right columns to the right
+        if current_total >= self.total_width {
+            // No room for a gap
+            (0, transition)
+        } else {
+            // Gap = extra space, minus one separator (which we replace with the gap)
+            let extra = self.total_width - current_total;
+            // The gap replaces one separator, so add sep_width back to the gap
+            (extra + sep_width, transition)
+        }
     }
 
     /// Format multiple rows.
@@ -239,15 +310,21 @@ impl TableFormatter {
             return vec![self.format_row(values)];
         }
 
-        // Build output lines
+        // Build output lines with anchor support
+        let (anchor_gap, anchor_transition) = self.calculate_anchor_gap();
         let mut output = Vec::with_capacity(max_lines);
+
         for line_idx in 0..max_lines {
             let mut row = String::new();
             row.push_str(&self.prefix);
 
             for (i, (cell, col)) in cell_outputs.iter().zip(self.columns.iter()).enumerate() {
                 if i > 0 {
-                    row.push_str(&self.separator);
+                    if anchor_gap > 0 && i == anchor_transition {
+                        row.push_str(&" ".repeat(anchor_gap));
+                    } else {
+                        row.push_str(&self.separator);
+                    }
                 }
 
                 let width = self.widths.get(i).copied().unwrap_or(0);
@@ -1002,5 +1079,144 @@ mod tests {
         // Out of bounds returns empty padded
         let line2 = cell.line(2, 10, Align::Left);
         assert_eq!(line2, "          ");
+    }
+
+    // ============================================================================
+    // Anchor Tests (Phase 5)
+    // ============================================================================
+
+    #[test]
+    fn format_row_all_left_anchor_no_gap() {
+        // All columns left-anchored - no gap inserted
+        let spec = FlatDataSpec::builder()
+            .column(Column::new(Width::Fixed(5)))
+            .column(Column::new(Width::Fixed(5)))
+            .separator(" ")
+            .build();
+        let formatter = TableFormatter::new(&spec, 50);
+
+        let output = formatter.format_row(&["A", "B"]);
+        // Total content: 5 + 1 + 5 = 11, no gap
+        assert_eq!(output, "A     B    ");
+        assert_eq!(display_width(&output), 11);
+    }
+
+    #[test]
+    fn format_row_with_right_anchor() {
+        // Left column + right column with gap
+        let spec = FlatDataSpec::builder()
+            .column(Column::new(Width::Fixed(5))) // left-anchored
+            .column(Column::new(Width::Fixed(5)).anchor_right()) // right-anchored
+            .separator(" ")
+            .build();
+
+        // Total: 30, content: 5 + 5 = 10, sep: 1, overhead: 11
+        // Gap: 30 - 11 + 1 = 20 (replaces separator)
+        let formatter = TableFormatter::new(&spec, 30);
+
+        let output = formatter.format_row(&["L", "R"]);
+        assert_eq!(display_width(&output), 30);
+        // Left content at start, right content at end
+        assert!(output.starts_with("L    "));
+        assert!(output.ends_with("R    "));
+    }
+
+    #[test]
+    fn format_row_with_right_anchor_exact_fit() {
+        // When total_width equals content width, no gap
+        let spec = FlatDataSpec::builder()
+            .column(Column::new(Width::Fixed(10)))
+            .column(Column::new(Width::Fixed(10)).anchor_right())
+            .separator("  ")
+            .build();
+
+        // Total: 22 (10 + 2 + 10), no extra space
+        let formatter = TableFormatter::new(&spec, 22);
+
+        let output = formatter.format_row(&["Left", "Right"]);
+        assert_eq!(display_width(&output), 22);
+        // Normal separator, no gap
+        assert!(output.contains("  ")); // Original separator preserved
+    }
+
+    #[test]
+    fn format_row_all_right_anchor_no_gap() {
+        // All columns right-anchored - no gap needed
+        let spec = FlatDataSpec::builder()
+            .column(Column::new(Width::Fixed(5)).anchor_right())
+            .column(Column::new(Width::Fixed(5)).anchor_right())
+            .separator(" ")
+            .build();
+        let formatter = TableFormatter::new(&spec, 50);
+
+        let output = formatter.format_row(&["A", "B"]);
+        // No transition from left to right, so no gap
+        assert_eq!(output, "A     B    ");
+    }
+
+    #[test]
+    fn format_row_multiple_anchors() {
+        // Two left, two right
+        let spec = FlatDataSpec::builder()
+            .column(Column::new(Width::Fixed(4))) // L1
+            .column(Column::new(Width::Fixed(4))) // L2
+            .column(Column::new(Width::Fixed(4)).anchor_right()) // R1
+            .column(Column::new(Width::Fixed(4)).anchor_right()) // R2
+            .separator(" ")
+            .build();
+
+        // Content: 4*4 = 16, seps: 3, overhead: 19
+        // Total: 40, gap: 40 - 19 + 1 = 22
+        let formatter = TableFormatter::new(&spec, 40);
+
+        let output = formatter.format_row(&["A", "B", "C", "D"]);
+        assert_eq!(display_width(&output), 40);
+        // Left group at start, right group at end
+        assert!(output.starts_with("A    B   "));
+    }
+
+    #[test]
+    fn calculate_anchor_gap_no_transition() {
+        let spec = FlatDataSpec::builder()
+            .column(Column::new(Width::Fixed(10)))
+            .column(Column::new(Width::Fixed(10)))
+            .build();
+        let formatter = TableFormatter::new(&spec, 50);
+
+        let (gap, transition) = formatter.calculate_anchor_gap();
+        assert_eq!(transition, 2); // No right-anchored columns
+        assert_eq!(gap, 0);
+    }
+
+    #[test]
+    fn calculate_anchor_gap_with_transition() {
+        let spec = FlatDataSpec::builder()
+            .column(Column::new(Width::Fixed(10)))
+            .column(Column::new(Width::Fixed(10)).anchor_right())
+            .separator(" ")
+            .build();
+        let formatter = TableFormatter::new(&spec, 50);
+
+        let (gap, transition) = formatter.calculate_anchor_gap();
+        assert_eq!(transition, 1); // Second column is right-anchored
+        assert!(gap > 0);
+    }
+
+    #[test]
+    fn format_row_lines_with_anchor() {
+        // Multi-line output should also respect anchors
+        let spec = FlatDataSpec::builder()
+            .column(Column::new(Width::Fixed(8)).wrap())
+            .column(Column::new(Width::Fixed(6)).anchor_right())
+            .separator(" ")
+            .build();
+        let formatter = TableFormatter::new(&spec, 40);
+
+        let lines = formatter.format_row_lines(&["This is text", "Right"]);
+
+        // All lines should have consistent width due to anchor
+        for line in &lines {
+            assert_eq!(display_width(line), 40);
+        }
     }
 }
