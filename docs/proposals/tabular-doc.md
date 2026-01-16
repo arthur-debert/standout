@@ -281,12 +281,12 @@ For output with explicit headers, separators, and borders:
     {"name": "Message", "key": "message", "width": "fill"}
 ], border="rounded", header_style="bold") %}
 
-{{ t.header() }}
-{{ t.separator() }}
+{{ t.header_row() }}
+{{ t.separator_row() }}
 {% for commit in commits %}
-{{ t.row_from(commit) }}
+{{ t.row([commit.id, commit.author, commit.message]) }}
 {% endfor %}
-{{ t.footer() }}
+{{ t.bottom_border() }}
 ```
 
 Output:
@@ -313,7 +313,7 @@ border="rounded"  {# ╭──┬──╮  Rounded corners #}
 
 ### Row Separators
 
-Add lines between data rows:
+Add lines between data rows (planned feature):
 
 ```jinja
 {% set t = table(columns, border="light", row_separator=true) %}
@@ -329,15 +329,18 @@ Add lines between data rows:
 └──────────┴──────────────────────┘
 ```
 
+> **Note**: `row_separator` is not yet implemented.
+
 ### Simple Table Rendering
 
-For simple cases, render everything in one call:
+For simple cases, render everything in one call using `render_all()`:
 
 ```jinja
-{{ table_render(commits, [
-    {"name": "ID", "key": "id", "width": 8},
-    {"name": "Author", "key": "author", "width": 20}
-], border="light") }}
+{% set t = table([
+    {"width": 8, "header": "ID"},
+    {"width": 20, "header": "Author"}
+], border="light", header=["ID", "Author"]) %}
+{{ t.render_all(commits) }}
 ```
 
 ---
@@ -360,16 +363,16 @@ let table = Table::from(spec)
     .build();
 
 // Render full table
-let output = table.render(&data)?;
+let output = table.render(&data);
 println!("{}", output);
 
 // Or render parts manually
-println!("{}", table.header());
-println!("{}", table.separator());
+println!("{}", table.header_row());
+println!("{}", table.separator_row());
 for row in &data {
-    println!("{}", table.row_from(row));
+    println!("{}", table.row(&[row.id, row.author, row.message]));
 }
-println!("{}", table.footer());
+println!("{}", table.bottom_border());
 ```
 
 ---
@@ -548,12 +551,13 @@ With styling (in terminal):
 ### `table()` Function
 
 ```jinja
-{% set t = table(columns, border=?, header_style=?, row_separator=?) %}
-{{ t.header() }}
-{{ t.separator() }}
+{% set t = table(columns, border=?, header=?, header_style=?, width=?) %}
+{{ t.header_row() }}
+{{ t.separator_row() }}
 {{ t.row([values]) }}
-{{ t.row_from(object) }}
-{{ t.footer() }}
+{{ t.top_border() }}
+{{ t.bottom_border() }}
+{{ t.render_all(rows) }}
 ```
 
 ### Border Styles
