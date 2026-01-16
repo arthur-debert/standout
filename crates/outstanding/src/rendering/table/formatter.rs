@@ -44,6 +44,7 @@ use super::resolve::ResolvedWidths;
 use super::types::{Align, Column, FlatDataSpec, Overflow, TruncateAt};
 use super::util::{
     display_width, pad_center, pad_left, pad_right, truncate_end, truncate_middle, truncate_start,
+    wrap_indent,
 };
 
 /// Formats table rows according to a specification.
@@ -193,6 +194,74 @@ impl TableFormatter {
         rows.iter().map(|row| self.format_row(row)).collect()
     }
 
+    /// Format a row that may produce multiple output lines (due to wrapping).
+    ///
+    /// If any cell wraps to multiple lines, the output contains multiple lines
+    /// with proper vertical alignment. Cells are top-aligned.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use outstanding::table::{FlatDataSpec, Column, Width, Overflow, TableFormatter};
+    ///
+    /// let spec = FlatDataSpec::builder()
+    ///     .column(Column::new(Width::Fixed(10)).wrap())
+    ///     .column(Column::new(Width::Fixed(8)))
+    ///     .separator("  ")
+    ///     .build();
+    ///
+    /// let formatter = TableFormatter::new(&spec, 80);
+    /// let lines = formatter.format_row_lines(&["This is a long text", "Short"]);
+    /// // Returns multiple lines if the first column wraps
+    /// ```
+    pub fn format_row_lines<S: AsRef<str>>(&self, values: &[S]) -> Vec<String> {
+        // Format each cell
+        let cell_outputs: Vec<CellOutput> = self
+            .columns
+            .iter()
+            .enumerate()
+            .map(|(i, col)| {
+                let width = self.widths.get(i).copied().unwrap_or(0);
+                let value = values.get(i).map(|s| s.as_ref()).unwrap_or(&col.null_repr);
+                format_cell_lines(value, width, col)
+            })
+            .collect();
+
+        // Find max lines needed
+        let max_lines = cell_outputs
+            .iter()
+            .map(|c| c.line_count())
+            .max()
+            .unwrap_or(1);
+
+        // If only single line, use simple path
+        if max_lines == 1 {
+            return vec![self.format_row(values)];
+        }
+
+        // Build output lines
+        let mut output = Vec::with_capacity(max_lines);
+        for line_idx in 0..max_lines {
+            let mut row = String::new();
+            row.push_str(&self.prefix);
+
+            for (i, (cell, col)) in cell_outputs.iter().zip(self.columns.iter()).enumerate() {
+                if i > 0 {
+                    row.push_str(&self.separator);
+                }
+
+                let width = self.widths.get(i).copied().unwrap_or(0);
+                let line = cell.line(line_idx, width, col.align);
+                row.push_str(&line);
+            }
+
+            row.push_str(&self.suffix);
+            output.push(row);
+        }
+
+        output
+    }
+
     /// Get the resolved width for a column by index.
     pub fn column_width(&self, index: usize) -> Option<usize> {
         self.widths.get(index).copied()
@@ -337,6 +406,95 @@ fn format_cell(value: &str, width: usize, col: &Column) -> String {
 
 /// Type alias: TabularFormatter is the preferred name for TableFormatter.
 pub type TabularFormatter = TableFormatter;
+
+/// Result of formatting a cell, which may be single or multi-line.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CellOutput {
+    /// Single line of formatted text.
+    Single(String),
+    /// Multiple lines (from word-wrap).
+    Multi(Vec<String>),
+}
+
+impl CellOutput {
+    /// Returns true if this is a single-line output.
+    pub fn is_single(&self) -> bool {
+        matches!(self, CellOutput::Single(_))
+    }
+
+    /// Returns the number of lines.
+    pub fn line_count(&self) -> usize {
+        match self {
+            CellOutput::Single(_) => 1,
+            CellOutput::Multi(lines) => lines.len().max(1),
+        }
+    }
+
+    /// Get a specific line, padding to width if needed.
+    pub fn line(&self, index: usize, width: usize, align: Align) -> String {
+        let content = match self {
+            CellOutput::Single(s) if index == 0 => s.as_str(),
+            CellOutput::Multi(lines) => lines.get(index).map(|s| s.as_str()).unwrap_or(""),
+            _ => "",
+        };
+
+        // Pad to width
+        match align {
+            Align::Left => pad_right(content, width),
+            Align::Right => pad_left(content, width),
+            Align::Center => pad_center(content, width),
+        }
+    }
+
+    /// Convert to a single string (first line for Multi).
+    pub fn to_single(&self) -> String {
+        match self {
+            CellOutput::Single(s) => s.clone(),
+            CellOutput::Multi(lines) => lines.first().cloned().unwrap_or_default(),
+        }
+    }
+}
+
+/// Format a cell with potential multi-line output (for Wrap mode).
+fn format_cell_lines(value: &str, width: usize, col: &Column) -> CellOutput {
+    if width == 0 {
+        return CellOutput::Single(String::new());
+    }
+
+    let current_width = display_width(value);
+
+    match &col.overflow {
+        Overflow::Wrap { indent } => {
+            if current_width <= width {
+                // Fits on one line
+                let padded = match col.align {
+                    Align::Left => pad_right(value, width),
+                    Align::Right => pad_left(value, width),
+                    Align::Center => pad_center(value, width),
+                };
+                CellOutput::Single(padded)
+            } else {
+                // Wrap to multiple lines
+                let wrapped = wrap_indent(value, width, *indent);
+                let padded: Vec<String> = wrapped
+                    .into_iter()
+                    .map(|line| match col.align {
+                        Align::Left => pad_right(&line, width),
+                        Align::Right => pad_left(&line, width),
+                        Align::Center => pad_center(&line, width),
+                    })
+                    .collect();
+                if padded.len() == 1 {
+                    CellOutput::Single(padded.into_iter().next().unwrap())
+                } else {
+                    CellOutput::Multi(padded)
+                }
+            }
+        }
+        // All other modes are single-line
+        _ => CellOutput::Single(format_cell(value, width, col)),
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -669,5 +827,180 @@ mod tests {
             .unwrap();
 
         assert_eq!(output, "cols=2, sep=' | '");
+    }
+
+    // ============================================================================
+    // Overflow Mode Tests (Phase 4)
+    // ============================================================================
+
+    #[test]
+    fn format_cell_clip_no_marker() {
+        let spec = FlatDataSpec::builder()
+            .column(Column::new(Width::Fixed(5)).clip())
+            .build();
+        let formatter = TableFormatter::new(&spec, 80);
+
+        let output = formatter.format_row(&["Hello World"]);
+        // Clip truncates without marker
+        assert_eq!(display_width(&output), 5);
+        assert!(!output.contains("…"));
+        assert!(output.starts_with("Hello"));
+    }
+
+    #[test]
+    fn format_cell_expand_overflows() {
+        // Expand mode lets content overflow
+        let col = Column::new(Width::Fixed(5)).overflow(Overflow::Expand);
+        let output = format_cell("Hello World", 5, &col);
+
+        // Should NOT be truncated
+        assert_eq!(output, "Hello World");
+        assert_eq!(display_width(&output), 11); // Full width
+    }
+
+    #[test]
+    fn format_cell_expand_pads_when_short() {
+        let col = Column::new(Width::Fixed(10)).overflow(Overflow::Expand);
+        let output = format_cell("Hi", 10, &col);
+
+        // Should be padded to width
+        assert_eq!(output, "Hi        ");
+        assert_eq!(display_width(&output), 10);
+    }
+
+    #[test]
+    fn format_cell_wrap_single_line() {
+        // Content fits, no wrapping needed
+        let col = Column::new(Width::Fixed(20)).wrap();
+        let output = format_cell_lines("Short text", 20, &col);
+
+        assert!(output.is_single());
+        assert_eq!(output.line_count(), 1);
+        assert_eq!(display_width(&output.to_single()), 20);
+    }
+
+    #[test]
+    fn format_cell_wrap_multi_line() {
+        let col = Column::new(Width::Fixed(10)).wrap();
+        let output = format_cell_lines("This is a longer text that wraps", 10, &col);
+
+        assert!(!output.is_single());
+        assert!(output.line_count() > 1);
+
+        // Each line should be padded to width
+        if let CellOutput::Multi(lines) = &output {
+            for line in lines {
+                assert_eq!(display_width(line), 10);
+            }
+        }
+    }
+
+    #[test]
+    fn format_cell_wrap_with_indent() {
+        let col = Column::new(Width::Fixed(15)).overflow(Overflow::Wrap { indent: 2 });
+        let output = format_cell_lines("First line then continuation", 15, &col);
+
+        if let CellOutput::Multi(lines) = output {
+            // First line should start normally
+            assert!(lines[0].starts_with("First"));
+            // Subsequent lines should be indented
+            if lines.len() > 1 {
+                // The line content should start with spaces due to indent
+                let second_trimmed = lines[1].trim_start();
+                assert!(lines[1].len() > second_trimmed.len()); // Has leading spaces
+            }
+        }
+    }
+
+    #[test]
+    fn format_row_lines_single_line() {
+        let spec = FlatDataSpec::builder()
+            .column(Column::new(Width::Fixed(10)))
+            .column(Column::new(Width::Fixed(8)))
+            .separator("  ")
+            .build();
+        let formatter = TableFormatter::new(&spec, 80);
+
+        let lines = formatter.format_row_lines(&["Hello", "World"]);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0], formatter.format_row(&["Hello", "World"]));
+    }
+
+    #[test]
+    fn format_row_lines_multi_line() {
+        let spec = FlatDataSpec::builder()
+            .column(Column::new(Width::Fixed(8)).wrap())
+            .column(Column::new(Width::Fixed(6)))
+            .separator("  ")
+            .build();
+        let formatter = TableFormatter::new(&spec, 80);
+
+        let lines = formatter.format_row_lines(&["This is long", "Short"]);
+
+        // Should have multiple lines due to wrapping
+        assert!(!lines.is_empty());
+
+        // Each line should have consistent width
+        let expected_width = display_width(&lines[0]);
+        for line in &lines {
+            assert_eq!(display_width(line), expected_width);
+        }
+    }
+
+    #[test]
+    fn format_row_lines_mixed_columns() {
+        // One column wraps, others don't
+        let spec = FlatDataSpec::builder()
+            .column(Column::new(Width::Fixed(6))) // truncates
+            .column(Column::new(Width::Fixed(10)).wrap()) // wraps
+            .column(Column::new(Width::Fixed(4))) // truncates
+            .separator(" ")
+            .build();
+        let formatter = TableFormatter::new(&spec, 80);
+
+        let lines = formatter.format_row_lines(&["aaaaa", "this text wraps here", "bbbb"]);
+
+        // Multiple lines due to middle column wrapping
+        assert!(!lines.is_empty());
+    }
+
+    // ============================================================================
+    // CellOutput Tests
+    // ============================================================================
+
+    #[test]
+    fn cell_output_single_accessors() {
+        let cell = CellOutput::Single("Hello".to_string());
+
+        assert!(cell.is_single());
+        assert_eq!(cell.line_count(), 1);
+        assert_eq!(cell.to_single(), "Hello");
+    }
+
+    #[test]
+    fn cell_output_multi_accessors() {
+        let cell = CellOutput::Multi(vec!["Line 1".to_string(), "Line 2".to_string()]);
+
+        assert!(!cell.is_single());
+        assert_eq!(cell.line_count(), 2);
+        assert_eq!(cell.to_single(), "Line 1");
+    }
+
+    #[test]
+    fn cell_output_line_accessor() {
+        let cell = CellOutput::Multi(vec!["First".to_string(), "Second".to_string()]);
+
+        // Get first line, padded to 10
+        let line0 = cell.line(0, 10, Align::Left);
+        assert_eq!(line0, "First     ");
+        assert_eq!(display_width(&line0), 10);
+
+        // Get second line
+        let line1 = cell.line(1, 10, Align::Right);
+        assert_eq!(line1, "    Second");
+
+        // Out of bounds returns empty padded
+        let line2 = cell.line(2, 10, Align::Left);
+        assert_eq!(line2, "          ");
     }
 }
