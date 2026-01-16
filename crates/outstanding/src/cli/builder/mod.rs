@@ -185,11 +185,19 @@ impl AppBuilder {
         let theme = if let Some(theme) = self.theme {
             Some(theme)
         } else if let Some(ref mut registry) = self.stylesheet_registry {
-            let theme_name = self.default_theme_name.as_deref().unwrap_or("default");
-            let theme = registry
-                .get(theme_name)
-                .map_err(|_| SetupError::ThemeNotFound(theme_name.to_string()))?;
-            Some(theme)
+            if let Some(name) = &self.default_theme_name {
+                let theme = registry
+                    .get(name)
+                    .map_err(|_| SetupError::ThemeNotFound(name.to_string()))?;
+                Some(theme)
+            } else {
+                // Try defaults in order: default, theme, base
+                registry
+                    .get("default")
+                    .or_else(|_| registry.get("theme"))
+                    .or_else(|_| registry.get("base"))
+                    .ok()
+            }
         } else {
             None
         };
@@ -241,5 +249,46 @@ mod tests {
             .build()
             .unwrap();
         assert_eq!(outstanding.output_flag.as_deref(), Some("format"));
+    }
+
+    #[test]
+    fn test_theme_fallback_precedence() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+
+        // Create base.yaml
+        fs::write(temp_dir.path().join("base.yaml"), "style: { fg: blue }").unwrap();
+
+        // 1. Only base exists
+        let app = AppBuilder::new()
+            .styles_dir(temp_dir.path())
+            .build()
+            .unwrap();
+
+        assert!(app.theme.is_some());
+        let theme = app.theme.as_ref().unwrap();
+        assert_eq!(theme.name(), Some("base"));
+
+        // 2. theme.yaml exists (should override base)
+        fs::write(temp_dir.path().join("theme.yaml"), "style: { fg: red }").unwrap();
+
+        let app = AppBuilder::new()
+            .styles_dir(temp_dir.path())
+            .build()
+            .unwrap();
+
+        assert_eq!(app.theme.as_ref().unwrap().name(), Some("theme"));
+
+        // 3. default.yaml exists (should override theme)
+        fs::write(temp_dir.path().join("default.yaml"), "style: { fg: green }").unwrap();
+
+        let app = AppBuilder::new()
+            .styles_dir(temp_dir.path())
+            .build()
+            .unwrap();
+
+        assert_eq!(app.theme.as_ref().unwrap().name(), Some("default"));
     }
 }

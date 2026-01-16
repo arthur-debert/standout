@@ -251,7 +251,13 @@ fn parse_bool(
 pub fn parse_shorthand(s: &str, style_name: &str) -> Result<StyleAttributes, StylesheetError> {
     let mut attrs = StyleAttributes::new();
 
-    for part in s.split_whitespace() {
+    // Split by comma or whitespace
+    let parts: Vec<&str> = s
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    for part in parts {
         match part.to_lowercase().as_str() {
             "bold" => attrs.bold = Some(true),
             "dim" => attrs.dim = Some(true),
@@ -546,6 +552,22 @@ mod tests {
         let attrs = parse_shorthand("BOLD ITALIC", "test").unwrap();
         assert_eq!(attrs.bold, Some(true));
         assert_eq!(attrs.italic, Some(true));
+    }
+
+    #[test]
+    fn test_parse_shorthand_comma_separated() {
+        let attrs = parse_shorthand("bold, italic, cyan", "test").unwrap();
+        assert_eq!(attrs.bold, Some(true));
+        assert_eq!(attrs.italic, Some(true));
+        assert_eq!(attrs.fg, Some(ColorDef::Named(Color::Cyan)));
+    }
+
+    #[test]
+    fn test_parse_shorthand_mixed_separators() {
+        let attrs = parse_shorthand("bold, italic underline", "test").unwrap();
+        assert_eq!(attrs.bold, Some(true));
+        assert_eq!(attrs.italic, Some(true));
+        assert_eq!(attrs.underline, Some(true));
     }
 
     // =========================================================================
