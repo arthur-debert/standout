@@ -110,11 +110,11 @@ mod types;
 mod util;
 
 // Re-export types
-pub use formatter::TableFormatter;
+pub use formatter::{TableFormatter, TabularFormatter};
 pub use resolve::ResolvedWidths;
 pub use types::{
-    Align, Column, ColumnBuilder, Decorations, FlatDataSpec, FlatDataSpecBuilder, TableSpec,
-    TableSpecBuilder, TruncateAt, Width,
+    Align, Anchor, Col, Column, ColumnBuilder, Decorations, FlatDataSpec, FlatDataSpecBuilder,
+    Overflow, TableSpec, TableSpecBuilder, TabularSpec, TabularSpecBuilder, TruncateAt, Width,
 };
 
 // Re-export utility functions

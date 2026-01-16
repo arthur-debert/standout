@@ -41,7 +41,7 @@ use minijinja::value::{Enumerator, Object, Value};
 use std::sync::Arc;
 
 use super::resolve::ResolvedWidths;
-use super::types::{Align, Column, FlatDataSpec, TruncateAt};
+use super::types::{Align, Column, FlatDataSpec, Overflow, TruncateAt};
 use super::util::{
     display_width, pad_center, pad_left, pad_right, truncate_end, truncate_middle, truncate_start,
 };
@@ -297,24 +297,46 @@ fn format_cell(value: &str, width: usize, col: &Column) -> String {
 
     let current_width = display_width(value);
 
-    // Truncate if needed
-    let truncated = if current_width > width {
-        match col.truncate {
-            TruncateAt::End => truncate_end(value, width, &col.ellipsis),
-            TruncateAt::Start => truncate_start(value, width, &col.ellipsis),
-            TruncateAt::Middle => truncate_middle(value, width, &col.ellipsis),
+    // Handle overflow
+    let processed = if current_width > width {
+        match &col.overflow {
+            Overflow::Truncate { at, marker } => match at {
+                TruncateAt::End => truncate_end(value, width, marker),
+                TruncateAt::Start => truncate_start(value, width, marker),
+                TruncateAt::Middle => truncate_middle(value, width, marker),
+            },
+            Overflow::Clip => {
+                // Hard cut with no marker
+                truncate_end(value, width, "")
+            }
+            Overflow::Expand => {
+                // Don't truncate, let it overflow
+                value.to_string()
+            }
+            Overflow::Wrap { .. } => {
+                // For single-line format_cell, truncate as fallback
+                // Multi-line wrapping is handled by format_cell_lines
+                truncate_end(value, width, "…")
+            }
         }
     } else {
         value.to_string()
     };
 
-    // Pad to width
-    match col.align {
-        Align::Left => pad_right(&truncated, width),
-        Align::Right => pad_left(&truncated, width),
-        Align::Center => pad_center(&truncated, width),
+    // Pad to width (skip if Expand mode overflowed)
+    if matches!(col.overflow, Overflow::Expand) && current_width > width {
+        processed
+    } else {
+        match col.align {
+            Align::Left => pad_right(&processed, width),
+            Align::Right => pad_left(&processed, width),
+            Align::Center => pad_center(&processed, width),
+        }
     }
 }
+
+/// Type alias: TabularFormatter is the preferred name for TableFormatter.
+pub type TabularFormatter = TableFormatter;
 
 #[cfg(test)]
 mod tests {
