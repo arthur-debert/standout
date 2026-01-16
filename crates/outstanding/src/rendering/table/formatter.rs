@@ -38,6 +38,8 @@
 //! ```
 
 use minijinja::value::{Enumerator, Object, Value};
+use serde::Serialize;
+use serde_json::Value as JsonValue;
 use std::sync::Arc;
 
 use super::resolve::ResolvedWidths;
@@ -352,6 +354,126 @@ impl TableFormatter {
     /// Get the number of columns.
     pub fn num_columns(&self) -> usize {
         self.columns.len()
+    }
+
+    /// Format a row by extracting values from a serializable struct.
+    ///
+    /// This method extracts field values from the struct based on each column's
+    /// `key` or `name` field. Supports dot notation for nested field access
+    /// (e.g., "user.email").
+    ///
+    /// # Arguments
+    ///
+    /// * `value` - Any serializable value to extract fields from
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use outstanding::table::{FlatDataSpec, Column, Width, TableFormatter};
+    /// use serde::Serialize;
+    ///
+    /// #[derive(Serialize)]
+    /// struct Record {
+    ///     name: String,
+    ///     status: String,
+    ///     count: u32,
+    /// }
+    ///
+    /// let spec = FlatDataSpec::builder()
+    ///     .column(Column::new(Width::Fixed(20)).key("name"))
+    ///     .column(Column::new(Width::Fixed(10)).key("status"))
+    ///     .column(Column::new(Width::Fixed(5)).key("count"))
+    ///     .separator("  ")
+    ///     .build();
+    ///
+    /// let formatter = TableFormatter::new(&spec, 80);
+    /// let record = Record {
+    ///     name: "example".to_string(),
+    ///     status: "active".to_string(),
+    ///     count: 42,
+    /// };
+    ///
+    /// let row = formatter.row_from(&record);
+    /// assert!(row.contains("example"));
+    /// assert!(row.contains("active"));
+    /// assert!(row.contains("42"));
+    /// ```
+    pub fn row_from<T: Serialize>(&self, value: &T) -> String {
+        let values = self.extract_values(value);
+        let string_refs: Vec<&str> = values.iter().map(|s| s.as_str()).collect();
+        self.format_row(&string_refs)
+    }
+
+    /// Format a row with potential multi-line output from a serializable struct.
+    ///
+    /// Same as `row_from` but handles word-wrap columns that may produce
+    /// multiple output lines.
+    pub fn row_lines_from<T: Serialize>(&self, value: &T) -> Vec<String> {
+        let values = self.extract_values(value);
+        let string_refs: Vec<&str> = values.iter().map(|s| s.as_str()).collect();
+        self.format_row_lines(&string_refs)
+    }
+
+    /// Extract values from a serializable struct based on column keys.
+    fn extract_values<T: Serialize>(&self, value: &T) -> Vec<String> {
+        // Convert to JSON for field access
+        let json = match serde_json::to_value(value) {
+            Ok(v) => v,
+            Err(_) => return vec![String::new(); self.columns.len()],
+        };
+
+        self.columns
+            .iter()
+            .map(|col| {
+                // Use key first, fall back to name
+                let key = col.key.as_ref().or(col.name.as_ref());
+
+                match key {
+                    Some(k) => extract_field(&json, k),
+                    None => col.null_repr.clone(),
+                }
+            })
+            .collect()
+    }
+}
+
+/// Extract a field value from JSON using dot notation.
+///
+/// Supports paths like "user.email" or "items.0.name".
+fn extract_field(value: &JsonValue, path: &str) -> String {
+    let mut current = value;
+
+    for part in path.split('.') {
+        match current {
+            JsonValue::Object(map) => {
+                current = match map.get(part) {
+                    Some(v) => v,
+                    None => return String::new(),
+                };
+            }
+            JsonValue::Array(arr) => {
+                // Try to parse as index
+                if let Ok(idx) = part.parse::<usize>() {
+                    current = match arr.get(idx) {
+                        Some(v) => v,
+                        None => return String::new(),
+                    };
+                } else {
+                    return String::new();
+                }
+            }
+            _ => return String::new(),
+        }
+    }
+
+    // Convert final value to string
+    match current {
+        JsonValue::String(s) => s.clone(),
+        JsonValue::Number(n) => n.to_string(),
+        JsonValue::Bool(b) => b.to_string(),
+        JsonValue::Null => String::new(),
+        // For arrays/objects, use JSON representation
+        _ => current.to_string(),
     }
 }
 
@@ -1218,5 +1340,247 @@ mod tests {
         for line in &lines {
             assert_eq!(display_width(line), 40);
         }
+    }
+
+    // ============================================================================
+    // Struct Extraction Tests (Phase 6)
+    // ============================================================================
+
+    #[test]
+    fn row_from_simple_struct() {
+        #[derive(Serialize)]
+        struct Record {
+            name: String,
+            value: i32,
+        }
+
+        let spec = FlatDataSpec::builder()
+            .column(Column::new(Width::Fixed(10)).key("name"))
+            .column(Column::new(Width::Fixed(5)).key("value"))
+            .separator("  ")
+            .build();
+        let formatter = TableFormatter::new(&spec, 80);
+
+        let record = Record {
+            name: "Test".to_string(),
+            value: 42,
+        };
+
+        let row = formatter.row_from(&record);
+        assert!(row.contains("Test"));
+        assert!(row.contains("42"));
+    }
+
+    #[test]
+    fn row_from_uses_name_as_fallback() {
+        #[derive(Serialize)]
+        struct Item {
+            title: String,
+        }
+
+        let spec = FlatDataSpec::builder()
+            .column(Column::new(Width::Fixed(15)).named("title"))
+            .build();
+        let formatter = TableFormatter::new(&spec, 80);
+
+        let item = Item {
+            title: "Hello".to_string(),
+        };
+
+        let row = formatter.row_from(&item);
+        assert!(row.contains("Hello"));
+    }
+
+    #[test]
+    fn row_from_nested_field() {
+        #[derive(Serialize)]
+        struct User {
+            email: String,
+        }
+
+        #[derive(Serialize)]
+        struct Record {
+            user: User,
+            status: String,
+        }
+
+        let spec = FlatDataSpec::builder()
+            .column(Column::new(Width::Fixed(20)).key("user.email"))
+            .column(Column::new(Width::Fixed(10)).key("status"))
+            .separator("  ")
+            .build();
+        let formatter = TableFormatter::new(&spec, 80);
+
+        let record = Record {
+            user: User {
+                email: "test@example.com".to_string(),
+            },
+            status: "active".to_string(),
+        };
+
+        let row = formatter.row_from(&record);
+        assert!(row.contains("test@example.com"));
+        assert!(row.contains("active"));
+    }
+
+    #[test]
+    fn row_from_array_index() {
+        #[derive(Serialize)]
+        struct Record {
+            items: Vec<String>,
+        }
+
+        let spec = FlatDataSpec::builder()
+            .column(Column::new(Width::Fixed(10)).key("items.0"))
+            .column(Column::new(Width::Fixed(10)).key("items.1"))
+            .build();
+        let formatter = TableFormatter::new(&spec, 80);
+
+        let record = Record {
+            items: vec!["First".to_string(), "Second".to_string()],
+        };
+
+        let row = formatter.row_from(&record);
+        assert!(row.contains("First"));
+        assert!(row.contains("Second"));
+    }
+
+    #[test]
+    fn row_from_missing_field_uses_null_repr() {
+        #[derive(Serialize)]
+        struct Record {
+            present: String,
+        }
+
+        let spec = FlatDataSpec::builder()
+            .column(Column::new(Width::Fixed(10)).key("present"))
+            .column(Column::new(Width::Fixed(10)).key("missing").null_repr("-"))
+            .build();
+        let formatter = TableFormatter::new(&spec, 80);
+
+        let record = Record {
+            present: "value".to_string(),
+        };
+
+        let row = formatter.row_from(&record);
+        assert!(row.contains("value"));
+        // Missing field should show empty (extract_field returns empty string)
+    }
+
+    #[test]
+    fn row_from_no_key_uses_null_repr() {
+        #[derive(Serialize)]
+        struct Record {
+            value: String,
+        }
+
+        let spec = FlatDataSpec::builder()
+            .column(Column::new(Width::Fixed(10)).null_repr("N/A"))
+            .build();
+        let formatter = TableFormatter::new(&spec, 80);
+
+        let record = Record {
+            value: "test".to_string(),
+        };
+
+        let row = formatter.row_from(&record);
+        assert!(row.contains("N/A"));
+    }
+
+    #[test]
+    fn row_from_various_types() {
+        #[derive(Serialize)]
+        struct Record {
+            string_val: String,
+            int_val: i64,
+            float_val: f64,
+            bool_val: bool,
+        }
+
+        let spec = FlatDataSpec::builder()
+            .column(Column::new(Width::Fixed(10)).key("string_val"))
+            .column(Column::new(Width::Fixed(10)).key("int_val"))
+            .column(Column::new(Width::Fixed(10)).key("float_val"))
+            .column(Column::new(Width::Fixed(10)).key("bool_val"))
+            .build();
+        let formatter = TableFormatter::new(&spec, 80);
+
+        let record = Record {
+            string_val: "text".to_string(),
+            int_val: 123,
+            float_val: 9.87,
+            bool_val: true,
+        };
+
+        let row = formatter.row_from(&record);
+        assert!(row.contains("text"));
+        assert!(row.contains("123"));
+        assert!(row.contains("9.87"));
+        assert!(row.contains("true"));
+    }
+
+    #[test]
+    fn extract_field_simple() {
+        let json = serde_json::json!({
+            "name": "Alice",
+            "age": 30
+        });
+
+        assert_eq!(extract_field(&json, "name"), "Alice");
+        assert_eq!(extract_field(&json, "age"), "30");
+        assert_eq!(extract_field(&json, "missing"), "");
+    }
+
+    #[test]
+    fn extract_field_nested() {
+        let json = serde_json::json!({
+            "user": {
+                "profile": {
+                    "email": "test@example.com"
+                }
+            }
+        });
+
+        assert_eq!(
+            extract_field(&json, "user.profile.email"),
+            "test@example.com"
+        );
+        assert_eq!(extract_field(&json, "user.missing"), "");
+    }
+
+    #[test]
+    fn extract_field_array() {
+        let json = serde_json::json!({
+            "items": ["a", "b", "c"]
+        });
+
+        assert_eq!(extract_field(&json, "items.0"), "a");
+        assert_eq!(extract_field(&json, "items.1"), "b");
+        assert_eq!(extract_field(&json, "items.10"), ""); // Out of bounds
+    }
+
+    #[test]
+    fn row_lines_from_struct() {
+        #[derive(Serialize)]
+        struct Record {
+            description: String,
+            status: String,
+        }
+
+        let spec = FlatDataSpec::builder()
+            .column(Column::new(Width::Fixed(10)).key("description").wrap())
+            .column(Column::new(Width::Fixed(6)).key("status"))
+            .separator("  ")
+            .build();
+        let formatter = TableFormatter::new(&spec, 80);
+
+        let record = Record {
+            description: "A longer description that wraps".to_string(),
+            status: "OK".to_string(),
+        };
+
+        let lines = formatter.row_lines_from(&record);
+        // Should have multiple lines due to wrapping
+        assert!(!lines.is_empty());
     }
 }
