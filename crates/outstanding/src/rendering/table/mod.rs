@@ -103,6 +103,7 @@
 //! | `truncate_at` | `{{ value \| truncate_at(10, 'middle', '...') }}` |
 //! | `display_width` | `{{ value \| display_width }}` |
 
+mod decorator;
 pub mod filters;
 mod formatter;
 mod resolve;
@@ -110,6 +111,7 @@ mod types;
 mod util;
 
 // Re-export types
+pub use decorator::{BorderStyle, Table};
 pub use formatter::{CellOutput, TableFormatter, TabularFormatter};
 pub use resolve::ResolvedWidths;
 pub use types::{
