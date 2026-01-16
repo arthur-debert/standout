@@ -434,6 +434,19 @@ impl Theme {
         self.base.len() + self.aliases.len()
     }
 
+    /// Resolves a single style for the given mode.
+    ///
+    /// This is a convenience wrapper around [`resolve_styles`](Self::resolve_styles).
+    pub fn get_style(&self, name: &str, mode: Option<ColorMode>) -> Option<Style> {
+        let styles = self.resolve_styles(mode);
+        // Styles::resolve is crate-private, so we have to use to_resolved_map or check internal.
+        // Wait, Styles::resolve is pub(crate). We are in rendering/theme/theme.rs,
+        // Styles is in rendering/style/registry.rs. Same crate.
+        // But Theme is in `rendering::theme`, Styles in `rendering::style`.
+        // They are different modules. `pub(crate)` is visible.
+        styles.resolve(name).cloned()
+    }
+
     /// Returns the number of light mode overrides.
     pub fn light_override_count(&self) -> usize {
         self.light.len()
@@ -442,6 +455,31 @@ impl Theme {
     /// Returns the number of dark mode overrides.
     pub fn dark_override_count(&self) -> usize {
         self.dark.len()
+    }
+
+    /// Merges another theme into this one.
+    ///
+    /// Styles from `other` take precedence over styles in `self`.
+    /// This allows layering themes, e.g., loading a base theme and applying user overrides.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use outstanding::Theme;
+    /// use console::Style;
+    ///
+    /// let base = Theme::new().add("text", Style::new().dim());
+    /// let user = Theme::new().add("text", Style::new().bold());
+    ///
+    /// let merged = base.merge(user);
+    /// // "text" is now bold (from user)
+    /// ```
+    pub fn merge(mut self, other: Theme) -> Self {
+        self.base.extend(other.base);
+        self.light.extend(other.light);
+        self.dark.extend(other.dark);
+        self.aliases.extend(other.aliases);
+        self
     }
 }
 
@@ -807,5 +845,31 @@ mod tests {
         let mut theme = Theme::new();
         let result = theme.refresh();
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_theme_merge() {
+        let base = Theme::new()
+            .add("keep", Style::new().dim())
+            .add("overwrite", Style::new().red());
+
+        let extension = Theme::new()
+            .add("overwrite", Style::new().blue())
+            .add("new", Style::new().bold());
+
+        let merged = base.merge(extension);
+
+        let styles = merged.resolve_styles(None);
+
+        // "keep" should be from base
+        assert!(styles.has("keep"));
+
+        // "overwrite" should be from extension (blue, not red)
+        assert!(styles.has("overwrite"));
+
+        // "new" should be from extension
+        assert!(styles.has("new"));
+
+        assert_eq!(merged.len(), 3);
     }
 }
