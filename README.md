@@ -93,6 +93,8 @@ Ensure you have `outstanding-macros` if you want to use the embedding features.
 
 Learn more about building with Outstanding:
 
+-   **[Full Tutorial](docs/guides/full-tutorial.md)** - Step-by-step guide to adopting Outstanding in your CLI application. Start here if you're new.
+
 -   **Guides**
     -   [App Configuration](docs/guides/app-configuration.md)
     -   [Execution Model](docs/guides/execution-model.md)

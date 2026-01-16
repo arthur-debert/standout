@@ -11,13 +11,53 @@ and more.
 
 For explanation's sake, we will show a hypothetical list command for todoier, a todo list manager.
 
+See Also:
+  - Handler Contract (docs/guides/handler-contract.md) - detailed handler API
+  - Rendering System (docs/guides/rendering-system.md) - templates and styles in depth
+  - Output Modes (docs/guides/output-modes.md) - all output format options
+  - Partial Adoption (docs/howtos/partial-adoption.md) - migrating incrementally
+
 
 1. Start: The Argument Parsing
 
   Arg parsing is insanely intricate and deceptively simple. In case you are not already: define your
   application's interface with clap. Nothing else is worth doing until you have a sane starting point.
 
+  If you don't have clap set up yet, here's a minimal starting point:
+    use clap::{Parser, Subcommand};
+
+    #[derive(Parser)]
+    #[command(name = "todoier")]
+    struct Cli {
+        #[command(subcommand)]
+        command: Commands,
+    }
+
+    #[derive(Subcommand)]
+    enum Commands {
+        /// List all todos
+        List {
+            #[arg(short, long)]
+            all: bool,
+        },
+        /// Add a new todo
+        Add {
+            title: String,
+        },
+    }
+
+    fn main() {
+        let cli = Cli::parse();
+        match cli.command {
+            Commands::List { all } => list_command(all),
+            Commands::Add { title } => add_command(&title),
+        }
+    }
+  :: rust ::
+
   (If you are using a non-clap-compatible crate, for now, you'd have to write an adapter for clap.)
+
+  Verify: Run `cargo build` - it should compile without errors.
 
 
 2. Hard Split Logic and Formatting
@@ -30,10 +70,27 @@ For explanation's sake, we will show a hypothetical list command for todoier, a 
   iterate on both logic and presentation under this design is Outstanding's key value.
 
   If your CLI is in good shape this will be a small task, otherwise you may find yourself patching together
-  print statements everywhere, tidying up the data model and centralizing the processing. The silver
-  lining here being: if it takes considerable work, there will be considerable gain in doing so.
+  print statements everywhere, tidying up the data model and centralizing the processing. The silver lining
+  here being: if it takes considerable work, there will be considerable gain in doing so.
 
-  You'd end up with:
+  Before (tangled logic and output):
+    fn list_command(show_all: bool) {
+        let todos = storage::list().unwrap();
+        println!("Your Todos:");
+        println!("-----------");
+        for (i, todo) in todos.iter().enumerate() {
+            if show_all || todo.status == Status::Pending {
+                let marker = if todo.status == Status::Done { "[x]" } else { "[ ]" };
+                println!("{}. {} {}", i + 1, marker, todo.title);
+            }
+        }
+        if todos.is_empty() {
+            println!("No todos yet!");
+        }
+    }
+  :: rust ::
+
+  After (clean separation):
     use clap::ArgMatches;
 
     // Data types for your domain
@@ -91,25 +148,51 @@ For explanation's sake, we will show a hypothetical list command for todoier, a 
     }
   :: rust ::
 
+  Verify: Run `cargo build` and then `todoier list` - output should look identical to before.
 
-Intermezzo A: Milestone Logic and Presentation Split!
-  It's easy to miss it, so let me be loud about this: congratulations, you've done the single most important step
-  for a sane CLI design. At this point:
-      - All of your app's logic can be unit tested as any code, from the logic inwards.
-      - The first step: from command input string up to your logic, you can simply test by feeding input strings and verifying your logic handler
-        gets called with the right parameters.
-  The rendering can also be tested by feeding data inputs and matching outputs. That's true, but also brittle (small
-  changes in output formatting or messages break many tests, etc). We'll see how that's better later.
+
+Intermezzo A: Milestone - Logic and Presentation Split
+
+  What you achieved: Your command logic is now a pure function that returns data.
+
+  What's now possible:
+    - All of your app's logic can be unit tested as any code, from the logic inwards.
+    - You can test by feeding input strings and verifying your logic handler gets called with the right parameters.
+    - The rendering can also be tested by feeding data inputs and matching outputs (though this is brittle).
+
+  What's next: Making the return type serializable for automatic JSON/YAML output.
+
+  Your files now:
+    src/
+    ├── main.rs          # clap setup + orchestrators
+    ├── handlers.rs      # list(), add() - pure logic
+    └── render.rs        # render_list(), render_add() - output formatting
 
 
 3. Fine Tune the Logic Handler's Return Type
 
   While any data type works, Outstanding's renderer takes a generic type that must implement `Serialize`.
   This enables automatic JSON/YAML output modes and template rendering through MiniJinja's context system.
-  This is likely a small change, and beneficial as a baseline for logic results that will simplify writing renderers later.
+  This is likely a small change, and beneficial as a baseline for logic results that will simplify writing
+  renderers later.
 
-  Example:
+  Add serde to your Cargo.toml:
+    [dependencies]
+    serde = { version = "1", features = ["derive"] }
+  :: toml ::
+
+  Update your types:
     use serde::Serialize;
+
+    #[derive(Clone, Serialize)]
+    #[serde(rename_all = "lowercase")]
+    pub enum Status { Pending, Done }
+
+    #[derive(Clone, Serialize)]
+    pub struct Todo {
+        pub title: String,
+        pub status: Status,
+    }
 
     #[derive(Serialize)]
     pub struct TodoResult {
@@ -118,30 +201,55 @@ Intermezzo A: Milestone Logic and Presentation Split!
     }
   :: rust ::
 
+  Verify: Run `cargo build` - it should compile without errors.
+
 
 4. Replace Imperative Print Statements With a Template
 
-  Reading a template of an output next to the substituting variables is much easier to reason about than scattered
-  prints, string concats and the like. If your template is quite simple, a std::fmt can be a good intermediate step
-  and a checkpoint. Else skip to the next one.
+  Reading a template of an output next to the substituting variables is much easier to reason about than
+  scattered prints, string concats and the like.
+
+  This step is optional - if your current output is simple, you can skip to step 5.
+  If you want an intermediate checkpoint, use Rust's format strings:
+    pub fn render_list(result: TodoResult) {
+        let output = format!(
+            "{header}\n{todos}",
+            header = result.message.unwrap_or_default(),
+            todos = result.todos.iter().enumerate()
+                .map(|(i, t)| format!("{}. [{}] {}", i + 1, t.status, t.title))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        println!("{}", output);
+    }
+  :: rust ::
+
+  Verify: Run `todoier list` - output should still work.
 
 
 5. Use a MiniJinja Template String
 
   Rewrite your std::fmt or imperative prints into a MiniJinja template string, and add minijinja to your crate.
   If you're not familiar with it, it's a Rust implementation of Jinja, pretty much a de-facto standard for
-  more complex templates. The MiniJinja documentation is excellent: https://docs.rs/minijinja and the Jinja
-  template syntax reference: https://jinja.palletsprojects.com/en/3.1.x/templates/
+  more complex templates.
+
+  Resources:
+    - MiniJinja docs: https://docs.rs/minijinja
+    - Jinja syntax reference: https://jinja.palletsprojects.com/en/3.1.x/templates/
+
+  Add minijinja to your Cargo.toml:
+    [dependencies]
+    minijinja = "2"
+  :: toml ::
 
   And then you call render in MiniJinja, passing the template string and the data to use.
-
   So now your rendering function looks like this:
-
     pub fn render_list(result: TodoResult) {
         let output_tmpl = r#"
-    {% if message %}{{ message }} {% endif %}
+    {% if message %}{{ message }}
+    {% endif %}
     {% for todo in todos %}
-      {{ loop.index }}. {{ todo.title }} [{{ todo.status }}]
+    {{ loop.index }}. [{{ todo.status }}] {{ todo.title }}
     {% endfor %}
     "#;
 
@@ -152,53 +260,81 @@ Intermezzo A: Milestone Logic and Presentation Split!
     }
   :: rust ::
 
+  Verify: Run `todoier list` - output should match (formatting may differ slightly).
+
+
 6. Use a Dedicated Template File
 
-  Now, move the template content into a file (say templates/list.jinja), and embed its content in the rendering module.
-  Dedicated files have several advantages: triggering editor/IDE support for the file type, more descriptive diffs, less
-  risk of breaking the code/build and, in the event that you have less technical people helping out with the UI, a much
-  cleaner and simpler way for them to contribute.
+  Now, move the template content into a file (say `src/templates/list.jinja`), and load it in the rendering module.
+  Dedicated files have several advantages: triggering editor/IDE support for the file type, more descriptive diffs,
+  less risk of breaking the code/build and, in the event that you have less technical people helping out with the UI,
+  a much cleaner and simpler way for them to contribute.
 
-  Your templates/list.jinja file:
+  Create `src/templates/list.jinja`:
     {% if message %}{{ message }}
     {% endif %}
     {% for todo in todos %}
-    {{ loop.index }}. {{ todo.title }} [{{ todo.status }}]
+    {{ loop.index }}. [{{ todo.status }}] {{ todo.title }}
     {% endfor %}
   :: jinja ::
 
+  Update your render function to load from file:
+    pub fn render_list(result: TodoResult) {
+        let template_content = include_str!("templates/list.jinja");
+        let env = minijinja::Environment::new();
+        let tmpl = env.template_from_str(template_content).unwrap();
+        let output = tmpl.render(&result).unwrap();
+        println!("{}", output);
+    }
+  :: rust ::
+
+  Verify: Run `todoier list` - output should be identical.
+
+
 Intermezzo B: Declarative Output Definition
 
-  Congratulations, you've now reached another significant milestone. Instead of a maze of print statements and string
-  concatenations, you have a much simpler, less error-prone and easier to maintain rendering blueprint.
-  This plays well when reviewing code (are we changing logic or just display?) and more.
+  What you achieved: Output is now defined declaratively in a template file, separate from Rust code.
 
-  Note: for some complex data models and complex outputs, this by itself does not produce a great result,
-  as it's all a one-pass render. The symptom being a template filled with conditionals and branches. Do not fret, however, as
-  very simple solutions to this exist: partials (smaller templates that can be embedded in larger ones), variables, and
-  template filters and macros.
+  What's now possible:
+    - Edit templates without recompiling (with minor changes to loading)
+    - Non-Rust developers can contribute to UI
+    - Clear separation in code reviews: "is this a logic change or display change?"
+    - Use partials, filters, and macros for complex outputs (see docs/guides/rendering-system.md)
 
-  Also, notice we've yet to do anything Outstanding specific. This is not a coincidence, as the framework is born out of
-  making using and leveraging this design for easy testability, development speed and rich feature set easy under this design.
+  What's next: Hooking up Outstanding for automatic dispatch and rich output.
 
-  Recap:
-    Now your application looks like this:
-      - Clap-defined interface
-      - Orchestration list function that takes in parsed clap parameters, passing them to your application logic only handler,
-      which in turn returns your `Serialize` data type, which, in turn, gets passed to the rendering function. The latter
-      now is dead simple, with a template declaration and rendering the template with the command's result.
+  Also, notice we've yet to do anything Outstanding specific. This is not a coincidence, as the framework is
+  born out of making using and leveraging this design for easy testability, development speed and rich feature
+  set easy under this design.
+
+  Your files now:
+    src/
+    ├── main.rs
+    ├── handlers.rs
+    ├── render.rs
+    └── templates/
+        └── list.jinja
+
 
 7. Outstanding: Offload the Handler Orchestration
 
-    And now the Outstanding-specific bits finally show up. Add it as a dependency to your Cargo.toml and then:
+  And now the Outstanding-specific bits finally show up.
 
-    1. Add Outstanding to your Cargo.toml:
-      [dependencies]
-      outstanding = { version = "2", features = ["clap", "macros"] }
-    :: toml ::
+  7.1 Add Outstanding to your Cargo.toml
 
-    2. Annotate your list (the app logic) function with a dispatch macro. This tells Outstanding that the "list" command
-       should be dispatched to this logic. That's all Outstanding needs to know, and now it can manage the execution.
+    [dependencies]
+    outstanding = { version = "2", features = ["clap", "macros"] }
+  :: toml ::
+
+  Verify: Run `cargo build` - dependencies should download and compile.
+
+  7.2 Create the Commands enum with Dispatch
+
+    Annotate your commands enum with the Dispatch derive macro. This tells Outstanding that the "list" command
+    should be dispatched to the `list` handler. That's all Outstanding needs to know, and now it can manage
+    the execution.
+
+    See docs/guides/handler-contract.md for full handler API details.
 
       use outstanding::cli::{Dispatch, CommandContext, HandlerResult, Output};
       use clap::{ArgMatches, Subcommand};
@@ -234,20 +370,30 @@ Intermezzo B: Declarative Output Definition
       }
     :: rust ::
 
-    3. Use AppBuilder to configure your app. Instantiate the builder, add the path for your templates:
+  Verify: Run `cargo build` - it should compile without errors.
+
+  7.3 Configure AppBuilder
+
+    Use AppBuilder to configure your app. Instantiate the builder, add the path for your templates.
+    See docs/guides/app-configuration.md for all configuration options.
+
       use outstanding::cli::App;
       use outstanding::{embed_templates, embed_styles};
 
       let app = App::builder()
           .templates(embed_templates!("src/templates"))   // Embeds all .jinja/.j2 files
-          .styles(embed_styles!("src/styles"))            // Embeds all .yaml/.css files
-          .default_theme("default")                       // Use the "default" theme
           .commands(Commands::dispatch_config())          // Register handlers from derive macro
           .build()?;
     :: rust ::
 
-    4. The final bit: handling the dispatching off to Outstanding:
-      // In your main function
+  Verify: Run `cargo build` - it should compile without errors.
+
+  7.4 Wire up main()
+
+    The final bit: handling the dispatching off to Outstanding:
+      use outstanding::cli::App;
+      use outstanding::embed_templates;
+
       fn main() -> anyhow::Result<()> {
           let app = App::builder()
               .templates(embed_templates!("src/templates"))
@@ -260,7 +406,9 @@ Intermezzo B: Declarative Output Definition
       }
     :: rust ::
 
-    If your app has other clap commands that are not managed by Outstanding, use `run_to_string` instead:
+    If your app has other clap commands that are not managed by Outstanding, use `run_to_string` instead.
+    See docs/howtos/partial-adoption.md for details on incremental migration.
+
       match app.run_to_string(Cli::command(), std::env::args()) {
           RunResult::Handled(output) => println!("{}", output),
           RunResult::NoMatch(matches) => legacy_dispatch(matches),  // Your existing handler
@@ -268,49 +416,55 @@ Intermezzo B: Declarative Output Definition
       }
     :: rust ::
 
-    And now you can remove the boilerplate: the orchestrator (list_command) and the rendering (render_list).
-    You're pretty much at global optima: a single line of derive macro links your app logic to a command name, a few lines configure
-    Outstanding, and auto dispatch handles all the boilerplate.
+  Verify: Run `todoier list` - it should work as before.
+  Verify: Run `todoier list --output json` - you should get JSON output for free!
 
-    For the next commands you'd wish to migrate, this is even simpler. Say you have a "create" logic handler: add a "create.jinja" to
-    that template dir, add the derive macro for the create function and that is it. By default the macro will match the command's name to the
-    handlers and to the template files, but you can change these and map explicitly to your heart's content.
+  And now you can remove the boilerplate: the orchestrator (list_command) and the rendering (render_list).
+  You're pretty much at global optima: a single line of derive macro links your app logic to a command name,
+  a few lines configure Outstanding, and auto dispatch handles all the boilerplate.
+
+  For the next commands you'd wish to migrate, this is even simpler. Say you have a "create" logic handler:
+  add a "create.jinja" to that template dir, add the derive macro for the create function and that is it.
+  By default the macro will match the command's name to the handlers and to the template files, but you can
+  change these and map explicitly to your heart's content.
+
 
 Intermezzo C: Welcome to Outstanding
 
-    We've seen some of the benefits: once your organization is well structured (split logic and presentation, template-driven presentation) a
-    single line of code hooks up dispatch, your logic and the template.
+  What you achieved: Full dispatch pipeline with zero boilerplate.
 
-    This creates a logical barrier where it's easy to keep the decoupling of logic and presentation, makes working on the output easier and safer,
-    and the naming conventions tend to bring more consistency to most codebases too.
-
-    But there are more:
-      - You can alter the template and re-run your CLI, without compilation, and the new template will be used. Much faster dev workflow.
-      - Your CLI just got quite a few output options via --output:
+  What's now possible:
+    - Alter the template and re-run your CLI, without compilation, and the new template will be used
+    - Your CLI just got multiple output modes via --output (see docs/guides/output-modes.md):
         - term: rich shell formatting (more about this on the next step)
-        - term-debug: a way to print formatting info so that testing and other tools that don't understand colors can make sense of it
+        - term-debug: print formatting info for testing/debugging
         - text: plain text, no styling
-        - auto: the default, renders rich term and automatically degrades to plain text if terminal capabilities require it
-        - json, csv, yaml: you get these for free, the output of your application logic is serialized (which can be further refined if needed). These
-          come in handy: use json for testing tools, piping to other programs, effectively turning your shell into a well-behaved API.
+        - auto: the default, rich term that degrades gracefully
+        - json, csv, yaml: automatic serialization of your data
+
+  What's next: Adding rich styling to make the output beautiful.
+
+  Your files now:
+    src/
+    ├── main.rs              # App::builder() setup
+    ├── commands.rs          # Commands enum with #[derive(Dispatch)]
+    ├── handlers.rs          # list(), add() returning HandlerResult
+    └── templates/
+        ├── list.jinja
+        └── add.jinja
+
 
 8. Make the Output Awesome
 
-    Let's transform that mono-typed, monochrome string into a richer and more useful UI.
-    Borrowing from web apps setup, we keep the content in a template file, and we define
-    styles in a stylesheet file:
-      - Create the styles/default.css (or default.yaml)
-      - In your app builder add the styles and the default theme (already done in step 7):
+  Let's transform that mono-typed, monochrome string into a richer and more useful UI.
+  Borrowing from web apps setup, we keep the content in a template file, and we define
+  styles in a stylesheet file.
 
-      let app = App::builder()
-          .templates(embed_templates!("src/templates"))
-          .styles(embed_styles!("src/styles"))       // Load stylesheets
-          .default_theme("default")                  // Use styles/default.css or default.yaml
-          .commands(Commands::dispatch_config())
-          .build()?;
-    :: rust ::
+  See docs/guides/rendering-system.md for full styling documentation.
 
-    And in the CSS file (styles/default.css):
+  8.1 Create the stylesheet
+
+    Create `src/styles/default.css`:
       /* Styles for completed todos */
       .done {
           text-decoration: line-through;
@@ -342,7 +496,7 @@ Intermezzo C: Welcome to Outstanding
       }
     :: css ::
 
-    Or if you prefer YAML (styles/default.yaml):
+    Or if you prefer YAML (`src/styles/default.yaml`):
       done:
         strikethrough: true
         fg: gray
@@ -359,7 +513,11 @@ Intermezzo C: Welcome to Outstanding
         fg: cyan
     :: yaml ::
 
-    And finally let's add the styles in the templates (templates/list.jinja):
+  Verify: The file exists at `src/styles/default.css` or `src/styles/default.yaml`.
+
+  8.2 Add style tags to your template
+
+    Update `src/templates/list.jinja` with style tags:
       {% if message %}[message]{{ message }}[/message]
       {% endif %}
       {% for todo in todos %}
@@ -371,36 +529,91 @@ Intermezzo C: Welcome to Outstanding
     Notice how we use [{{ todo.status }}] dynamically - if todo.status is "done", it applies the .done style;
     if it's "pending", it applies the .pending style.
 
-    Now add this to your app bulder, to cin
-                  .styles(embed_styles!("src/styles"))V
-                  .default_theme("default")
-    ::  rust :: 
-    
-    Now you're leveraging the core rendering design of Outstanding:
-      - File-based templates for content, and stylesheets for styles
-      - Custom template syntax with BBCode for markup styles [style][/style]
-      - Live reload: iterate through content and styling without recompiling
+  Verify: The template file is updated.
 
-    You can now serve a finely crafted experience, as formatting is easy to control, scalable (easy to render, to reuse) and
-    fast (live reload).
+  8.3 Wire up styles in AppBuilder
+
+    Add the styles to your app builder:
+      let app = App::builder()
+          .templates(embed_templates!("src/templates"))
+          .styles(embed_styles!("src/styles"))       // Load stylesheets
+          .default_theme("default")                  // Use styles/default.css or default.yaml
+          .commands(Commands::dispatch_config())
+          .build()?;
+    :: rust ::
+
+  Verify: Run `cargo build` - it should compile without errors.
+  Verify: Run `todoier list` - you should see colored, styled output!
+  Verify: Run `todoier list --output text` - plain text, no colors.
+
+  Now you're leveraging the core rendering design of Outstanding:
+    - File-based templates for content, and stylesheets for styles
+    - Custom template syntax with BBCode for markup styles [style][/style]
+    - Live reload: iterate through content and styling without recompiling
+
 
 Intermezzo D: The Full Setup Is Done
 
-  A few lines to configure where to look for templates and themes, marking each command's handler and triggering the autodispatch
-  is all it takes to leverage Outstanding. You're now enjoying a clear hard boundary between data and presentation, a fully unit
-  testable logic and dispatch, a rich set of tools from MiniJinja to stylesheets and themes that, together with hot reload, make
-  producing high quality outputs a breeze.
+  What you achieved: A fully styled, testable, multi-format CLI.
 
-  You've also gained automated output formats, with structured data support and a plethora of tools to help in debugging (term-debug),
-  JSON output. For brevity's sake, we've ignored a bunch of finer and relevant points:
-    - The derive macros can set name mapping explicitly if you follow another convention or prefer not to change current code:
-      #[dispatch(handler = custom_handler_fn, template = "custom/path.jinja")]
-    - There are pre-dispatch, post-dispatch and post-render hooks that let you enrich data, do other actions and so on.
-    - Outstanding is a framework whose inner parts are exposed as libraries, so you could, for example, just use a CSS string and a text
-      template to render [styles] without any other bits, and so on.
-    - Powerful tabular/columnar-based layout capabilities via the `col` filter.
-    - Granular and manual dispatch control.
-    - A help topics system that can show rich documentation through the app's help system.
+  What's now possible:
+    - Rich terminal output with colors, bold, strikethrough
+    - Automatic light/dark mode adaptation
+    - JSON/YAML/CSV output for scripting and testing
+    - Hot reload of templates and styles during development
+    - Unit testable logic handlers
 
-  Aside from exposing the library primitives, Outstanding leverages best-in-breed crates like MiniJinja and console::Style under the hood.
-  The lock-in is really negligible: you can use Outstanding's BB parser or swap it, manually dispatch handlers, and use the renderers directly in your clap dispatch.
+  Your final files:
+    src/
+    ├── main.rs              # App::builder() setup
+    ├── commands.rs          # Commands enum with #[derive(Dispatch)]
+    ├── handlers.rs          # list(), add() returning HandlerResult
+    ├── templates/
+    │   ├── list.jinja       # with [style] tags
+    │   └── add.jinja
+    └── styles/
+        └── default.css      # or default.yaml
+
+  For brevity's sake, we've ignored a bunch of finer and relevant points:
+    - The derive macros can set name mapping explicitly: #[dispatch(handler = custom_fn, template = "custom.jinja")]
+    - There are pre-dispatch, post-dispatch and post-render hooks (see docs/guides/execution-model.md)
+    - Outstanding exposes its primitives as libraries for custom usage (see docs/howtos/render-only.md)
+    - Powerful tabular layouts via the `col` filter (see docs/howtos/tables.md)
+    - A help topics system for rich documentation (see docs/guides/topics-system.md)
+
+  Aside from exposing the library primitives, Outstanding leverages best-in-breed crates like MiniJinja and
+  console::Style under the hood. The lock-in is really negligible: you can use Outstanding's BB parser or
+  swap it, manually dispatch handlers, and use the renderers directly in your clap dispatch.
+
+
+Appendix: Common Errors and Troubleshooting
+
+  Template not found
+    Error: "template 'list' not found"
+    Cause: The template path in embed_templates! doesn't match your file structure.
+    Fix: Ensure the path is relative to your Cargo.toml, e.g., embed_templates!("src/templates")
+         and that the file is named list.jinja, list.j2, or list.txt.
+
+  Style not applied
+    Symptom: Text appears but without colors/formatting.
+    Cause: Style name in template doesn't match stylesheet.
+    Fix: Check that [mystyle] in your template matches .mystyle in CSS or mystyle: in YAML.
+         Run with --output term-debug to see style tag names.
+
+  Handler not called
+    Symptom: Command runs but nothing happens or wrong handler runs.
+    Cause: Command name mismatch between clap enum variant and handler function.
+    Fix: Ensure enum variant List maps to function handlers::list (snake_case conversion).
+         Or use explicit mapping: #[dispatch(handler = my_custom_handler)]
+
+  JSON output is empty or wrong
+    Symptom: --output json produces unexpected results.
+    Cause: Serialize derive is missing or field names don't match template expectations.
+    Fix: Ensure all types in your result implement Serialize.
+         Use #[serde(rename_all = "lowercase")] for consistent naming.
+
+  Styles not loading
+    Error: "theme not found: default"
+    Cause: Stylesheet file missing or wrong path.
+    Fix: Ensure src/styles/default.css or default.yaml exists.
+         Check embed_styles! path matches your file structure.
