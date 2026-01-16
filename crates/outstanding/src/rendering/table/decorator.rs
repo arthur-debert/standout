@@ -238,6 +238,28 @@ impl Table {
         self.wrap_row(&content)
     }
 
+    /// Format a data row by extracting values from a serializable struct.
+    ///
+    /// This method extracts field values based on each column's `key` or `name`.
+    /// See [`TableFormatter::row_from`] for details on field extraction.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use serde::Serialize;
+    ///
+    /// #[derive(Serialize)]
+    /// struct Record { name: String, status: String }
+    ///
+    /// let table = Table::new(spec, 80);
+    /// let record = Record { name: "Alice".into(), status: "active".into() };
+    /// println!("{}", table.row_from(&record));
+    /// ```
+    pub fn row_from<T: serde::Serialize>(&self, value: &T) -> String {
+        let content = self.formatter.row_from(value);
+        self.wrap_row(&content)
+    }
+
     /// Format the header row.
     pub fn header_row(&self) -> String {
         match &self.headers {
@@ -433,6 +455,20 @@ impl minijinja::value::Object for Table {
 
                 let formatted = self.row(&values);
                 Ok(minijinja::Value::from(formatted))
+            }
+            "row_from" => {
+                // row_from(object) - format a row by extracting values from an object
+                if args.is_empty() {
+                    return Err(minijinja::Error::new(
+                        minijinja::ErrorKind::MissingArgument,
+                        "row_from() requires an object argument",
+                    ));
+                }
+
+                // Convert MiniJinja Value to serde_json::Value for field extraction
+                let json_value = minijinja::value::Value::from_serialize(&args[0]);
+                let formatted = self.formatter.row_from(&json_value);
+                Ok(minijinja::Value::from(self.wrap_row(&formatted)))
             }
             "header_row" => {
                 // header_row() - format the header row
@@ -659,5 +695,60 @@ mod tests {
 
         assert_eq!(table.get_border(), BorderStyle::Ascii);
         assert_eq!(table.num_columns(), 2);
+    }
+
+    #[test]
+    fn table_row_from() {
+        use serde::Serialize;
+
+        #[derive(Serialize)]
+        struct Record {
+            name: String,
+            status: String,
+        }
+
+        let spec = TabularSpec::builder()
+            .column(Col::fixed(10).key("name"))
+            .column(Col::fixed(8).key("status"))
+            .separator("  ")
+            .build();
+
+        let table = Table::new(spec, 80);
+        let record = Record {
+            name: "Alice".to_string(),
+            status: "active".to_string(),
+        };
+
+        let row = table.row_from(&record);
+        assert!(row.contains("Alice"));
+        assert!(row.contains("active"));
+    }
+
+    #[test]
+    fn table_row_from_with_border() {
+        use serde::Serialize;
+
+        #[derive(Serialize)]
+        struct Item {
+            id: u32,
+            value: String,
+        }
+
+        let spec = TabularSpec::builder()
+            .column(Col::fixed(5).key("id"))
+            .column(Col::fixed(10).key("value"))
+            .build();
+
+        let table = Table::new(spec, 80).border(BorderStyle::Light);
+        let item = Item {
+            id: 42,
+            value: "test".to_string(),
+        };
+
+        let row = table.row_from(&item);
+        assert!(row.starts_with('│'));
+        assert!(row.ends_with('│'));
+        assert!(row.contains("42"));
+        assert!(row.contains("test"));
     }
 }

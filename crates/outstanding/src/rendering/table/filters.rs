@@ -1238,4 +1238,33 @@ mod tests {
         assert!(result.contains("30"));
         assert!(result.contains("10"));
     }
+
+    #[test]
+    fn function_table_row_from() {
+        let mut env = setup_env();
+        env.add_template(
+            "test",
+            r#"{% set tbl = table([{"width": 10, "key": "name"}, {"width": 8, "key": "status"}], separator="  ") %}{{ tbl.row_from(item) }}"#,
+        )
+        .unwrap();
+
+        #[derive(Serialize)]
+        struct TestItem {
+            name: &'static str,
+            status: &'static str,
+        }
+
+        let item = TestItem {
+            name: "Alice",
+            status: "active",
+        };
+
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(context!(item => item))
+            .unwrap();
+        assert!(result.contains("Alice"));
+        assert!(result.contains("active"));
+    }
 }
