@@ -320,6 +320,14 @@ fn parse_column(value: &Value) -> Result<Column, minijinja::Error> {
         }
     }
 
+    // Optional: anchor
+    if let Ok(anchor_val) = value.get_attr("anchor") {
+        if !anchor_val.is_none() && !anchor_val.is_undefined()
+            && anchor_val.to_string().to_lowercase() == "right" {
+                col = col.anchor_right();
+            }
+    }
+
     Ok(col)
 }
 
@@ -943,5 +951,24 @@ mod tests {
             .unwrap();
         assert!(result.contains("[title]"));
         assert!(result.contains("[/title]"));
+    }
+
+    #[test]
+    fn function_tabular_with_anchor() {
+        let mut env = setup_env();
+        env.add_template(
+            "test",
+            r#"{% set fmt = tabular([{"width": 5}, {"width": 5, "anchor": "right"}], separator=" ", width=30) %}{{ fmt.row(["L", "R"]) }}"#,
+        )
+        .unwrap();
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(context!())
+            .unwrap();
+        // Total width 30, left col at start, right col at end
+        assert_eq!(display_width(&result), 30);
+        assert!(result.starts_with("L    "));
+        assert!(result.ends_with("R    "));
     }
 }
