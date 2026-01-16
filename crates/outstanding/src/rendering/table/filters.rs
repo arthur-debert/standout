@@ -397,18 +397,26 @@ fn parse_width(value: &Value) -> Result<Width, minijinja::Error> {
         return Ok(Width::Fixed(n as usize));
     }
 
-    // String "fill" -> Fill
+    // String "fill" or "Nfr" (fractional) -> Fill or Fraction
     if let Some(s) = value.as_str() {
-        return match s {
-            "fill" => Ok(Width::Fill),
-            _ => Err(minijinja::Error::new(
-                minijinja::ErrorKind::InvalidOperation,
-                format!(
-                    "unknown width string: '{}' (use number, 'fill', or object)",
-                    s
-                ),
-            )),
-        };
+        if s == "fill" {
+            return Ok(Width::Fill);
+        }
+
+        // Check for fractional syntax: "2fr", "1fr", etc.
+        if let Some(num_part) = s.strip_suffix("fr") {
+            if let Ok(n) = num_part.parse::<usize>() {
+                return Ok(Width::Fraction(n));
+            }
+        }
+
+        return Err(minijinja::Error::new(
+            minijinja::ErrorKind::InvalidOperation,
+            format!(
+                "unknown width string: '{}' (use number, 'fill', 'Nfr', or object)",
+                s
+            ),
+        ));
     }
 
     // Object with min and/or max -> Bounded
@@ -1191,5 +1199,43 @@ mod tests {
             .unwrap();
         // Total 50, bounded fits content "Hello" (5) but uses min 10, fill takes rest
         assert_eq!(display_width(&result), 50);
+    }
+
+    #[test]
+    fn function_tabular_width_fraction_string() {
+        let mut env = setup_env();
+        // Two fraction columns: 2fr and 1fr (2:1 ratio)
+        env.add_template(
+            "test",
+            r#"{% set fmt = tabular([{"width": "2fr"}, {"width": "1fr"}], separator="  ", width=35) %}{{ fmt.widths }}"#,
+        )
+        .unwrap();
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(context!())
+            .unwrap();
+        // Total 35, sep 2, content 33, ratio 2:1 -> [22, 11]
+        assert!(result.contains("22"));
+        assert!(result.contains("11"));
+    }
+
+    #[test]
+    fn function_tabular_width_fraction_object() {
+        let mut env = setup_env();
+        // Fraction via object syntax
+        env.add_template(
+            "test",
+            r#"{% set fmt = tabular([{"width": {"fraction": 3}}, {"width": {"fraction": 1}}], separator="  ", width=42) %}{{ fmt.widths }}"#,
+        )
+        .unwrap();
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(context!())
+            .unwrap();
+        // Total 42, sep 2, content 40, ratio 3:1 -> [30, 10]
+        assert!(result.contains("30"));
+        assert!(result.contains("10"));
     }
 }
