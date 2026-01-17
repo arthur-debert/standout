@@ -63,7 +63,7 @@ impl FlatDataSpec {
     /// # Example
     ///
     /// ```rust
-    /// use outstanding::table::{FlatDataSpec, Column, Width};
+    /// use outstanding::tabular::{FlatDataSpec, Column, Width};
     ///
     /// let spec = FlatDataSpec::builder()
     ///     .column(Column::new(Width::Bounded { min: Some(5), max: Some(20) }))
@@ -187,7 +187,7 @@ impl FlatDataSpec {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::table::{Column, Width};
+    use crate::tabular::{Column, Width};
 
     #[test]
     fn resolve_empty_spec() {
@@ -471,7 +471,7 @@ mod tests {
 #[cfg(test)]
 mod proptests {
     use super::*;
-    use crate::table::{Column, Width};
+    use crate::tabular::{Column, Width};
     use proptest::prelude::*;
 
     proptest! {

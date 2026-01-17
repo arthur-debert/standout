@@ -1,11 +1,4 @@
-# Tabular Layout - Documentation Draft
-
-> This document shows what the user-facing documentation would look like.
-> It drives the API design by focusing on user experience first.
-
----
-
-## How To: Align Columns and Format Tables
+# Tabular Layout
 
 Outstanding helps you create aligned, readable output for lists, logs, and tabular data.
 
@@ -247,7 +240,7 @@ let spec = TabularSpec::builder()
 Pass to template context:
 
 ```rust
-let formatter = TabularFormatter::auto(&spec);
+let formatter = TabularFormatter::new(&spec, 80);
 ctx.insert("table", formatter);
 ```
 
@@ -355,18 +348,21 @@ For simple cases, render everything in one call using `render_all()`:
 use outstanding::tabular::{Table, TabularSpec, Col, BorderStyle};
 
 let spec = TabularSpec::builder()
-    .column(Col::fixed(8).named("ID"))
-    .column(Col::min(10).named("Author"))
+    .column(Col::fixed(8).header("ID"))
+    .column(Col::min(10).header("Author"))
     .column(Col::fill().named("Message"))
     .build();
 
-let table = Table::from(spec)
-    .header_from_columns()        // Use column names as headers
+let table = Table::new(spec, 80)
+    .header_from_columns()        // Use column headers/names as headers
     .header_style("table-header")
-    .border(BorderStyle::Rounded)
-    .build();
+    .border(BorderStyle::Rounded);
 
 // Render full table
+let data = vec![
+    vec!["a1b2c3d4", "Alice", "Add login"],
+    vec!["e5f6g7h8", "Bob", "Fix bug"],
+];
 let output = table.render(&data);
 println!("{}", output);
 
@@ -374,7 +370,7 @@ println!("{}", output);
 println!("{}", table.header_row());
 println!("{}", table.separator_row());
 for row in &data {
-    println!("{}", table.row(&[row.id, row.author, row.message]));
+    println!("{}", table.row(row));
 }
 println!("{}", table.bottom_border());
 ```
@@ -390,8 +386,7 @@ By default, Outstanding auto-detects terminal width. Override for testing or fix
 ```
 
 ```rust
-let formatter = TabularFormatter::new(&spec, 80);  // Fixed
-let formatter = TabularFormatter::auto(&spec);     // Auto-detect
+let formatter = TabularFormatter::new(&spec, 80);  // Fixed width
 ```
 
 ---
@@ -557,16 +552,17 @@ With styling (in terminal):
 ### `table()` Function
 
 ```jinja
-{% set t = table(columns, border=?, header=?, header_style=?, width=?) %}
+{% set t = table(columns, border=?, header=?, header_style=?, row_separator=?, width=?) %}
 {{ t.header_row() }}
 {{ t.separator_row() }}
 {{ t.row([values]) }}
+{{ t.row_from(object) }}
 {{ t.top_border() }}
 {{ t.bottom_border() }}
 {{ t.render_all(rows) }}
 ```
 
-### Reference Border Styles
+### Border Styles
 
 | Value | Example |
 | ----- | ------- |

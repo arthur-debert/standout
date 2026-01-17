@@ -1,11 +1,11 @@
 //! Table row formatter.
 //!
-//! This module provides the `TableFormatter` type that formats data rows
+//! This module provides the `TabularFormatter` type that formats data rows
 //! according to a table specification, producing aligned output.
 //!
 //! # Template Integration
 //!
-//! `TableFormatter` implements `minijinja::value::Object`, allowing it to be
+//! `TabularFormatter` implements `minijinja::value::Object`, allowing it to be
 //! used in templates when injected via context:
 //!
 //! ```jinja
@@ -21,10 +21,10 @@
 //! # Example with Context Injection
 //!
 //! ```rust,ignore
-//! use outstanding::table::{TableSpec, Column, Width, TableFormatter};
+//! use outstanding::tabular::{TabularSpec, Column, Width, TabularFormatter};
 //! use outstanding::context::ContextRegistry;
 //!
-//! let spec = TableSpec::builder()
+//! let spec = TabularSpec::builder()
 //!     .column(Column::new(Width::Fixed(10)))
 //!     .column(Column::new(Width::Fill))
 //!     .separator("  ")
@@ -32,7 +32,7 @@
 //!
 //! let mut registry = ContextRegistry::new();
 //! registry.add_provider("table", |ctx| {
-//!     let formatter = TableFormatter::new(&spec, ctx.terminal_width.unwrap_or(80));
+//!     let formatter = TabularFormatter::new(&spec, ctx.terminal_width.unwrap_or(80));
 //!     minijinja::Value::from_object(formatter)
 //! });
 //! ```
@@ -57,7 +57,7 @@ use super::util::{
 /// # Example
 ///
 /// ```rust
-/// use outstanding::table::{FlatDataSpec, Column, Width, TableFormatter};
+/// use outstanding::tabular::{FlatDataSpec, Column, Width, TabularFormatter};
 ///
 /// let spec = FlatDataSpec::builder()
 ///     .column(Column::new(Width::Fixed(8)))
@@ -66,7 +66,7 @@ use super::util::{
 ///     .separator("  ")
 ///     .build();
 ///
-/// let formatter = TableFormatter::new(&spec, 80);
+/// let formatter = TabularFormatter::new(&spec, 80);
 ///
 /// // Format rows one at a time (enables interleaved output)
 /// let row1 = formatter.format_row(&["abc123", "path/to/file.rs", "pending"]);
@@ -76,7 +76,7 @@ use super::util::{
 /// println!("{}", row2);
 /// ```
 #[derive(Clone, Debug)]
-pub struct TableFormatter {
+pub struct TabularFormatter {
     /// Column specifications.
     columns: Vec<Column>,
     /// Resolved widths for each column.
@@ -91,7 +91,7 @@ pub struct TableFormatter {
     total_width: usize,
 }
 
-impl TableFormatter {
+impl TabularFormatter {
     /// Create a new formatter by resolving widths from the spec.
     ///
     /// # Arguments
@@ -120,7 +120,7 @@ impl TableFormatter {
         resolved: ResolvedWidths,
         total_width: usize,
     ) -> Self {
-        TableFormatter {
+        TabularFormatter {
             columns: spec.columns.clone(),
             widths: resolved.widths,
             separator: spec.decorations.column_sep.clone(),
@@ -135,7 +135,7 @@ impl TableFormatter {
     /// This is useful for direct construction without a full FlatDataSpec.
     pub fn with_widths(columns: Vec<Column>, widths: Vec<usize>) -> Self {
         let total_width = widths.iter().sum();
-        TableFormatter {
+        TabularFormatter {
             columns,
             widths,
             separator: String::new(),
@@ -181,7 +181,7 @@ impl TableFormatter {
     /// # Example
     ///
     /// ```rust
-    /// use outstanding::table::{FlatDataSpec, Column, Width, TableFormatter};
+    /// use outstanding::tabular::{FlatDataSpec, Column, Width, TabularFormatter};
     ///
     /// let spec = FlatDataSpec::builder()
     ///     .column(Column::new(Width::Fixed(10)))
@@ -189,7 +189,7 @@ impl TableFormatter {
     ///     .separator(" | ")
     ///     .build();
     ///
-    /// let formatter = TableFormatter::new(&spec, 80);
+    /// let formatter = TabularFormatter::new(&spec, 80);
     /// let output = formatter.format_row(&["Hello", "World"]);
     /// assert_eq!(output, "Hello      | World   ");
     /// ```
@@ -275,7 +275,7 @@ impl TableFormatter {
     /// # Example
     ///
     /// ```rust
-    /// use outstanding::table::{FlatDataSpec, Column, Width, Overflow, TableFormatter};
+    /// use outstanding::tabular::{FlatDataSpec, Column, Width, Overflow, TabularFormatter};
     ///
     /// let spec = FlatDataSpec::builder()
     ///     .column(Column::new(Width::Fixed(10)).wrap())
@@ -283,7 +283,7 @@ impl TableFormatter {
     ///     .separator("  ")
     ///     .build();
     ///
-    /// let formatter = TableFormatter::new(&spec, 80);
+    /// let formatter = TabularFormatter::new(&spec, 80);
     /// let lines = formatter.format_row_lines(&["This is a long text", "Short"]);
     /// // Returns multiple lines if the first column wraps
     /// ```
@@ -392,7 +392,7 @@ impl TableFormatter {
     /// # Example
     ///
     /// ```rust
-    /// use outstanding::table::{FlatDataSpec, Column, Width, TableFormatter};
+    /// use outstanding::tabular::{FlatDataSpec, Column, Width, TabularFormatter};
     /// use serde::Serialize;
     ///
     /// #[derive(Serialize)]
@@ -409,7 +409,7 @@ impl TableFormatter {
     ///     .separator("  ")
     ///     .build();
     ///
-    /// let formatter = TableFormatter::new(&spec, 80);
+    /// let formatter = TabularFormatter::new(&spec, 80);
     /// let record = Record {
     ///     name: "example".to_string(),
     ///     status: "active".to_string(),
@@ -504,7 +504,7 @@ fn extract_field(value: &JsonValue, path: &str) -> String {
 // MiniJinja Object Implementation
 // ============================================================================
 
-impl Object for TableFormatter {
+impl Object for TabularFormatter {
     fn get_value(self: &Arc<Self>, key: &Value) -> Option<Value> {
         match key.as_str()? {
             "num_columns" => Some(Value::from(self.num_columns())),
@@ -574,7 +574,7 @@ impl Object for TableFormatter {
             }
             _ => Err(minijinja::Error::new(
                 minijinja::ErrorKind::UnknownMethod,
-                format!("TableFormatter has no method '{}'", name),
+                format!("TabularFormatter has no method '{}'", name),
             )),
         }
     }
@@ -651,9 +651,6 @@ fn format_cell_styled(
         _ => padded,
     }
 }
-
-/// Type alias: TabularFormatter is the preferred name for TableFormatter.
-pub type TabularFormatter = TableFormatter;
 
 /// Result of formatting a cell, which may be single or multi-line.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -765,7 +762,7 @@ fn format_cell_lines(value: &str, width: usize, col: &Column) -> CellOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::table::{TableSpec, Width};
+    use crate::tabular::{TabularSpec, Width};
 
     fn simple_spec() -> FlatDataSpec {
         FlatDataSpec::builder()
@@ -777,7 +774,7 @@ mod tests {
 
     #[test]
     fn format_basic_row() {
-        let formatter = TableFormatter::new(&simple_spec(), 80);
+        let formatter = TabularFormatter::new(&simple_spec(), 80);
         let output = formatter.format_row(&["Hello", "World"]);
         assert_eq!(output, "Hello      | World   ");
     }
@@ -787,7 +784,7 @@ mod tests {
         let spec = FlatDataSpec::builder()
             .column(Column::new(Width::Fixed(8)))
             .build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         let output = formatter.format_row(&["Hello World"]);
         assert_eq!(output, "Hello W…");
@@ -798,7 +795,7 @@ mod tests {
         let spec = FlatDataSpec::builder()
             .column(Column::new(Width::Fixed(10)).align(Align::Right))
             .build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         let output = formatter.format_row(&["42"]);
         assert_eq!(output, "        42");
@@ -809,7 +806,7 @@ mod tests {
         let spec = FlatDataSpec::builder()
             .column(Column::new(Width::Fixed(10)).align(Align::Center))
             .build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         let output = formatter.format_row(&["hi"]);
         assert_eq!(output, "    hi    ");
@@ -820,7 +817,7 @@ mod tests {
         let spec = FlatDataSpec::builder()
             .column(Column::new(Width::Fixed(10)).truncate(TruncateAt::Start))
             .build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         let output = formatter.format_row(&["/path/to/file.rs"]);
         assert_eq!(display_width(&output), 10);
@@ -832,7 +829,7 @@ mod tests {
         let spec = FlatDataSpec::builder()
             .column(Column::new(Width::Fixed(10)).truncate(TruncateAt::Middle))
             .build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         let output = formatter.format_row(&["abcdefghijklmno"]);
         assert_eq!(display_width(&output), 10);
@@ -846,7 +843,7 @@ mod tests {
             .column(Column::new(Width::Fixed(8)).null_repr("N/A"))
             .separator("  ")
             .build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         // Only provide first value - second uses null_repr
         let output = formatter.format_row(&["value"]);
@@ -862,7 +859,7 @@ mod tests {
             .prefix("│ ")
             .suffix(" │")
             .build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         let output = formatter.format_row(&["Hello", "World"]);
         assert!(output.starts_with("│ "));
@@ -872,7 +869,7 @@ mod tests {
 
     #[test]
     fn format_multiple_rows() {
-        let formatter = TableFormatter::new(&simple_spec(), 80);
+        let formatter = TabularFormatter::new(&simple_spec(), 80);
         let rows = vec![vec!["a", "1"], vec!["b", "2"], vec!["c", "3"]];
 
         let output = formatter.format_rows(&rows);
@@ -889,7 +886,7 @@ mod tests {
             .build();
 
         // Total: 30, overhead: 4 (2 separators), fixed: 10, fill: 16
-        let formatter = TableFormatter::new(&spec, 30);
+        let formatter = TabularFormatter::new(&spec, 30);
         let _output = formatter.format_row(&["abc", "middle", "xyz"]);
 
         // Check that widths are as expected
@@ -902,7 +899,7 @@ mod tests {
             .column(Column::new(Width::Fixed(10)))
             .column(Column::new(Width::Fixed(8)))
             .build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         assert_eq!(formatter.num_columns(), 2);
         assert_eq!(formatter.column_width(0), Some(10));
@@ -913,7 +910,7 @@ mod tests {
     #[test]
     fn format_empty_spec() {
         let spec = FlatDataSpec::builder().build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         let output = formatter.format_row::<&str>(&[]);
         assert_eq!(output, "");
@@ -924,7 +921,7 @@ mod tests {
         let spec = FlatDataSpec::builder()
             .column(Column::new(Width::Fixed(10)))
             .build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         let styled = "\x1b[31mred\x1b[0m";
         let output = formatter.format_row(&[styled]);
@@ -937,7 +934,7 @@ mod tests {
     #[test]
     fn format_with_explicit_widths() {
         let columns = vec![Column::new(Width::Fixed(5)), Column::new(Width::Fixed(10))];
-        let formatter = TableFormatter::with_widths(columns, vec![5, 10]).separator(" - ");
+        let formatter = TabularFormatter::with_widths(columns, vec![5, 10]).separator(" - ");
 
         let output = formatter.format_row(&["hi", "there"]);
         assert_eq!(output, "hi    - there     ");
@@ -949,18 +946,18 @@ mod tests {
 
     #[test]
     fn object_get_num_columns() {
-        let formatter = Arc::new(TableFormatter::new(&simple_spec(), 80));
+        let formatter = Arc::new(TabularFormatter::new(&simple_spec(), 80));
         let value = formatter.get_value(&Value::from("num_columns"));
         assert_eq!(value, Some(Value::from(2)));
     }
 
     #[test]
     fn object_get_widths() {
-        let spec = TableSpec::builder()
+        let spec = TabularSpec::builder()
             .column(Column::new(Width::Fixed(10)))
             .column(Column::new(Width::Fixed(8)))
             .build();
-        let formatter = Arc::new(TableFormatter::new(&spec, 80));
+        let formatter = Arc::new(TabularFormatter::new(&spec, 80));
 
         let value = formatter.get_value(&Value::from("widths"));
         assert!(value.is_some());
@@ -971,11 +968,11 @@ mod tests {
 
     #[test]
     fn object_get_separator() {
-        let spec = TableSpec::builder()
+        let spec = TabularSpec::builder()
             .column(Column::new(Width::Fixed(10)))
             .separator(" | ")
             .build();
-        let formatter = Arc::new(TableFormatter::new(&spec, 80));
+        let formatter = Arc::new(TabularFormatter::new(&spec, 80));
 
         let value = formatter.get_value(&Value::from("separator"));
         assert_eq!(value, Some(Value::from(" | ")));
@@ -983,7 +980,7 @@ mod tests {
 
     #[test]
     fn object_get_unknown_returns_none() {
-        let formatter = Arc::new(TableFormatter::new(&simple_spec(), 80));
+        let formatter = Arc::new(TabularFormatter::new(&simple_spec(), 80));
         let value = formatter.get_value(&Value::from("unknown"));
         assert_eq!(value, None);
     }
@@ -992,12 +989,12 @@ mod tests {
     fn object_row_method_via_template() {
         use minijinja::Environment;
 
-        let spec = TableSpec::builder()
+        let spec = TabularSpec::builder()
             .column(Column::new(Width::Fixed(10)))
             .column(Column::new(Width::Fixed(8)))
             .separator(" | ")
             .build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         let mut env = Environment::new();
         env.add_template("test", "{{ table.row(['Hello', 'World']) }}")
@@ -1015,12 +1012,12 @@ mod tests {
     fn object_row_method_in_loop() {
         use minijinja::Environment;
 
-        let spec = TableSpec::builder()
+        let spec = TabularSpec::builder()
             .column(Column::new(Width::Fixed(8)))
             .column(Column::new(Width::Fixed(6)))
             .separator("  ")
             .build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         let mut env = Environment::new();
         env.add_template(
@@ -1048,11 +1045,11 @@ mod tests {
     fn object_column_width_method_via_template() {
         use minijinja::Environment;
 
-        let spec = TableSpec::builder()
+        let spec = TabularSpec::builder()
             .column(Column::new(Width::Fixed(10)))
             .column(Column::new(Width::Fixed(8)))
             .build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         let mut env = Environment::new();
         env.add_template(
@@ -1073,12 +1070,12 @@ mod tests {
     fn object_attribute_access_via_template() {
         use minijinja::Environment;
 
-        let spec = TableSpec::builder()
+        let spec = TabularSpec::builder()
             .column(Column::new(Width::Fixed(10)))
             .column(Column::new(Width::Fixed(8)))
             .separator(" | ")
             .build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         let mut env = Environment::new();
         env.add_template(
@@ -1104,7 +1101,7 @@ mod tests {
         let spec = FlatDataSpec::builder()
             .column(Column::new(Width::Fixed(5)).clip())
             .build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         let output = formatter.format_row(&["Hello World"]);
         // Clip truncates without marker
@@ -1185,7 +1182,7 @@ mod tests {
             .column(Column::new(Width::Fixed(8)))
             .separator("  ")
             .build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         let lines = formatter.format_row_lines(&["Hello", "World"]);
         assert_eq!(lines.len(), 1);
@@ -1199,7 +1196,7 @@ mod tests {
             .column(Column::new(Width::Fixed(6)))
             .separator("  ")
             .build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         let lines = formatter.format_row_lines(&["This is long", "Short"]);
 
@@ -1222,7 +1219,7 @@ mod tests {
             .column(Column::new(Width::Fixed(4))) // truncates
             .separator(" ")
             .build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         let lines = formatter.format_row_lines(&["aaaaa", "this text wraps here", "bbbb"]);
 
@@ -1282,7 +1279,7 @@ mod tests {
             .column(Column::new(Width::Fixed(5)))
             .separator(" ")
             .build();
-        let formatter = TableFormatter::new(&spec, 50);
+        let formatter = TabularFormatter::new(&spec, 50);
 
         let output = formatter.format_row(&["A", "B"]);
         // Total content: 5 + 1 + 5 = 11, no gap
@@ -1301,7 +1298,7 @@ mod tests {
 
         // Total: 30, content: 5 + 5 = 10, sep: 1, overhead: 11
         // Gap: 30 - 11 + 1 = 20 (replaces separator)
-        let formatter = TableFormatter::new(&spec, 30);
+        let formatter = TabularFormatter::new(&spec, 30);
 
         let output = formatter.format_row(&["L", "R"]);
         assert_eq!(display_width(&output), 30);
@@ -1320,7 +1317,7 @@ mod tests {
             .build();
 
         // Total: 22 (10 + 2 + 10), no extra space
-        let formatter = TableFormatter::new(&spec, 22);
+        let formatter = TabularFormatter::new(&spec, 22);
 
         let output = formatter.format_row(&["Left", "Right"]);
         assert_eq!(display_width(&output), 22);
@@ -1336,7 +1333,7 @@ mod tests {
             .column(Column::new(Width::Fixed(5)).anchor_right())
             .separator(" ")
             .build();
-        let formatter = TableFormatter::new(&spec, 50);
+        let formatter = TabularFormatter::new(&spec, 50);
 
         let output = formatter.format_row(&["A", "B"]);
         // No transition from left to right, so no gap
@@ -1356,7 +1353,7 @@ mod tests {
 
         // Content: 4*4 = 16, seps: 3, overhead: 19
         // Total: 40, gap: 40 - 19 + 1 = 22
-        let formatter = TableFormatter::new(&spec, 40);
+        let formatter = TabularFormatter::new(&spec, 40);
 
         let output = formatter.format_row(&["A", "B", "C", "D"]);
         assert_eq!(display_width(&output), 40);
@@ -1370,7 +1367,7 @@ mod tests {
             .column(Column::new(Width::Fixed(10)))
             .column(Column::new(Width::Fixed(10)))
             .build();
-        let formatter = TableFormatter::new(&spec, 50);
+        let formatter = TabularFormatter::new(&spec, 50);
 
         let (gap, transition) = formatter.calculate_anchor_gap();
         assert_eq!(transition, 2); // No right-anchored columns
@@ -1384,7 +1381,7 @@ mod tests {
             .column(Column::new(Width::Fixed(10)).anchor_right())
             .separator(" ")
             .build();
-        let formatter = TableFormatter::new(&spec, 50);
+        let formatter = TabularFormatter::new(&spec, 50);
 
         let (gap, transition) = formatter.calculate_anchor_gap();
         assert_eq!(transition, 1); // Second column is right-anchored
@@ -1399,7 +1396,7 @@ mod tests {
             .column(Column::new(Width::Fixed(6)).anchor_right())
             .separator(" ")
             .build();
-        let formatter = TableFormatter::new(&spec, 40);
+        let formatter = TabularFormatter::new(&spec, 40);
 
         let lines = formatter.format_row_lines(&["This is text", "Right"]);
 
@@ -1426,7 +1423,7 @@ mod tests {
             .column(Column::new(Width::Fixed(5)).key("value"))
             .separator("  ")
             .build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         let record = Record {
             name: "Test".to_string(),
@@ -1448,7 +1445,7 @@ mod tests {
         let spec = FlatDataSpec::builder()
             .column(Column::new(Width::Fixed(15)).named("title"))
             .build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         let item = Item {
             title: "Hello".to_string(),
@@ -1476,7 +1473,7 @@ mod tests {
             .column(Column::new(Width::Fixed(10)).key("status"))
             .separator("  ")
             .build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         let record = Record {
             user: User {
@@ -1501,7 +1498,7 @@ mod tests {
             .column(Column::new(Width::Fixed(10)).key("items.0"))
             .column(Column::new(Width::Fixed(10)).key("items.1"))
             .build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         let record = Record {
             items: vec!["First".to_string(), "Second".to_string()],
@@ -1523,7 +1520,7 @@ mod tests {
             .column(Column::new(Width::Fixed(10)).key("present"))
             .column(Column::new(Width::Fixed(10)).key("missing").null_repr("-"))
             .build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         let record = Record {
             present: "value".to_string(),
@@ -1544,7 +1541,7 @@ mod tests {
         let spec = FlatDataSpec::builder()
             .column(Column::new(Width::Fixed(10)).null_repr("N/A"))
             .build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         let record = Record {
             value: "test".to_string(),
@@ -1570,7 +1567,7 @@ mod tests {
             .column(Column::new(Width::Fixed(10)).key("float_val"))
             .column(Column::new(Width::Fixed(10)).key("bool_val"))
             .build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         let record = Record {
             string_val: "text".to_string(),
@@ -1639,7 +1636,7 @@ mod tests {
             .column(Column::new(Width::Fixed(6)).key("status"))
             .separator("  ")
             .build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         let record = Record {
             description: "A longer description that wraps".to_string(),
@@ -1660,7 +1657,7 @@ mod tests {
         let spec = FlatDataSpec::builder()
             .column(Column::new(Width::Fixed(10)).style("header"))
             .build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         let output = formatter.format_row(&["Hello"]);
         // Should wrap in style tags
@@ -1674,7 +1671,7 @@ mod tests {
         let spec = FlatDataSpec::builder()
             .column(Column::new(Width::Fixed(10)).style_from_value())
             .build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         let output = formatter.format_row(&["error"]);
         // Value "error" becomes the style
@@ -1687,7 +1684,7 @@ mod tests {
         let spec = FlatDataSpec::builder()
             .column(Column::new(Width::Fixed(10)))
             .build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         let output = formatter.format_row(&["Hello"]);
         // No style tags
@@ -1704,7 +1701,7 @@ mod tests {
         col.style_from_value = true;
 
         let spec = FlatDataSpec::builder().column(col).build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         let output = formatter.format_row(&["custom"]);
         // style_from_value takes precedence
@@ -1719,7 +1716,7 @@ mod tests {
             .column(Column::new(Width::Fixed(8)).style("status"))
             .separator("  ")
             .build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         let output = formatter.format_row(&["Alice", "Active"]);
         assert!(output.contains("[name]"));
@@ -1731,7 +1728,7 @@ mod tests {
         let spec = FlatDataSpec::builder()
             .column(Column::new(Width::Fixed(10)).wrap().style("text"))
             .build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         let lines = formatter.format_row_lines(&["This is a long text that wraps"]);
 
@@ -1752,7 +1749,7 @@ mod tests {
             .column(Column::new(Width::Fixed(10)).header("Name"))
             .column(Column::new(Width::Fixed(8)).header("Status"))
             .build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         let headers = formatter.extract_headers();
         assert_eq!(headers, vec!["Name", "Status"]);
@@ -1764,7 +1761,7 @@ mod tests {
             .column(Column::new(Width::Fixed(10)).key("user_name"))
             .column(Column::new(Width::Fixed(8)).key("status"))
             .build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         let headers = formatter.extract_headers();
         assert_eq!(headers, vec!["user_name", "status"]);
@@ -1776,7 +1773,7 @@ mod tests {
             .column(Column::new(Width::Fixed(10)).named("col1"))
             .column(Column::new(Width::Fixed(8)).named("col2"))
             .build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         let headers = formatter.extract_headers();
         assert_eq!(headers, vec!["col1", "col2"]);
@@ -1800,7 +1797,7 @@ mod tests {
             .column(Column::new(Width::Fixed(10)).named("name_only"))
             .column(Column::new(Width::Fixed(10))) // No header, key, or name
             .build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         let headers = formatter.extract_headers();
         assert_eq!(headers, vec!["Header", "key_only", "name_only", ""]);
@@ -1809,7 +1806,7 @@ mod tests {
     #[test]
     fn extract_headers_empty_spec() {
         let spec = FlatDataSpec::builder().build();
-        let formatter = TableFormatter::new(&spec, 80);
+        let formatter = TabularFormatter::new(&spec, 80);
 
         let headers = formatter.extract_headers();
         assert!(headers.is_empty());

@@ -44,13 +44,13 @@
 use minijinja::{Environment, Value};
 
 use super::decorator::{BorderStyle, Table};
-use super::formatter::TableFormatter;
+use super::formatter::TabularFormatter;
 use super::types::{Align, Column, Overflow, TabularSpec, TruncateAt, Width};
 use super::util::{
     display_width, pad_center, pad_left, pad_right, truncate_end, truncate_middle, truncate_start,
 };
 
-/// Register all table-related filters on a MiniJinja environment.
+/// Register all tabular-related filters on a MiniJinja environment.
 ///
 /// # Filters Added
 ///
@@ -63,12 +63,12 @@ use super::util::{
 ///
 /// ```rust,ignore
 /// use minijinja::Environment;
-/// use outstanding::table::filters::register_table_filters;
+/// use outstanding::tabular::filters::register_tabular_filters;
 ///
 /// let mut env = Environment::new();
-/// register_table_filters(&mut env);
+/// register_tabular_filters(&mut env);
 /// ```
-pub fn register_table_filters(env: &mut Environment<'static>) {
+pub fn register_tabular_filters(env: &mut Environment<'static>) {
     // col filter: {{ value | col(width) }} or {{ value | col(width, align="right", truncate="middle") }}
     // "fill" support (Option B): {{ value | col("fill", width=80) }}
     env.add_filter(
@@ -193,7 +193,7 @@ fn register_table_functions(env: &mut Environment<'static>) {
             }
 
             let spec = builder.build();
-            let formatter = TableFormatter::new(&spec, width);
+            let formatter = TabularFormatter::new(&spec, width);
             Ok(Value::from_object(formatter))
         },
     );
@@ -549,7 +549,7 @@ mod tests {
 
     fn setup_env() -> Environment<'static> {
         let mut env = Environment::new();
-        register_table_filters(&mut env);
+        register_tabular_filters(&mut env);
         env
     }
 

@@ -6,7 +6,7 @@
 //! # Example
 //!
 //! ```rust
-//! use outstanding::table::{Table, TabularSpec, Col, BorderStyle};
+//! use outstanding::tabular::{Table, TabularSpec, Col, BorderStyle};
 //!
 //! let spec = TabularSpec::builder()
 //!     .column(Col::fixed(20))
@@ -35,7 +35,7 @@
 //! println!("{}", table.render(&data));
 //! ```
 
-use super::formatter::TableFormatter;
+use super::formatter::TabularFormatter;
 use super::types::{FlatDataSpec, TabularSpec};
 use super::util::display_width;
 
@@ -172,7 +172,7 @@ impl BorderChars {
 #[derive(Clone, Debug)]
 pub struct Table {
     /// The underlying formatter.
-    formatter: TableFormatter,
+    formatter: TabularFormatter,
     /// Column headers.
     headers: Option<Vec<String>>,
     /// Border style.
@@ -186,7 +186,7 @@ pub struct Table {
 impl Table {
     /// Create a new table with the given spec and total width.
     pub fn new(spec: TabularSpec, total_width: usize) -> Self {
-        let formatter = TableFormatter::new(&spec, total_width);
+        let formatter = TabularFormatter::new(&spec, total_width);
         Table {
             formatter,
             headers: None,
@@ -198,7 +198,7 @@ impl Table {
 
     /// Create a table from a raw FlatDataSpec.
     pub fn from_spec(spec: &FlatDataSpec, total_width: usize) -> Self {
-        let formatter = TableFormatter::new(spec, total_width);
+        let formatter = TabularFormatter::new(spec, total_width);
         Table {
             formatter,
             headers: None,
@@ -277,7 +277,7 @@ impl Table {
     /// Format a data row by extracting values from a serializable struct.
     ///
     /// This method extracts field values based on each column's `key` or `name`.
-    /// See [`TableFormatter::row_from`] for details on field extraction.
+    /// See [`TabularFormatter::row_from`] for details on field extraction.
     ///
     /// # Example
     ///
@@ -576,7 +576,7 @@ impl minijinja::value::Object for Table {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::table::Col;
+    use crate::tabular::Col;
 
     fn simple_spec() -> TabularSpec {
         TabularSpec::builder()

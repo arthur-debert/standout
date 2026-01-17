@@ -567,7 +567,7 @@ impl ColumnBuilder {
 /// Provides a concise API for common column configurations:
 ///
 /// ```rust
-/// use outstanding::table::Col;
+/// use outstanding::tabular::Col;
 ///
 /// let col = Col::fixed(10);           // Fixed width 10
 /// let col = Col::min(5);              // At least 5, grows to fit
@@ -654,7 +654,7 @@ impl Decorations {
 
     /// Calculate the total overhead (prefix + suffix + separators between n columns).
     pub fn overhead(&self, num_columns: usize) -> usize {
-        use crate::table::display_width;
+        use crate::tabular::display_width;
         let prefix_width = display_width(&self.row_prefix);
         let suffix_width = display_width(&self.row_suffix);
         let sep_width = display_width(&self.column_sep);
@@ -809,11 +809,6 @@ impl FlatDataSpecBuilder {
 pub type TabularSpec = FlatDataSpec;
 /// Type alias for the builder.
 pub type TabularSpecBuilder = FlatDataSpecBuilder;
-
-/// Backward compatibility alias (use TabularSpec instead).
-pub type TableSpec = FlatDataSpec;
-/// Backward compatibility alias (use TabularSpecBuilder instead).
-pub type TableSpecBuilder = FlatDataSpecBuilder;
 
 #[cfg(test)]
 mod tests {
@@ -1173,7 +1168,7 @@ mod tests {
 
     #[test]
     fn table_spec_no_fill() {
-        let spec = TableSpec::builder()
+        let spec = TabularSpec::builder()
             .column(Column::new(Width::Fixed(8)))
             .column(Column::new(Width::Fixed(10)))
             .build();
