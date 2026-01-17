@@ -122,6 +122,9 @@ pub use traits::{Tabular, TabularRow};
 #[cfg(feature = "macros")]
 #[doc(hidden)]
 pub use outstanding_macros::Tabular;
+#[cfg(feature = "macros")]
+#[doc(hidden)]
+pub use outstanding_macros::TabularRow;
 pub use types::{
     Align, Anchor, Col, Column, ColumnBuilder, Decorations, FlatDataSpec, FlatDataSpecBuilder,
     Overflow, TabularSpec, TabularSpecBuilder, TruncateAt, Width,

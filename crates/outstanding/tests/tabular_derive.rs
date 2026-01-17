@@ -5,7 +5,7 @@
 
 #![cfg(feature = "macros")]
 
-use outstanding::tabular::{Align, Anchor, Overflow, Tabular, TruncateAt, Width};
+use outstanding::tabular::{Align, Anchor, Overflow, Tabular, TabularRow, TruncateAt, Width};
 use outstanding_macros::Tabular as DeriveTabular;
 use serde::Serialize;
 
@@ -400,4 +400,152 @@ fn test_complete_task_due_column() {
 fn test_complete_task_decorations() {
     let spec = CompleteTask::tabular_spec();
     assert_eq!(spec.decorations.column_sep, " │ ");
+}
+
+// =============================================================================
+// TabularRow derive tests
+// =============================================================================
+
+use outstanding_macros::TabularRow as DeriveTabularRow;
+
+#[derive(DeriveTabularRow)]
+struct BasicRow {
+    id: String,
+    title: String,
+    status: String,
+}
+
+#[test]
+fn test_tabular_row_basic() {
+    let row = BasicRow {
+        id: "TSK-001".to_string(),
+        title: "Implement feature".to_string(),
+        status: "pending".to_string(),
+    };
+    let values = row.to_row();
+    assert_eq!(values.len(), 3);
+    assert_eq!(values[0], "TSK-001");
+    assert_eq!(values[1], "Implement feature");
+    assert_eq!(values[2], "pending");
+}
+
+#[derive(DeriveTabularRow)]
+struct NumericRow {
+    id: i32,
+    count: u64,
+    value: f64,
+}
+
+#[test]
+fn test_tabular_row_numeric() {
+    let row = NumericRow {
+        id: 42,
+        count: 100,
+        value: 1.23,
+    };
+    let values = row.to_row();
+    assert_eq!(values.len(), 3);
+    assert_eq!(values[0], "42");
+    assert_eq!(values[1], "100");
+    assert_eq!(values[2], "1.23");
+}
+
+#[derive(DeriveTabularRow)]
+struct SkipRow {
+    id: String,
+
+    #[col(skip)]
+    #[allow(dead_code)]
+    internal: u32,
+
+    title: String,
+}
+
+#[test]
+fn test_tabular_row_skip() {
+    let row = SkipRow {
+        id: "TSK-001".to_string(),
+        internal: 42,
+        title: "Task title".to_string(),
+    };
+    let values = row.to_row();
+    // Should have 2 fields (internal is skipped)
+    assert_eq!(values.len(), 2);
+    assert_eq!(values[0], "TSK-001");
+    assert_eq!(values[1], "Task title");
+}
+
+#[derive(DeriveTabularRow)]
+struct BoolRow {
+    active: bool,
+    name: String,
+}
+
+#[test]
+fn test_tabular_row_bool() {
+    let row = BoolRow {
+        active: true,
+        name: "Test".to_string(),
+    };
+    let values = row.to_row();
+    assert_eq!(values[0], "true");
+    assert_eq!(values[1], "Test");
+}
+
+// Test that both macros can be used together
+#[derive(Serialize, DeriveTabular, DeriveTabularRow)]
+#[tabular(separator = " | ")]
+struct CombinedTask {
+    #[col(width = 8)]
+    id: String,
+
+    #[col(width = "fill")]
+    title: String,
+
+    #[col(skip)]
+    internal: u32,
+
+    #[col(width = 12, align = "right")]
+    status: String,
+}
+
+#[test]
+fn test_combined_macros_spec() {
+    let spec = CombinedTask::tabular_spec();
+    // Should have 3 columns (internal is skipped)
+    assert_eq!(spec.columns.len(), 3);
+    assert_eq!(spec.columns[0].name.as_deref(), Some("id"));
+    assert_eq!(spec.columns[1].name.as_deref(), Some("title"));
+    assert_eq!(spec.columns[2].name.as_deref(), Some("status"));
+}
+
+#[test]
+fn test_combined_macros_row() {
+    let task = CombinedTask {
+        id: "TSK-001".to_string(),
+        title: "Implement feature".to_string(),
+        internal: 42,
+        status: "pending".to_string(),
+    };
+    let values = task.to_row();
+    // Should have 3 values (internal is skipped)
+    assert_eq!(values.len(), 3);
+    assert_eq!(values[0], "TSK-001");
+    assert_eq!(values[1], "Implement feature");
+    assert_eq!(values[2], "pending");
+}
+
+#[test]
+fn test_combined_row_matches_spec_columns() {
+    // Verify that the number of row values matches the number of spec columns
+    let spec = CombinedTask::tabular_spec();
+    let task = CombinedTask {
+        id: "TSK-001".to_string(),
+        title: "Implement feature".to_string(),
+        internal: 42,
+        status: "pending".to_string(),
+    };
+    let values = task.to_row();
+
+    assert_eq!(spec.columns.len(), values.len());
 }

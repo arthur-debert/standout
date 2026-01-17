@@ -14,6 +14,7 @@
 //!
 //! - [`Dispatch`] - Generate dispatch configuration from clap `Subcommand` enums
 //! - [`Tabular`] - Generate `TabularSpec` from struct field annotations
+//! - [`TabularRow`] - Generate optimized row extraction without JSON serialization
 //!
 //! # Design Philosophy
 //!
@@ -224,6 +225,53 @@ pub fn dispatch_derive(input: TokenStream) -> TokenStream {
 pub fn tabular_derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     tabular::tabular_derive_impl(input)
+        .unwrap_or_else(|e| e.to_compile_error())
+        .into()
+}
+
+/// Derives optimized row extraction for tabular formatting.
+///
+/// This macro generates an implementation of the `TabularRow` trait, which provides
+/// a `to_row()` method that converts the struct to a `Vec<String>` without JSON serialization.
+///
+/// For working examples, see `outstanding/tests/tabular_derive.rs`.
+///
+/// # Field Attributes
+///
+/// | Attribute | Description |
+/// |-----------|-------------|
+/// | `skip` | Exclude this field from the row |
+///
+/// # Example
+///
+/// ```ignore
+/// use outstanding::tabular::TabularRow;
+///
+/// #[derive(TabularRow)]
+/// struct Task {
+///     id: String,
+///     title: String,
+///
+///     #[col(skip)]
+///     internal_state: u32,
+///
+///     status: String,
+/// }
+///
+/// let task = Task {
+///     id: "TSK-001".to_string(),
+///     title: "Implement feature".to_string(),
+///     internal_state: 42,
+///     status: "pending".to_string(),
+/// };
+///
+/// let row = task.to_row();
+/// assert_eq!(row, vec!["TSK-001", "Implement feature", "pending"]);
+/// ```
+#[proc_macro_derive(TabularRow, attributes(col))]
+pub fn tabular_row_derive(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    tabular::tabular_row_derive_impl(input)
         .unwrap_or_else(|e| e.to_compile_error())
         .into()
 }
