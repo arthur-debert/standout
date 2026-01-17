@@ -1,6 +1,6 @@
 # Introduction to Tabular
 
-Polished terminal output requires two things: good formatting (see [Rendering System](rendering-system.md)) and good layouts. For text-only, non-interactive output, layout mostly means aligning things vertically and controlling how multiple pieces of information are presented together.
+Polished terminal output requires two things: good formatting (see [Rendering System](../topics/rendering-system.md)) and good layouts. For text-only, non-interactive output, layout mostly means aligning things vertically and controlling how multiple pieces of information are presented together.
 
 Tabular provides a declarative column system with powerful primitives for sizing (fixed, range, fill, fractions), positioning (anchor to right), overflow handling (clip, wrap, truncate), cell alignment, and automated per-column styling.
 
@@ -12,8 +12,8 @@ In this guide, we will walk our way up from a simpler table to a more complex on
 
 **See Also:**
 
-- [Tabular Reference](tabular.md) - complete API reference
-- [Rendering System](rendering-system.md) - templates and styles in depth
+- [Tabular Reference](../topics/tabular.md) - complete API reference
+- [Rendering System](../topics/rendering-system.md) - templates and styles in depth
 
 ---
 
@@ -235,7 +235,7 @@ The wrapped lines are indented to align with the column.
 
 Here's where Tabular shines for todo lists. We want status colors: green for done, yellow for pending.
 
-First, define styles in your [theme](rendering-system.md#themes-and-styles):
+First, define styles in your [theme](../topics/rendering-system.md#themes-and-styles):
 
 ```css
 /* styles/default.css */
@@ -577,4 +577,4 @@ Tabular transforms raw data into polished, scannable output with minimal effort:
 
 The declarative approach means your layout adapts to terminal width, handles Unicode correctly, and remains maintainable as your data evolves.
 
-For complete API details, see the [Tabular Reference](tabular.md).
+For complete API details, see the [Tabular Reference](../topics/tabular.md).

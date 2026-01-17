@@ -12,9 +12,9 @@ In this guide, we'll explore what makes great outputs and how Standout helps you
 
 **See Also:**
 
-- [Rendering System](rendering-system.md) - complete rendering API reference
-- [Output Modes](output-modes.md) - all output format options
-- [Full Tutorial](full-tutorial.md) - end-to-end adoption guide
+- [Rendering System](../topics/rendering-system.md) - complete rendering API reference
+- [Output Modes](../topics/output-modes.md) - all output format options
+- [Introduction to Standout](intro-to-standout.md) - end-to-end adoption guide
 
 ---
 
@@ -174,7 +174,7 @@ This changes the entire experience. You can make and verify small adjustments in
 
 (When released, files are compiled into the binary, costing no performance or path-handling headaches in distribution.)
 
-See [Rendering System](rendering-system.md#hot-reloading) for details on how hot reload works.
+See [Rendering System](../topics/rendering-system.md#hot-reloading) for details on how hot reload works.
 
 ---
 
@@ -199,7 +199,7 @@ Benefits:
 - **Partials support**: templates can include other templates, enabling reuse across commands
 - **Custom filters**: for complex presentation needs, write small bits of code and keep templates clean
 
-See [Rendering System](rendering-system.md) for template filters and context injection.
+See [Rendering System](../topics/rendering-system.md) for template filters and context injection.
 
 ### Styles: CSS Themes
 
@@ -232,7 +232,7 @@ Features:
 - **True color**: RGB values for precise colors (`#ff6b35` or `[255, 107, 53]`)
 - **Aliases**: semantic names resolve to visual styles (`commit-message: title`)
 
-YAML syntax is also supported as an alternative. See [Rendering System](rendering-system.md#themes-and-styles) for complete style options.
+YAML syntax is also supported as an alternative. See [Rendering System](../topics/rendering-system.md#themes-and-styles) for complete style options.
 
 ---
 
@@ -277,7 +277,7 @@ Override auto behavior with `--output=term-debug` for debugging:
 
 Style tags remain visible, making it easy to verify correct placement. Useful for testing and automation tools.
 
-See [Output Modes](output-modes.md) for all available output formats.
+See [Output Modes](../topics/output-modes.md) for all available output formats.
 
 ---
 
@@ -341,7 +341,7 @@ myapp list --output=json | jq '.tasks[] | select(.status == "blocked")'
 
 Same handler, same types—different output format. This enables API-like behavior from CLI apps without writing separate code paths.
 
-See [Output Modes](output-modes.md) for complete documentation.
+See [Output Modes](../topics/output-modes.md) for complete documentation.
 
 ---
 
@@ -480,4 +480,4 @@ Standout's rendering layer transforms CLI output from a chore into a pleasure:
 
 The rendering system makes it practical to care about details. When iteration is fast and changes are safe, polish becomes achievable—not aspirational.
 
-For complete API details, see [Rendering System](rendering-system.md).
+For complete API details, see [Rendering System](../topics/rendering-system.md).

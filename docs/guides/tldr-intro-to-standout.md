@@ -1,7 +1,7 @@
 # Fast Paced intro to your First Standout Based Command
 
 This is a terse and direct how to for more experienced developers or at least the ones in a hurry.
-It skimps rationale , design and other useful bits you can read from the [longer form version](full-tutorial.md)
+It skimps rationale, design and other useful bits you can read from the [longer form version](intro-to-standout.md)
 
 ## Prerequisites
 

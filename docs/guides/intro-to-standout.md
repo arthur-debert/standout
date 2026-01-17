@@ -293,7 +293,7 @@ pub fn render_list(result: TodoResult) {
 - Edit templates without recompiling (with minor changes to loading)
 - Non-Rust developers can contribute to UI
 - Clear separation in code reviews: "is this a logic change or display change?"
-- Use partials, filters, and macros for complex outputs (see [Rendering System](rendering-system.md))
+- Use partials, filters, and macros for complex outputs (see [Rendering System](../topics/rendering-system.md))
 
 **What's next:** Hooking up Standout for automatic dispatch and rich output.
 Also, notice we've yet to do anything Standout-specific. This is not a coincidence—the framework is designed around this pattern, making testability, fast iteration, and rich features natural outcomes of the architecture.
@@ -325,7 +325,7 @@ standout = { version = "2", features = ["clap", "macros"] }
 
 Annotate your commands enum with the Dispatch derive macro. This tells Standout that the "list" command should be dispatched to the `list` handler. That's all Standout needs to know, and now it can manage the execution.
 
-See [Handler Contract](handler-contract.md) for full handler API details.
+See [Handler Contract](../topics/handler-contract.md) for full handler API details.
 
 ```rust
 use standout::cli::{Dispatch, CommandContext, HandlerResult, Output};
@@ -366,7 +366,7 @@ mod handlers {
 
 ### 7.3 Configure AppBuilder
 
-Use AppBuilder to configure your app. Instantiate the builder, add the path for your templates. See [App Configuration](app-configuration.md) for all configuration options.
+Use AppBuilder to configure your app. Instantiate the builder, add the path for your templates. See [App Configuration](../topics/app-configuration.md) for all configuration options.
 
 ```rust
 use standout::cli::App;
@@ -423,7 +423,7 @@ For the next commands you'd wish to migrate, this is even simpler. Say you have 
 **What's now possible:**
 
 - Alter the template and re-run your CLI, without compilation, and the new template will be used
-- Your CLI just got multiple output modes via `--output` (see [Output Modes](output-modes.md)):
+- Your CLI just got multiple output modes via `--output` (see [Output Modes](../topics/output-modes.md)):
   - **term**: rich shell formatting (more about this on the next step)
   - **term-debug**: print formatting info for testing/debugging
   - **text**: plain text, no styling
@@ -448,7 +448,7 @@ src/
 
 Let's transform that mono-typed, monochrome string into a richer and more useful UI. Borrowing from web apps setup, we keep the content in a template file, and we define styles in a stylesheet file.
 
-See [Rendering System](rendering-system.md) for full styling documentation.
+See [Rendering System](../topics/rendering-system.md) for full styling documentation.
 
 ### 8.1 Create the stylesheet
 
