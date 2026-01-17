@@ -1,6 +1,7 @@
 site_name: Standout
 site_description: A CLI framework for Rust that enforces separation between logic and presentation
 site_url: https://standout.readthedocs.io/
+use_directory_urls: false
 
 repo_name: arthur-debert/standout
 repo_url: https://github.com/arthur-debert/standout
