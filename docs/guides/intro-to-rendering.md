@@ -30,23 +30,25 @@ The edit-code-compile-run cycle makes small tweaks take minutes. Sometimes a ful
 
 ---
 
-## Our Example: A Task Manager
+## Our Example: tdoo
 
-We'll use a simple task manager CLI to demonstrate the rendering layer. Here's our data:
+We'll use `tdoo`, a simple todo list manager CLI, to demonstrate the rendering layer. Here's our data:
 
 ```rust
-#[derive(Serialize)]
-pub struct Task {
-    pub id: String,
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Status { Pending, Done }
+
+#[derive(Clone, Serialize)]
+pub struct Todo {
     pub title: String,
-    pub status: String,  // "pending", "done", "blocked"
-    pub due: String,
+    pub status: Status,
 }
 
 #[derive(Serialize)]
-pub struct TaskListResult {
-    pub tasks: Vec<Task>,
-    pub summary: String,
+pub struct TodoResult {
+    pub message: Option<String>,
+    pub todos: Vec<Todo>,
 }
 ```
 
@@ -63,21 +65,17 @@ Outstanding is designed around a strict separation of logic and presentation. Th
 Here's the typical approach, tangling logic and output:
 
 ```rust
-fn list_tasks(show_all: bool) {
-    let tasks = storage::list().unwrap();
-    println!("\x1b[1;36mYour Tasks\x1b[0m");
+fn list_command(show_all: bool) {
+    let todos = storage::list().unwrap();
+    println!("\x1b[1;36mYour Todos\x1b[0m");
     println!("──────────");
-    for task in &tasks {
-        if show_all || task.status != "done" {
-            let color = match task.status.as_str() {
-                "done" => "\x1b[32m",
-                "blocked" => "\x1b[31m",
-                _ => "\x1b[33m",
-            };
-            println!("{}[{}]\x1b[0m {} - {}", color, task.status, task.title, task.due);
+    for (i, todo) in todos.iter().enumerate() {
+        if show_all || todo.status == Status::Pending {
+            let marker = if todo.status == Status::Done { "[x]" } else { "[ ]" };
+            println!("{}. {} {}", i + 1, marker, todo.title);
         }
     }
-    println!("\n{} tasks total", tasks.len());
+    println!("\n{} todos total", todos.len());
 }
 ```
 
@@ -95,32 +93,34 @@ The same output, properly separated:
 
 ```rust
 // Handler: pure logic, returns data
-pub fn list(matches: &ArgMatches, _ctx: &CommandContext) -> HandlerResult<TaskListResult> {
+pub fn list(matches: &ArgMatches, _ctx: &CommandContext) -> HandlerResult<TodoResult> {
     let show_all = matches.get_flag("all");
-    let tasks = storage::list()?;
+    let todos = storage::list()?;
 
-    let filtered: Vec<Task> = if show_all {
-        tasks
+    let filtered: Vec<Todo> = if show_all {
+        todos
     } else {
-        tasks.into_iter().filter(|t| t.status != "done").collect()
+        todos.into_iter()
+            .filter(|t| matches!(t.status, Status::Pending))
+            .collect()
     };
 
-    Ok(Output::Render(TaskListResult {
-        summary: format!("{} tasks total", filtered.len()),
-        tasks: filtered,
+    Ok(Output::Render(TodoResult {
+        message: Some(format!("{} todos total", filtered.len())),
+        todos: filtered,
     }))
 }
 ```
 
 ```jinja
 {# Template: list.jinja #}
-[title]Your Tasks[/title]
+[title]Your Todos[/title]
 ──────────
-{% for task in tasks %}
-[{{ task.status }}][{{ task.status }}][/{{ task.status }}] {{ task.title }} - [muted]{{ task.due }}[/muted]
+{% for todo in todos %}
+[{{ todo.status }}]{{ todo.status }}[/{{ todo.status }}]  {{ todo.title }}
 {% endfor %}
 
-[muted]{{ summary }}[/muted]
+{% if message %}[muted]{{ message }}[/muted]{% endif %}
 ```
 
 ```yaml
@@ -129,7 +129,6 @@ title:
   fg: cyan
   bold: true
 done: green
-blocked: red
 pending: yellow
 muted:
   dim: true
@@ -188,8 +187,8 @@ Outstanding uses MiniJinja templates—a Rust implementation of Jinja, a de fact
 ```jinja
 {% if message %}[accent]{{ message }}[/accent]{% endif %}
 
-{% for task in tasks %}
-[{{ task.status }}]{{ task.status | upper }}[/{{ task.status }}]  {{ task.title }}
+{% for todo in todos %}
+[{{ todo.status }}]{{ todo.status | upper }}[/{{ todo.status }}]  {{ todo.title }}
 {% endfor %}
 ```
 
@@ -242,9 +241,9 @@ YAML syntax is also supported as an alternative. See [Rendering System](renderin
 Styles are applied with BBCode-like syntax: `[style]content[/style]`. A familiar, simple, and accessible form.
 
 ```jinja
-[title]Your Tasks[/title]
-{% for task in tasks %}
-[{{ task.status }}]{{ task.title }}[/{{ task.status }}]
+[title]Your Todos[/title]
+{% for todo in todos %}
+[{{ todo.status }}]{{ todo.title }}[/{{ todo.status }}]
 {% endfor %}
 ```
 
@@ -271,7 +270,7 @@ No separate templates for different output modes. The same template serves both.
 Override auto behavior with `--output=term-debug` for debugging:
 
 ```text
-[title]Your Tasks[/title]
+[title]Your Todos[/title]
 [pending]pending[/pending]  Implement auth
 [done]done[/done]  Fix tests
 ```
@@ -284,28 +283,28 @@ See [Output Modes](output-modes.md) for all available output formats.
 
 ## Tabular Layout
 
-Many commands output lists of things—log entries, servers, tasks. These benefit from vertically aligned layouts. Aligning fields seems simple at first, but when you factor in ANSI awareness, flexible size ranges, wrapping behavior, truncation, justification, and expanding cells, it becomes really hard. Those one-off bugs that drive you mad—yeah, those.
+Many commands output lists of things—log entries, servers, todos. These benefit from vertically aligned layouts. Aligning fields seems simple at first, but when you factor in ANSI awareness, flexible size ranges, wrapping behavior, truncation, justification, and expanding cells, it becomes really hard. Those one-off bugs that drive you mad—yeah, those.
 
 Tabular gives you a declarative API, both in Rust and in templates, that handles all of this:
 
 ```jinja
 {% set t = tabular([
+    {"name": "index", "width": 4},
     {"name": "status", "width": 10},
-    {"name": "title", "width": "fill"},
-    {"name": "due", "width": 10, "align": "right"}
+    {"name": "title", "width": "fill"}
 ], separator="  ") %}
 
-{% for task in tasks %}
-{{ t.row([task.status | style_as(task.status), task.title, task.due]) }}
+{% for todo in todos %}
+{{ t.row([loop.index, todo.status | style_as(todo.status), todo.title]) }}
 {% endfor %}
 ```
 
 Output adapts to terminal width:
 
 ```text
-pending     Implement user authentication    2024-01-20
-blocked     Fix payment gateway timeout      2024-01-18
-done        Review pull request #142         2024-01-15
+1.    pending     Implement user authentication
+2.    done        Review pull request #142
+3.    pending     Update dependencies
 ```
 
 Features:
@@ -348,7 +347,7 @@ See [Output Modes](output-modes.md) for complete documentation.
 
 ## Putting It All Together
 
-Here's a complete example of a polished task list command:
+Here's a complete example of a polished todo list command:
 
 **Handler (`src/handlers.rs`):**
 
@@ -357,53 +356,61 @@ use outstanding::cli::{CommandContext, HandlerResult, Output};
 use clap::ArgMatches;
 use serde::Serialize;
 
-#[derive(Serialize)]
-pub struct Task {
-    pub id: String,
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Status { Pending, Done }
+
+#[derive(Clone, Serialize)]
+pub struct Todo {
     pub title: String,
-    pub status: String,
-    pub due: String,
+    pub status: Status,
 }
 
 #[derive(Serialize)]
-pub struct TaskListResult {
-    pub tasks: Vec<Task>,
-    pub pending_count: usize,
+pub struct TodoResult {
+    pub message: Option<String>,
+    pub todos: Vec<Todo>,
 }
 
-pub fn list(matches: &ArgMatches, _ctx: &CommandContext) -> HandlerResult<TaskListResult> {
+pub fn list(matches: &ArgMatches, _ctx: &CommandContext) -> HandlerResult<TodoResult> {
     let show_all = matches.get_flag("all");
-    let tasks = storage::list()?;
+    let todos = storage::list()?;
 
-    let filtered: Vec<Task> = if show_all {
-        tasks
+    let filtered: Vec<Todo> = if show_all {
+        todos
     } else {
-        tasks.into_iter().filter(|t| t.status != "done").collect()
+        todos.into_iter()
+            .filter(|t| matches!(t.status, Status::Pending))
+            .collect()
     };
 
-    let pending_count = filtered.iter().filter(|t| t.status == "pending").count();
+    let pending_count = filtered.iter()
+        .filter(|t| matches!(t.status, Status::Pending))
+        .count();
 
-    Ok(Output::Render(TaskListResult { tasks: filtered, pending_count }))
+    Ok(Output::Render(TodoResult {
+        message: Some(format!("{} pending", pending_count)),
+        todos: filtered,
+    }))
 }
 ```
 
 **Template (`src/templates/list.jinja`):**
 
 ```jinja
-[title]Tasks[/title]
+[title]My Todos[/title]
 
 {% set t = tabular([
-    {"name": "id", "width": 8, "style": "muted"},
-    {"name": "title", "width": "fill"},
+    {"name": "index", "width": 4},
     {"name": "status", "width": 10},
-    {"name": "due", "width": 10, "align": "right", "style": "muted"}
+    {"name": "title", "width": "fill"}
 ], separator="  ") %}
 
-{% for task in tasks %}
-{{ t.row([task.id, task.title, task.status | style_as(task.status), task.due]) }}
+{% for todo in todos %}
+{{ t.row([loop.index, todo.status | style_as(todo.status), todo.title]) }}
 {% endfor %}
 
-[muted]{{ pending_count }} pending[/muted]
+{% if message %}[muted]{{ message }}[/muted]{% endif %}
 ```
 
 **Styles (`src/styles/default.yaml`):**
@@ -414,7 +421,6 @@ title:
   bold: true
 
 done: green
-blocked: red
 pending: yellow
 
 muted:
@@ -428,27 +434,27 @@ muted:
 **Output (terminal):**
 
 ```text
-Tasks
+My Todos
 
-TSK-001   Implement user authentication    pending     2024-01-20
-TSK-002   Fix payment gateway timeout      blocked     2024-01-18
-TSK-003   Review pull request #142         done        2024-01-15
+1.    pending     Implement user authentication
+2.    done        Review pull request #142
+3.    pending     Update dependencies
 
 2 pending
 ```
 
-With colors, "pending" appears yellow, "blocked" appears red, "done" appears green. The ID and due columns are dimmed. The title column fills available space.
+With colors, "pending" appears yellow, "done" appears green. The title column fills available space.
 
 **Output (`--output=json`):**
 
 ```json
 {
-  "tasks": [
-    {"id": "TSK-001", "title": "Implement user authentication", "status": "pending", "due": "2024-01-20"},
-    {"id": "TSK-002", "title": "Fix payment gateway timeout", "status": "blocked", "due": "2024-01-18"},
-    {"id": "TSK-003", "title": "Review pull request #142", "status": "done", "due": "2024-01-15"}
-  ],
-  "pending_count": 2
+  "message": "2 pending",
+  "todos": [
+    {"title": "Implement user authentication", "status": "pending"},
+    {"title": "Review pull request #142", "status": "done"},
+    {"title": "Update dependencies", "status": "pending"}
+  ]
 }
 ```
 

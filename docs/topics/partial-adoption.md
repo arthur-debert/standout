@@ -4,27 +4,23 @@ Adopting a new framework shouldn't require rewriting your entire application. Ou
 
 This guide shows how to run Outstanding alongside your existing manual dispatch or Clap loop.
 
+## The Core Pattern
 
-## The Core Pattern: RunResult::NoMatch
-
-When Outstanding doesn't have a handler for a command, `dispatch` returns `RunResult::NoMatch` containing the parsed `ArgMatches`:
+When Outstanding handles a command, it prints output and returns `None`. When no handler matches, it returns `Some(ArgMatches)` for your fallback:
 
 ```rust
-pub enum RunResult {
-    Handled(String),           // Handler ran, output ready
-    Binary(Vec<u8>, String),   // Binary output (bytes, filename)
-    NoMatch(ArgMatches),       // No handler found
+if let Some(matches) = app.run(cli, std::env::args()) {
+    // Outstanding didn't handle this command, fall back to legacy
+    your_existing_dispatch(matches);
 }
 ```
-
-Use `NoMatch` to fall back to your own dispatch.
 
 ## Pattern 1: Outstanding First, Fallback Second
 
 Try Outstanding dispatch first. If no match, use your existing code:
 
 ```rust
-use outstanding::cli::{App, RunResult, OutputMode};
+use outstanding::cli::App;
 use clap::Command;
 
 fn main() {
@@ -40,22 +36,12 @@ fn main() {
         .expect("Failed to build app");
 
     // Try Outstanding first
-    let cmd = cli.clone();
-    match app.run_to_string(cmd, std::env::args()) {
-        RunResult::Handled(output) => {
-            println!("{}", output);
-        }
-        RunResult::Binary(bytes, filename) => {
-            std::fs::write(&filename, bytes).ok();
-            eprintln!("Wrote {} bytes to {}", bytes.len(), filename);
-        }
-        RunResult::NoMatch(matches) => {
-            // Fall back to your existing dispatch
-            match matches.subcommand() {
-                Some(("status", sub)) => handle_status(sub),
-                Some(("config", sub)) => handle_config(sub),
-                _ => eprintln!("Unknown command"),
-            }
+    if let Some(matches) = app.run(cli, std::env::args()) {
+        // Fall back to your existing dispatch
+        match matches.subcommand() {
+            Some(("status", sub)) => handle_status(sub),
+            Some(("config", sub)) => handle_config(sub),
+            _ => eprintln!("Unknown command"),
         }
     }
 }
@@ -68,7 +54,7 @@ Your dispatch handles known commands, Outstanding handles new ones:
 ```rust
 fn main() {
     let cli = build_cli();
-    let matches = cli.get_matches();
+    let matches = cli.clone().get_matches();
 
     // Your existing dispatch first
     match matches.subcommand() {
@@ -87,13 +73,7 @@ fn main() {
 
     // Outstanding handles everything else
     let app = build_outstanding_app();
-    match app.dispatch(matches, OutputMode::Auto) {
-        RunResult::Handled(output) => println!("{}", output),
-        RunResult::Binary(bytes, filename) => {
-            std::fs::write(&filename, bytes).ok();
-        }
-        _ => {}
-    }
+    app.run(cli, std::env::args());
 }
 ```
 
@@ -104,7 +84,7 @@ Call Outstanding for specific commands within your existing match:
 ```rust
 fn main() {
     let cli = build_cli();
-    let matches = cli.get_matches();
+    let matches = cli.clone().get_matches();
 
     match matches.subcommand() {
         Some(("status", sub)) => handle_status(sub),
@@ -113,9 +93,7 @@ fn main() {
         // Use Outstanding just for these
         Some(("list", _)) | Some(("show", _)) => {
             let app = build_outstanding_app();
-            if let RunResult::Handled(output) = app.dispatch(matches, OutputMode::Auto) {
-                println!("{}", output);
-            }
+            app.run(cli, std::env::args());
         }
 
         _ => eprintln!("Unknown command"),
@@ -157,14 +135,11 @@ fn main() {
         .build()?;
 
     // Outstanding augments the command, then dispatches
-    match app.run_to_string(cli, std::env::args()) {
-        RunResult::Handled(output) => println!("{}", output),
-        RunResult::NoMatch(matches) => {
-            // matches from the augmented command (has --output, etc.)
-            match matches.subcommand() {
-                Some(("status", sub)) => handle_status(sub),
-                _ => {}
-            }
+    if let Some(matches) = app.run(cli, std::env::args()) {
+        // matches from the augmented command (has --output, etc.)
+        match matches.subcommand() {
+            Some(("status", sub)) => handle_status(sub),
+            _ => {}
         }
     }
 }
@@ -180,36 +155,43 @@ fn main() {
 
 4. **Add themes when ready**: Start with inline templates, add YAML stylesheets later.
 
-5. **Eventually remove legacy dispatch**: Once all commands are migrated, simplify to `app.run()`.
+5. **Eventually remove legacy dispatch**: Once all commands are migrated, simplify to just `app.run()`.
 
 ## Using run() vs run_to_string()
 
-`run()` prints directly and returns a boolean:
+`run()` prints output directly and returns `Option<ArgMatches>`:
 
 ```rust
-let handled = app.run(cli, args);
-if !handled {
-    // Fall back
+if let Some(matches) = app.run(cli, args) {
+    // Outstanding didn't handle, use matches for fallback
+    legacy_dispatch(matches);
 }
 ```
 
-`run_to_string()` returns `RunResult` for more control:
+`run_to_string()` captures output instead of printing, returning `RunResult`:
 
 ```rust
 match app.run_to_string(cli, args) {
-    RunResult::Handled(output) => { /* process output */ }
+    RunResult::Handled(output) => { /* process output string */ }
+    RunResult::Binary(bytes, filename) => { /* handle binary */ }
     RunResult::NoMatch(matches) => { /* access matches */ }
 }
 ```
 
-Use `run_to_string()` when you need the output string or `ArgMatches` for fallback.
+Use `run_to_string()` when you need to:
+
+- Capture output for testing
+- Post-process the output string before printing
+- Log or record what was generated
+
+For normal partial adoption, `run()` is simpler and preferred.
 
 ## Accessing the --output Flag in Fallback
 
 Outstanding adds `--output` globally. In fallback code, you can still access it:
 
 ```rust
-RunResult::NoMatch(matches) => {
+if let Some(matches) = app.run(cli, std::env::args()) {
     // Get the output mode Outstanding parsed
     let mode = matches.get_one::<String>("_output_mode")
         .map(|s| s.as_str())
@@ -245,8 +227,8 @@ App::builder()
 Complete example with both Outstanding and manual handlers:
 
 ```rust
-use outstanding::cli::{App, HandlerResult, Output, RunResult, OutputMode, CommandContext};
-use clap::{Command, Arg, ArgMatches};
+use outstanding::cli::{App, HandlerResult, Output, CommandContext};
+use clap::{Command, ArgMatches};
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -258,7 +240,7 @@ fn list_handler(_m: &ArgMatches, _ctx: &CommandContext) -> HandlerResult<ListOut
     }))
 }
 
-fn handle_status(matches: &ArgMatches) {
+fn handle_status(_matches: &ArgMatches) {
     println!("Status: OK");
 }
 
@@ -271,16 +253,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .command("list", list_handler, "{% for i in items %}- {{ i }}\n{% endfor %}")
         .build()?;
 
-    match app.run_to_string(cli, std::env::args()) {
-        RunResult::Handled(output) => println!("{}", output),
-        RunResult::Binary(bytes, filename) => {
-            std::fs::write(&filename, bytes)?;
-        }
-        RunResult::NoMatch(matches) => {
-            match matches.subcommand() {
-                Some(("status", sub)) => handle_status(sub),
-                _ => eprintln!("Unknown command"),
-            }
+    if let Some(matches) = app.run(cli, std::env::args()) {
+        match matches.subcommand() {
+            Some(("status", sub)) => handle_status(sub),
+            _ => eprintln!("Unknown command"),
         }
     }
 
@@ -289,6 +265,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 Run it:
+
 ```bash
 myapp list              # Outstanding handles, renders template
 myapp list --output=json # Outstanding handles, JSON output

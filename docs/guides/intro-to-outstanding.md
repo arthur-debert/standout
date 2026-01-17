@@ -4,14 +4,14 @@ This is a small, focused guide for adopting Outstanding in a working shell appli
 
 Note that only 2 out of 8 steps are Outstanding related. The others are generally good practices and clear designs for maintainable shell programs. This is not an accident, as Outstanding's goal is to allow your app to keep a great structure effortlessly, while providing testability, rich and fast output design, and more.
 
-For explanation's sake, we will show a hypothetical list command for todoier, a todo list manager.
+For explanation's sake, we will show a hypothetical list command for tdoo, a todo list manager.
 
 **See Also:**
 
-- [Handler Contract](handler-contract.md) - detailed handler API
-- [Rendering System](rendering-system.md) - templates and styles in depth
-- [Output Modes](output-modes.md) - all output format options
-- [Partial Adoption](../howtos/partial-adoption.md) - migrating incrementally
+- [Handler Contract](../topics/handler-contract.md) - detailed handler API
+- [Rendering System](../topics/rendering-system.md) - templates and styles in depth
+- [Output Modes](../topics/output-modes.md) - all output format options
+- [Partial Adoption](../topics/partial-adoption.md) - migrating incrementally
 
 ## 1. Start: The Argument Parsing
 
@@ -23,7 +23,7 @@ If you don't have clap set up yet, here's a minimal starting point:
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "todoier")]
+#[command(name = "tdoo")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -142,12 +142,11 @@ pub fn list_command(matches: &ArgMatches) {
 }
 ```
 
-> **Verify:** Run `cargo build` and then `todoier list` - output should look identical to before.
+> **Verify:** Run `cargo build` and then `tdoo list` - output should look identical to before.
 
 ### Intermezzo A: Milestone - Logic and Presentation Split
 
 **What you achieved:** Your command logic is now a pure function that returns data.
-
 **What's now possible:**
 
 - All of your app's logic can be unit tested as any code, from the logic inwards.
@@ -155,10 +154,9 @@ pub fn list_command(matches: &ArgMatches) {
 - The rendering can also be tested by feeding data inputs and matching outputs (though this is brittle).
 
 **What's next:** Making the return type serializable for automatic JSON/YAML output.
-
 **Your files now:**
 
-```text.u
+```text
 src/
 ├── main.rs          # clap setup + orchestrators
 ├── handlers.rs      # list(), add() - pure logic
@@ -220,7 +218,7 @@ pub fn render_list(result: TodoResult) {
 }
 ```
 
-> **Verify:** Run `todoier list` - output should still work.
+> **Verify:** Run `tdoo list` - output should still work.
 
 ## 5. Use a MiniJinja Template String
 
@@ -243,10 +241,11 @@ And then you call render in MiniJinja, passing the template string and the data 
 ```rust
 pub fn render_list(result: TodoResult) {
     let output_tmpl = r#"
-{% if message %}{{ message }}
+{% if message %}
+    {{ message }}
 {% endif %}
 {% for todo in todos %}
-{{ loop.index }}. [{{ todo.status }}] {{ todo.title }}
+    {{ loop.index }}. [{{ todo.status }}] {{ todo.title }}
 {% endfor %}
 "#;
 
@@ -257,7 +256,7 @@ pub fn render_list(result: TodoResult) {
 }
 ```
 
-> **Verify:** Run `todoier list` - output should match (formatting may differ slightly).
+> **Verify:** Run `tdoo list` - output should match (formatting may differ slightly).
 
 ## 6. Use a Dedicated Template File
 
@@ -266,10 +265,9 @@ Now, move the template content into a file (say `src/templates/list.jinja`), and
 Create `src/templates/list.jinja`:
 
 ```jinja
-{% if message %}{{ message }}
-{% endif %}
+{% if message %}{{ message }} {% endif %}
 {% for todo in todos %}
-{{ loop.index }}. [{{ todo.status }}] {{ todo.title }}
+    {{ loop.index }}. [{{ todo.status }}] {{ todo.title }}
 {% endfor %}
 ```
 
@@ -285,12 +283,11 @@ pub fn render_list(result: TodoResult) {
 }
 ```
 
-> **Verify:** Run `todoier list` - output should be identical.
+> **Verify:** Run `tdoo list` - output should be identical.
 
 ### Intermezzo B: Declarative Output Definition
 
 **What you achieved:** Output is now defined declaratively in a template file, separate from Rust code.
-
 **What's now possible:**
 
 - Edit templates without recompiling (with minor changes to loading)
@@ -299,9 +296,7 @@ pub fn render_list(result: TodoResult) {
 - Use partials, filters, and macros for complex outputs (see [Rendering System](rendering-system.md))
 
 **What's next:** Hooking up Outstanding for automatic dispatch and rich output.
-
-Also, notice we've yet to do anything Outstanding specific. This is not a coincidence, as the framework is born out of making using and leveraging this design for easy testability, development speed and rich feature set easy under this design.
-
+Also, notice we've yet to do anything Outstanding-specific. This is not a coincidence—the framework is designed around this pattern, making testability, fast iteration, and rich features natural outcomes of the architecture.
 **Your files now:**
 
 ```text
@@ -405,18 +400,17 @@ fn main() -> anyhow::Result<()> {
 }
 ```
 
-If your app has other clap commands that are not managed by Outstanding, use `run_to_string` instead. See [Partial Adoption](../howtos/partial-adoption.md) for details on incremental migration.
+If your app has other clap commands that are not managed by Outstanding, check for unhandled commands. See [Partial Adoption](../topics/partial-adoption.md) for details on incremental migration.
 
 ```rust
-match app.run_to_string(Cli::command(), std::env::args()) {
-    RunResult::Handled(output) => println!("{}", output),
-    RunResult::NoMatch(matches) => legacy_dispatch(matches),  // Your existing handler
-    RunResult::Binary(bytes, filename) => std::fs::write(filename, bytes)?,
+if let Some(matches) = app.run(Cli::command(), std::env::args()) {
+    // Outstanding didn't handle this command, fall back to legacy
+    legacy_dispatch(matches);
 }
 ```
 
-> **Verify:** Run `todoier list` - it should work as before.
-> **Verify:** Run `todoier list --output json` - you should get JSON output for free!
+> **Verify:** Run `tdoo list` - it should work as before.
+> **Verify:** Run `tdoo list --output json` - you should get JSON output for free!
 
 And now you can remove the boilerplate: the orchestrator (`list_command`) and the rendering (`render_list`). You're pretty much at global optima: a single line of derive macro links your app logic to a command name, a few lines configure Outstanding, and auto dispatch handles all the boilerplate.
 
@@ -541,8 +535,8 @@ let app = App::builder()
 ```
 
 > **Verify:** Run `cargo build` - it should compile without errors.
-> **Verify:** Run `todoier list` - you should see colored, styled output!
-> **Verify:** Run `todoier list --output text` - plain text, no colors.
+> **Verify:** Run `tdoo list` - you should see colored, styled output!
+> **Verify:** Run `tdoo list --output text` - plain text, no colors.
 
 Now you're leveraging the core rendering design of Outstanding:
 
@@ -579,51 +573,32 @@ src/
 For brevity's sake, we've ignored a bunch of finer and relevant points:
 
 - The derive macros can set name mapping explicitly: `#[dispatch(handler = custom_fn, template = "custom.jinja")]`
-- There are pre-dispatch, post-dispatch and post-render hooks (see [Execution Model](execution-model.md))
-- Outstanding exposes its primitives as libraries for custom usage (see [Render Only](../howtos/render-only.md))
-- Powerful tabular layouts via the `col` filter (see [Tables](../howtos/tables.md))
-- A help topics system for rich documentation (see [Topics System](topics-system.md))
+- There are pre-dispatch, post-dispatch and post-render hooks (see [Execution Model](../topics/execution-model.md))
+- Outstanding exposes its primitives as libraries for custom usage (see [Render Only](../topics/render-only.md))
+- Powerful tabular layouts via the `col` filter (see [Tabular Layout](../topics/tabular.md))
+- A help topics system for rich documentation (see [Topics System](../topics/topics-system.md))
 
 Aside from exposing the library primitives, Outstanding leverages best-in-breed crates like MiniJinja and console::Style under the hood. The lock-in is really negligible: you can use Outstanding's BB parser or swap it, manually dispatch handlers, and use the renderers directly in your clap dispatch.
 
 ## Appendix: Common Errors and Troubleshooting
 
-### Template not found
-
-**Error:** `template 'list' not found`
-
-**Cause:** The template path in `embed_templates!` doesn't match your file structure.
-
-**Fix:** Ensure the path is relative to your `Cargo.toml`, e.g., `embed_templates!("src/templates")` and that the file is named `list.jinja`, `list.j2`, or `list.txt`.
-
-### Style not applied
-
-**Symptom:** Text appears but without colors/formatting.
-
-**Cause:** Style name in template doesn't match stylesheet.
-
-**Fix:** Check that `[mystyle]` in your template matches `.mystyle` in CSS or `mystyle:` in YAML. Run with `--output term-debug` to see style tag names.
-
-### Handler not called
-
-**Symptom:** Command runs but nothing happens or wrong handler runs.
-
-**Cause:** Command name mismatch between clap enum variant and handler function.
-
-**Fix:** Ensure enum variant `List` maps to function `handlers::list` (snake_case conversion). Or use explicit mapping: `#[dispatch(handler = my_custom_handler)]`
-
-### JSON output is empty or wrong
-
-**Symptom:** `--output json` produces unexpected results.
-
-**Cause:** `Serialize` derive is missing or field names don't match template expectations.
-
-**Fix:** Ensure all types in your result implement `Serialize`. Use `#[serde(rename_all = "lowercase")]` for consistent naming.
-
-### Styles not loading
-
-**Error:** `theme not found: default`
-
-**Cause:** Stylesheet file missing or wrong path.
-
-**Fix:** Ensure `src/styles/default.css` or `default.yaml` exists. Check `embed_styles!` path matches your file structure.
+- Template not found
+  - **Error:** `template 'list' not found`
+  - **Cause:** The template path in `embed_templates!` doesn't match your file structure.
+  - **Fix:** Ensure the path is relative to your `Cargo.toml`, e.g., `embed_templates!("src/templates")` and that the file is named `list.jinja`, `list.j2`, or `list.txt`.
+- Style not applied
+  - **Symptom:** Text appears but without colors/formatting.
+  - **Cause:** Style name in template doesn't match stylesheet.
+  - **Fix:** Check that `[mystyle]` in your template matches `.mystyle` in CSS or `mystyle:` in YAML. Run with `--output term-debug` to see style tag names.
+- Handler not called
+  - **Symptom:** Command runs but nothing happens or wrong handler runs.
+  - **Cause:** Command name mismatch between clap enum variant and handler function.
+  - **Fix:** Ensure enum variant `List` maps to function `handlers::list` (snake_case conversion). Or use explicit mapping: `#[dispatch(handler = my_custom_handler)]`
+- JSON output is empty or wrong
+  - **Symptom:** `--output json` produces unexpected results.
+  - **Cause:** `Serialize` derive is missing or field names don't match template expectations.
+  - **Fix:** Ensure all types in your result implement `Serialize`. Use `#[serde(rename_all = "lowercase")]` for consistent naming.
+- Styles not loading
+  - **Error:** `theme not found: default`
+  - **Cause:** Stylesheet file missing or wrong path.
+  - **Fix:** Ensure `src/styles/default.css` or `default.yaml` exists. Check `embed_styles!` path matches your file structure.
