@@ -549,3 +549,143 @@ fn test_combined_row_matches_spec_columns() {
 
     assert_eq!(spec.columns.len(), values.len());
 }
+
+// =============================================================================
+// Integration with TabularFormatter tests
+// =============================================================================
+
+use outstanding::tabular::{BorderStyle, Table, TabularFormatter};
+
+#[test]
+fn test_formatter_from_type() {
+    // TabularFormatter::from_type<T> should create a formatter using the derived spec
+    let formatter = TabularFormatter::from_type::<CombinedTask>(80);
+
+    // Should have 3 columns (internal is skipped)
+    assert_eq!(formatter.num_columns(), 3);
+}
+
+#[test]
+fn test_formatter_row_from_trait() {
+    let formatter = TabularFormatter::from_type::<CombinedTask>(80);
+    let task = CombinedTask {
+        id: "TSK-001".to_string(),
+        title: "Implement feature".to_string(),
+        internal: 42,
+        status: "pending".to_string(),
+    };
+
+    let row = formatter.row_from_trait(&task);
+
+    // Row should contain the field values
+    assert!(row.contains("TSK-001"));
+    assert!(row.contains("Implement feature"));
+    assert!(row.contains("pending"));
+    // Internal field should not be present
+    assert!(!row.contains("42"));
+}
+
+#[test]
+fn test_formatter_row_lines_from_trait() {
+    let formatter = TabularFormatter::from_type::<CombinedTask>(80);
+    let task = CombinedTask {
+        id: "TSK-001".to_string(),
+        title: "Implement feature".to_string(),
+        internal: 42,
+        status: "pending".to_string(),
+    };
+
+    let lines = formatter.row_lines_from_trait(&task);
+
+    // Should have at least one line
+    assert!(!lines.is_empty());
+    // First line should contain the values
+    assert!(lines[0].contains("TSK-001"));
+}
+
+#[test]
+fn test_table_from_type() {
+    // Table::from_type<T> should create a table using the derived spec
+    let table = Table::from_type::<CombinedTask>(80)
+        .header_from_columns()
+        .border(BorderStyle::Light);
+
+    // Should have 3 columns
+    assert_eq!(table.num_columns(), 3);
+}
+
+#[test]
+fn test_table_row_from_trait() {
+    let table = Table::from_type::<CombinedTask>(80).border(BorderStyle::Light);
+    let task = CombinedTask {
+        id: "TSK-001".to_string(),
+        title: "Implement feature".to_string(),
+        internal: 42,
+        status: "pending".to_string(),
+    };
+
+    let row = table.row_from_trait(&task);
+
+    // Row should have border characters
+    assert!(row.starts_with('│'));
+    assert!(row.ends_with('│'));
+
+    // Row should contain the field values
+    assert!(row.contains("TSK-001"));
+    assert!(row.contains("Implement feature"));
+    assert!(row.contains("pending"));
+}
+
+#[test]
+fn test_table_header_from_columns_with_derived_spec() {
+    // The CompleteTask struct has explicit headers defined
+    let table = Table::from_type::<CompleteTask>(80).header_from_columns();
+
+    let header = table.header_row();
+
+    // "ID" is explicitly set as header for the id field
+    assert!(header.contains("ID"));
+}
+
+#[test]
+fn test_full_table_workflow_with_macros() {
+    // Demonstrate the complete workflow: define struct, derive macros, create table, render rows
+    let table = Table::from_type::<CombinedTask>(80)
+        .header_from_columns()
+        .border(BorderStyle::Light);
+
+    let tasks = vec![
+        CombinedTask {
+            id: "TSK-001".to_string(),
+            title: "First task".to_string(),
+            internal: 1,
+            status: "pending".to_string(),
+        },
+        CombinedTask {
+            id: "TSK-002".to_string(),
+            title: "Second task".to_string(),
+            internal: 2,
+            status: "done".to_string(),
+        },
+    ];
+
+    // Render all rows using the trait
+    let mut output = Vec::new();
+    output.push(table.top_border());
+    output.push(table.header_row());
+    output.push(table.separator_row());
+    for task in &tasks {
+        output.push(table.row_from_trait(task));
+    }
+    output.push(table.bottom_border());
+
+    let rendered = output.join("\n");
+
+    // Verify the complete table structure
+    assert!(rendered.contains("TSK-001"));
+    assert!(rendered.contains("TSK-002"));
+    assert!(rendered.contains("First task"));
+    assert!(rendered.contains("Second task"));
+    assert!(rendered.contains("pending"));
+    assert!(rendered.contains("done"));
+}
