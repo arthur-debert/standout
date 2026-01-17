@@ -483,6 +483,118 @@ println!("{}", table.bottom_border());
 
 ---
 
+## Derive Macros: Type-Safe Table Definitions
+
+Instead of manually building `TabularSpec` instances, you can use derive macros to generate them from struct annotations. This keeps your column definitions co-located with your data types and ensures they stay in sync.
+
+### `#[derive(Tabular)]` - Generate Spec from Struct
+
+Add `#[col(...)]` attributes to your struct fields to define column properties:
+
+```rust
+use outstanding::tabular::{Tabular, TabularRow, Table, BorderStyle};
+use serde::Serialize;
+
+#[derive(Serialize, Tabular, TabularRow)]
+#[tabular(separator = " │ ")]
+struct Task {
+    #[col(width = 8, style = "muted", header = "ID")]
+    id: String,
+
+    #[col(width = "fill", header = "Title", overflow = "truncate", truncate_at = "middle")]
+    title: String,
+
+    #[col(width = 12, header = "Status")]
+    status: String,
+
+    #[col(width = 10, header = "Assignee")]
+    assignee: String,
+
+    #[col(width = 10, align = "right", anchor = "right", style = "muted", header = "Due")]
+    due: String,
+}
+```
+
+Now create formatters and tables directly from the type:
+
+```rust
+// Create a table using the derived spec
+let table = Table::from_type::<Task>(80)
+    .header_from_columns()
+    .border(BorderStyle::Rounded);
+
+// Render rows using the TabularRow trait (no JSON serialization)
+for task in &tasks {
+    println!("{}", table.row_from_trait(task));
+}
+```
+
+### Available Field Attributes
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `width` | `8`, `"fill"`, `"2fr"` | Column width strategy |
+| `min`, `max` | `usize` | Bounded width range |
+| `align` | `"left"`, `"right"`, `"center"` | Text alignment within cell |
+| `anchor` | `"left"`, `"right"` | Column position in row |
+| `overflow` | `"truncate"`, `"wrap"`, `"clip"`, `"expand"` | How to handle long content |
+| `truncate_at` | `"end"`, `"start"`, `"middle"` | Where to truncate |
+| `style` | string | Style name for entire column |
+| `style_from_value` | flag | Use cell value as style name |
+| `header` | string | Column header text |
+| `null_repr` | string | Representation for null values |
+| `key` | string | Override field name for extraction |
+| `skip` | flag | Exclude field from table |
+
+### Container Attributes
+
+| Attribute | Description |
+|-----------|-------------|
+| `separator` | Column separator (default: `"  "`) |
+| `prefix` | Row prefix |
+| `suffix` | Row suffix |
+
+### Using with Templates
+
+The derived spec can be injected into templates using helper functions:
+
+```rust
+use outstanding::tabular::filters::{table_from_type, register_tabular_filters};
+use minijinja::{context, Environment};
+
+let mut env = Environment::new();
+register_tabular_filters(&mut env);
+
+// Create a table from the derived spec
+let table = table_from_type::<Task>(80, BorderStyle::Light, true);
+
+// Use in template context
+env.add_template("tasks", r#"
+{{ tbl.top_border() }}
+{{ tbl.header_row() }}
+{{ tbl.separator_row() }}
+{% for task in tasks %}{{ tbl.row([task.id, task.title, task.status, task.assignee, task.due]) }}
+{% endfor %}{{ tbl.bottom_border() }}
+"#)?;
+
+let output = env.get_template("tasks")?.render(context! {
+    tbl => table,
+    tasks => task_data,
+})?;
+```
+
+### Why Two Macros?
+
+- **`#[derive(Tabular)]`** generates the `TabularSpec` (column definitions, widths, styles)
+- **`#[derive(TabularRow)]`** generates efficient row extraction (field values to strings)
+
+You can use them independently:
+- Use only `Tabular` with `row_from()` to keep serde-based extraction
+- Use only `TabularRow` with manually-built specs for maximum control
+- Use both together for the best type safety and performance
+
+---
+
 ## Summary
 
 Tabular transforms raw data into polished, scannable output with minimal effort:
@@ -496,6 +608,7 @@ Tabular transforms raw data into polished, scannable output with minimal effort:
 7. **Add visual hierarchy** - style columns and values dynamically
 8. **Extract automatically** - let `row_from()` pull fields from structs
 9. **Decorate as tables** - add borders, headers, and separators
+10. **Use derive macros** - `#[derive(Tabular, TabularRow)]` for type-safe definitions
 
 The declarative approach means your layout adapts to terminal width, handles Unicode correctly, and remains maintainable as your data evolves.
 
