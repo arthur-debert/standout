@@ -13,6 +13,8 @@
 //! ## Derive Macros
 //!
 //! - [`Dispatch`] - Generate dispatch configuration from clap `Subcommand` enums
+//! - [`Tabular`] - Generate `TabularSpec` from struct field annotations
+//! - [`TabularRow`] - Generate optimized row extraction without JSON serialization
 //!
 //! # Design Philosophy
 //!
@@ -37,6 +39,7 @@
 
 mod dispatch;
 mod embed;
+mod tabular;
 
 use proc_macro::TokenStream;
 use syn::{parse_macro_input, DeriveInput, LitStr};
@@ -160,6 +163,115 @@ pub fn embed_styles(input: TokenStream) -> TokenStream {
 pub fn dispatch_derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     dispatch::dispatch_derive_impl(input)
+        .unwrap_or_else(|e| e.to_compile_error())
+        .into()
+}
+
+/// Derives a `TabularSpec` from struct field annotations.
+///
+/// This macro generates an implementation of the `Tabular` trait, which provides
+/// a `tabular_spec()` method that returns a `TabularSpec` for the struct.
+///
+/// For working examples, see `outstanding/tests/tabular_derive.rs`.
+///
+/// # Field Attributes
+///
+/// | Attribute | Type | Description |
+/// |-----------|------|-------------|
+/// | `width` | `usize` or `"fill"` or `"Nfr"` | Column width strategy |
+/// | `min` | `usize` | Minimum width (for bounded) |
+/// | `max` | `usize` | Maximum width (for bounded) |
+/// | `align` | `"left"`, `"right"`, `"center"` | Text alignment |
+/// | `anchor` | `"left"`, `"right"` | Column position |
+/// | `overflow` | `"truncate"`, `"wrap"`, `"clip"`, `"expand"` | Overflow handling |
+/// | `truncate_at` | `"end"`, `"start"`, `"middle"` | Truncation position |
+/// | `style` | string | Style name for the column |
+/// | `style_from_value` | flag | Use cell value as style name |
+/// | `header` | string | Header title (default: field name) |
+/// | `null_repr` | string | Representation for null values |
+/// | `key` | string | Data extraction key (supports dot notation) |
+/// | `skip` | flag | Exclude this field from the spec |
+///
+/// # Container Attributes
+///
+/// | Attribute | Type | Description |
+/// |-----------|------|-------------|
+/// | `separator` | string | Column separator (default: "  ") |
+/// | `prefix` | string | Row prefix |
+/// | `suffix` | string | Row suffix |
+///
+/// # Example
+///
+/// ```ignore
+/// use outstanding::tabular::Tabular;
+/// use serde::Serialize;
+///
+/// #[derive(Serialize, Tabular)]
+/// #[tabular(separator = " │ ")]
+/// struct Task {
+///     #[col(width = 8, style = "muted")]
+///     id: String,
+///
+///     #[col(width = "fill", overflow = "wrap")]
+///     title: String,
+///
+///     #[col(width = 12, align = "right")]
+///     status: String,
+/// }
+///
+/// let spec = Task::tabular_spec();
+/// ```
+#[proc_macro_derive(Tabular, attributes(col, tabular))]
+pub fn tabular_derive(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    tabular::tabular_derive_impl(input)
+        .unwrap_or_else(|e| e.to_compile_error())
+        .into()
+}
+
+/// Derives optimized row extraction for tabular formatting.
+///
+/// This macro generates an implementation of the `TabularRow` trait, which provides
+/// a `to_row()` method that converts the struct to a `Vec<String>` without JSON serialization.
+///
+/// For working examples, see `outstanding/tests/tabular_derive.rs`.
+///
+/// # Field Attributes
+///
+/// | Attribute | Description |
+/// |-----------|-------------|
+/// | `skip` | Exclude this field from the row |
+///
+/// # Example
+///
+/// ```ignore
+/// use outstanding::tabular::TabularRow;
+///
+/// #[derive(TabularRow)]
+/// struct Task {
+///     id: String,
+///     title: String,
+///
+///     #[col(skip)]
+///     internal_state: u32,
+///
+///     status: String,
+/// }
+///
+/// let task = Task {
+///     id: "TSK-001".to_string(),
+///     title: "Implement feature".to_string(),
+///     internal_state: 42,
+///     status: "pending".to_string(),
+/// };
+///
+/// let row = task.to_row();
+/// assert_eq!(row, vec!["TSK-001", "Implement feature", "pending"]);
+/// ```
+#[proc_macro_derive(TabularRow, attributes(col))]
+pub fn tabular_row_derive(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    tabular::tabular_row_derive_impl(input)
         .unwrap_or_else(|e| e.to_compile_error())
         .into()
 }

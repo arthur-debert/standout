@@ -107,6 +107,7 @@ mod decorator;
 pub mod filters;
 mod formatter;
 mod resolve;
+mod traits;
 mod types;
 mod util;
 
@@ -114,6 +115,16 @@ mod util;
 pub use decorator::{BorderStyle, Table};
 pub use formatter::{CellOutput, TabularFormatter};
 pub use resolve::ResolvedWidths;
+pub use traits::{Tabular, TabularFieldDisplay, TabularFieldOption, TabularRow};
+
+// Re-export the derive macros from outstanding-macros when available
+// The derive macro and trait share the same name but are in different namespaces
+#[cfg(feature = "macros")]
+#[doc(hidden)]
+pub use outstanding_macros::Tabular;
+#[cfg(feature = "macros")]
+#[doc(hidden)]
+pub use outstanding_macros::TabularRow;
 pub use types::{
     Align, Anchor, Col, Column, ColumnBuilder, Decorations, FlatDataSpec, FlatDataSpecBuilder,
     Overflow, TabularSpec, TabularSpecBuilder, TruncateAt, Width,
