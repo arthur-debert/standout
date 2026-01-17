@@ -1,14 +1,12 @@
 # Introduction to Tabular
 
-Polished terminal output requires good and smart formatting, which Outstanding gives you several tools for (see [Rendering System](rendering-system.md)). The other pillar is layouts. As a text-only, non-interactive output, that mostly means aligning things vertically and controlling how multiple, complex, and rich information fragments are presented.
+Polished terminal output requires two things: good formatting (see [Rendering System](rendering-system.md)) and good layouts. For text-only, non-interactive output, layout mostly means aligning things vertically and controlling how multiple pieces of information are presented together.
 
-Tabular works with a declarative set of columns. These can have powerful primitives for sizing (fixed, range, expand, expand fraction), position (anchor to right), truncation, overflow (clip, multi-line, truncate) as well as cell alignment, automated per-column styling, and more.
+Tabular provides a declarative column system with powerful primitives for sizing (fixed, range, fill, fractions), positioning (anchor to right), overflow handling (clip, wrap, truncate), cell alignment, and automated per-column styling.
 
-Tabular is not only about tables, however. Any listing where each item is further broken down and is better presented in alignment is a good candidate. For example, log entries listing where authors, timestamps, and messages are displayed. In fact, many if not most listing outputs benefit from the capabilities Tabular provides. That said, one can decorate a tabular declaration with headers, separators, and borders, and voila - now you've got a table.
+Tabular is not only about tables. Any listing where items have multiple fields that benefit from vertical alignment is a good candidate—log entries with authors, timestamps, and messages; file listings with names, sizes, and dates; task lists with IDs, titles, and statuses. Add headers, separators, and borders to a tabular layout, and you have a table.
 
-Tabular is designed to free you from the grunt work as much as possible. That means it comes with a declarative API, a template-based syntax for in-template usage, and an easy way to annotate and link how your already existing data types are represented in these cases.
-
-This ensures that even complex tables with complex types can be fully declaratively handled, with precise control over the layout and not a single line of code.
+Tabular is designed to minimize grunt work. It offers a declarative API, template-based syntax, and derive macros to link your existing data types directly to column definitions. Complex tables with complex types can be handled declaratively, with precise control over layout and minimal code.
 
 In this guide, we will walk our way up from a simpler table to a more complex one, exploring the available features of Tabular.
 
@@ -122,7 +120,7 @@ The output looks the same, but now the column definitions are centralized. This 
 Hardcoded widths are fragile. What if the terminal is wider or narrower? Tabular offers flexible width strategies:
 
 | Width | Meaning |
-|-------|---------|
+| ----- | ------- |
 | `8` | Exactly 8 columns (fixed) |
 | `{"min": 10}` | At least 10, grows to fit content |
 | `{"min": 10, "max": 30}` | Between 10 and 30 |
@@ -249,15 +247,14 @@ The wrapped lines are indented to align with the column.
 
 Here's where Tabular shines for task lists. We want status colors: green for done, yellow for pending, red for blocked, blue for in progress.
 
-First, define styles in your theme:
+First, define styles in your [theme](rendering-system.md#themes-and-styles):
 
-```yaml
-# theme.yaml
-styles:
-  done: { fg: green }
-  pending: { fg: yellow }
-  blocked: { fg: red }
-  in_progress: { fg: blue }
+```css
+/* styles/default.css */
+.done { color: green; }
+.pending { color: yellow; }
+.blocked { color: red; }
+.in_progress { color: blue; }
 ```
 
 Then use the `style_as` filter to apply styles based on the value itself:
@@ -375,7 +372,7 @@ Output:
 Choose from six border styles:
 
 | Style | Look |
-|-------|------|
+| ----- | ---- |
 | `"none"` | No borders |
 | `"ascii"` | `+--+--+` (ASCII compatible) |
 | `"light"` | `┌──┬──┐` |
@@ -438,6 +435,7 @@ Output (80 columns, with styling):
 ```
 
 Features in use:
+
 - **Rounded borders** for a modern look
 - **Muted styling** on ID and date columns for visual hierarchy
 - **Fill width** on title to use available space
@@ -532,7 +530,7 @@ for task in &tasks {
 ### Available Field Attributes
 
 | Attribute | Type | Description |
-|-----------|------|-------------|
+| --------- | ---- | ----------- |
 | `width` | `8`, `"fill"`, `"2fr"` | Column width strategy |
 | `min`, `max` | `usize` | Bounded width range |
 | `align` | `"left"`, `"right"`, `"center"` | Text alignment within cell |
@@ -549,7 +547,7 @@ for task in &tasks {
 ### Container Attributes
 
 | Attribute | Description |
-|-----------|-------------|
+| --------- | ----------- |
 | `separator` | Column separator (default: `"  "`) |
 | `prefix` | Row prefix |
 | `suffix` | Row suffix |
@@ -589,6 +587,7 @@ let output = env.get_template("tasks")?.render(context! {
 - **`#[derive(TabularRow)]`** generates efficient row extraction (field values to strings)
 
 You can use them independently:
+
 - Use only `Tabular` with `row_from()` to keep serde-based extraction
 - Use only `TabularRow` with manually-built specs for maximum control
 - Use both together for the best type safety and performance

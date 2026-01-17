@@ -158,7 +158,7 @@ pub fn list_command(matches: &ArgMatches) {
 
 **Your files now:**
 
-```text.u
+```text
 src/
 ├── main.rs          # clap setup + orchestrators
 ├── handlers.rs      # list(), add() - pure logic
@@ -300,7 +300,7 @@ pub fn render_list(result: TodoResult) {
 
 **What's next:** Hooking up Outstanding for automatic dispatch and rich output.
 
-Also, notice we've yet to do anything Outstanding specific. This is not a coincidence, as the framework is born out of making using and leveraging this design for easy testability, development speed and rich feature set easy under this design.
+Also, notice we've yet to do anything Outstanding-specific. This is not a coincidence—the framework is designed around this pattern, making testability, fast iteration, and rich features natural outcomes of the architecture.
 
 **Your files now:**
 

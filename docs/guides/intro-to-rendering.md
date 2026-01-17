@@ -117,7 +117,7 @@ pub fn list(matches: &ArgMatches, _ctx: &CommandContext) -> HandlerResult<TaskLi
 [title]Your Tasks[/title]
 ──────────
 {% for task in tasks %}
-[{{ task.status }}][{{ task.status }}][/{{ task.status }}] {{ task.title }} - [muted]{{ task.due }}[/muted]
+[{{ task.status }}]{{ task.status }}[/{{ task.status }}]  {{ task.title }} - [muted]{{ task.due }}[/muted]
 {% endfor %}
 
 [muted]{{ summary }}[/muted]
