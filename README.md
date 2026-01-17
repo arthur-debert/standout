@@ -1,7 +1,7 @@
 # Standout
 
 [![Crates.io](https://img.shields.io/crates/v/standout.svg)](https://crates.io/crates/standout)
-[![Documentation](https://img.shields.io/badge/docs-book-blue)](https://arthur-debert.github.io/standout/)
+[![Documentation](https://img.shields.io/badge/docs-book-blue)](https://standout.magik.works/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **Test your data. Render your view.**
@@ -91,12 +91,12 @@ myapp list --output json    # JSON for scripting
 
 ## Documentation
 
-You can find comprehensive documentation in our book: **[arthur-debert.github.io/standout](https://arthur-debert.github.io/standout/)**
+You can find comprehensive documentation in our book: **[standout.magik.works](https://standout.magik.works/)**
 
-- [Introduction to Standout](https://arthur-debert.github.io/standout/guides/intro-to-standout.html) — Start here
-- [Rendering System](https://arthur-debert.github.io/standout/topics/rendering-system.html) — Templates and styles
-- [Tabular Layouts](https://arthur-debert.github.io/standout/topics/tabular.html) — Tables and alignment
-- [All Topics](https://arthur-debert.github.io/standout/topics/index.html) — Complete reference
+- [Introduction to Standout](https://standout.magik.works/guides/intro-to-standout.html) — Start here
+- [Rendering System](https://standout.magik.works/topics/rendering-system.html) — Templates and styles
+- [Tabular Layouts](https://standout.magik.works/topics/tabular.html) — Tables and alignment
+- [All Topics](https://standout.magik.works/topics/index.html) — Complete reference
 
 ## Contributing
 
