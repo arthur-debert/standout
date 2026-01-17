@@ -312,16 +312,21 @@ pub struct App {
 ### Standard Execution
 
 ```rust
-app.run(Cli::command(), std::env::args());
+if let Some(matches) = app.run(Cli::command(), std::env::args()) {
+    // Outstanding didn't handle this command, fall back to legacy
+    legacy_dispatch(matches);
+}
 ```
 
-Parses args, dispatches to handler, prints output. Returns `bool` (true if handled).
+Parses args, dispatches to handler, prints output. Returns `Option<ArgMatches>`—`None` if handled, `Some(matches)` for fallback.
 
 ### Capture Output
 
+For testing, post-processing, or when you need the output string:
+
 ```rust
 match app.run_to_string(cmd, args) {
-    RunResult::Handled(output) => { /* use output */ }
+    RunResult::Handled(output) => { /* use output string */ }
     RunResult::Binary(bytes, filename) => { /* handle binary */ }
     RunResult::NoMatch(matches) => { /* fallback dispatch */ }
 }

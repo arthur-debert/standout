@@ -56,13 +56,13 @@ What Outstanding provides:
 - Logic is testable as any Rust code
 - Boilerplateless: declaratively link your handlers to command names and templates, Outstanding handles the rest
 - Autodispatch: save keystrokes with auto dispatch from the known command tree
-- Free [output handling](docs/guides/output-modes.md): rich terminal with graceful degradation, plus structured data (JSON, YAML, CSV)
+- Free [output handling](docs/topics/output-modes.md): rich terminal with graceful degradation, plus structured data (JSON, YAML, CSV)
 - Finely crafted output:
-  - File-based [templates](docs/guides/rendering-system.md) for content and CSS for styling
-  - Rich styling with [adaptive properties](docs/guides/rendering-system.md#adaptive-styles) (light/dark modes), inheritance, and full theming
+  - File-based [templates](docs/topics/rendering-system.md) for content and CSS for styling
+  - Rich styling with [adaptive properties](docs/topics/rendering-system.md#adaptive-styles) (light/dark modes), inheritance, and full theming
   - Powerful templating through [MiniJinja](https://github.com/mitsuhiko/minijinja), including partials (reusable, smaller templates for models displayed in multiple places)
-  - [Hot reload](docs/guides/rendering-system.md#hot-reloading): changes to templates and styles don't require compiling
-  - Declarative layout support for [tabular data](docs/guides/tabular.md)
+  - [Hot reload](docs/topics/rendering-system.md#hot-reloading): changes to templates and styles don't require compiling
+  - Declarative layout support for [tabular data](docs/topics/tabular.md)
 
 ## Quick Start
 
@@ -183,34 +183,40 @@ cargo add outstanding
 
 ## Migrating an Existing CLI
 
-Already have a CLI? Outstanding supports incremental adoption. Use `run_to_string` to handle Outstanding commands while falling back to your existing dispatch:
+Already have a CLI? Outstanding supports incremental adoption. Outstanding handles matched commands automatically; unmatched commands return `ArgMatches` for your existing dispatch:
 
 ```rust
-match app.run_to_string(Cli::command(), std::env::args()) {
-    RunResult::Handled(output) => println!("{}", output),
-    RunResult::NoMatch(matches) => your_existing_dispatch(matches),
+if let Some(matches) = app.run(Cli::command(), std::env::args()) {
+    // Outstanding didn't handle this command, fall back to legacy
+    your_existing_dispatch(matches);
 }
 ```
 
-See the [Partial Adoption Guide](docs/howtos/partial-adoption.md) for the full migration path.
+See the [Partial Adoption Guide](docs/topics/partial-adoption.md) for the full migration path.
 
 ## Documentation
 
-- **[Full Tutorial](docs/guides/full-tutorial.md)** — Step-by-step adoption guide. Start here.
-
 ### Guides
 
-- [Handler Contract](docs/guides/handler-contract.md) — The handler API in detail
-- [Rendering System](docs/guides/rendering-system.md) — Templates, styles, and themes
-- [Output Modes](docs/guides/output-modes.md) — Terminal, JSON, YAML, CSV
-- [Tabular Layout](docs/guides/tabular.md) — Tables, columns, and alignment
-- [App Configuration](docs/guides/app-configuration.md) — Builder options
-- [Execution Model](docs/guides/execution-model.md) — Request lifecycle
+Step-by-step walkthroughs covering principles, rationale, and features.
 
-### How-Tos
+- **[Introduction to Outstanding](docs/guides/intro-to-outstanding.md)** — Adopting Outstanding in a working CLI. Start here.
+- [Introduction to Rendering](docs/guides/intro-to-rendering.md) — Creating polished terminal output
+- [Introduction to Tabular](docs/guides/intro-to-tabular.md) — Building aligned, readable tabular layouts
+- [TLDR: Quick Start](docs/guides/tldr-intro-to-outstanding.md) — Fast-paced intro for experienced developers
 
-- [Partial Adoption](docs/howtos/partial-adoption.md) — Migrate incrementally
-- [Render Only](docs/howtos/render-only.md) — Use the renderer without the framework
+### Topics
+
+In-depth documentation for specific systems and use cases. See [all topics](docs/topics/index.md).
+
+- [Handler Contract](docs/topics/handler-contract.md) — The handler API in detail
+- [Rendering System](docs/topics/rendering-system.md) — Templates, styles, and themes
+- [Output Modes](docs/topics/output-modes.md) — Terminal, JSON, YAML, CSV
+- [Tabular Layout](docs/topics/tabular.md) — Tables, columns, and alignment
+- [App Configuration](docs/topics/app-configuration.md) — Builder options
+- [Execution Model](docs/topics/execution-model.md) — Request lifecycle
+- [Partial Adoption](docs/topics/partial-adoption.md) — Migrate incrementally
+- [Render Only](docs/topics/render-only.md) — Use the renderer without the framework
 
 ## Contributing
 

@@ -180,17 +180,14 @@ App::builder()
 
 A "naked" invocation like `myapp` or `myapp --verbose` will automatically dispatch to the `list` command. The arguments are modified internally to insert the command name, then reparsed. This ensures all clap validation and parsing rules apply correctly to the default command.
 
-If no handler matches, `run()` returns `RunResult::NoMatch(matches)`, letting you fall back to manual dispatch:
+If no handler matches, `run()` returns `Some(matches)`, letting you fall back to manual dispatch:
 
 ```rust
-match app.run_to_string(cmd, args) {
-    RunResult::Handled(output) => println!("{}", output),
-    RunResult::NoMatch(matches) => {
-        // Your existing dispatch logic
-        match matches.subcommand() {
-            Some(("legacy", sub)) => legacy_handler(sub),
-            _ => {}
-        }
+if let Some(matches) = app.run(cmd, args) {
+    // Outstanding didn't handle this command, fall back to legacy
+    match matches.subcommand() {
+        Some(("legacy", sub)) => legacy_handler(sub),
+        _ => {}
     }
 }
 ```
