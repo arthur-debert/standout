@@ -117,14 +117,8 @@ pub use formatter::{CellOutput, TabularFormatter};
 pub use resolve::ResolvedWidths;
 pub use traits::{Tabular, TabularFieldDisplay, TabularFieldOption, TabularRow};
 
-// Re-export the derive macros from standout-macros when available
-// The derive macro and trait share the same name but are in different namespaces
-#[cfg(feature = "macros")]
-#[doc(hidden)]
-pub use standout_macros::Tabular;
-#[cfg(feature = "macros")]
-#[doc(hidden)]
-pub use standout_macros::TabularRow;
+// Note: Tabular and TabularRow derive macros are re-exported from the main `standout` crate
+// when the "macros" feature is enabled.
 pub use types::{
     Align, Anchor, Col, Column, ColumnBuilder, Decorations, FlatDataSpec, FlatDataSpecBuilder,
     Overflow, TabularSpec, TabularSpecBuilder, TruncateAt, Width,

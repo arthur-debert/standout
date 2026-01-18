@@ -11,7 +11,7 @@ use minijinja::{Environment, Error, ErrorKind, Value};
 /// # Arguments
 ///
 /// * `env` - The MiniJinja environment to register filters on
-pub(crate) fn register_filters(env: &mut Environment<'static>) {
+pub fn register_filters(env: &mut Environment<'static>) {
     // Filter to append a newline to the value, enabling explicit line break control.
     // Usage: {{ content | nl }} outputs content followed by \n
     //        {{ "" | nl }} outputs just \n (a blank line)

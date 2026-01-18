@@ -74,7 +74,7 @@
 //! - [`crate::tabular`]: Column formatting utilities and template filters
 //! - [`crate::context`]: Context injection for templates
 
-pub(crate) mod filters;
+pub mod filters;
 mod functions;
 pub mod registry;
 mod renderer;

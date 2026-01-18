@@ -66,23 +66,22 @@
 //! For includes, use either:
 //! - [`Renderer`] with [`add_template`](Renderer::add_template) or
 //!   [`with_embedded_source`](Renderer::with_embedded_source)
-//! - [`App`](crate::cli::App) with embedded templates via the builder
+//! - `standout::cli::App` with embedded templates via the builder (requires `standout` crate)
 //!
 //! [`Renderer`]: super::renderer::Renderer
 //! [`Renderer::set_output_mode`]: super::renderer::Renderer::set_output_mode
-//! [`App::render`]: crate::cli::App::render
 
 use minijinja::{Environment, Error, Value};
 use serde::Serialize;
 use standout_bbparser::{BBParser, TagTransform, UnknownTagBehavior};
 use std::collections::HashMap;
 
-use super::super::context::{ContextRegistry, RenderContext};
-use super::super::output::OutputMode;
-use super::super::style::Styles;
-use super::super::tabular::FlatDataSpec;
-use super::super::theme::{detect_color_mode, ColorMode, Theme};
 use super::filters::register_filters;
+use crate::context::{ContextRegistry, RenderContext};
+use crate::output::OutputMode;
+use crate::style::Styles;
+use crate::tabular::FlatDataSpec;
+use crate::theme::{detect_color_mode, ColorMode, Theme};
 
 /// Maps OutputMode to BBParser's TagTransform.
 fn output_mode_to_transform(mode: OutputMode) -> TagTransform {

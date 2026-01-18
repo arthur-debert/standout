@@ -37,11 +37,11 @@ use minijinja::{Environment, Error};
 use serde::Serialize;
 use standout_bbparser::{BBParser, TagTransform, UnknownTagBehavior};
 
-use super::super::output::OutputMode;
-use super::super::style::Styles;
-use super::super::theme::Theme;
 use super::filters::register_filters;
 use super::registry::{walk_template_dir, ResolvedTemplate, TemplateRegistry};
+use crate::output::OutputMode;
+use crate::style::Styles;
+use crate::theme::Theme;
 use crate::EmbeddedTemplates;
 
 /// A renderer with pre-registered templates.
@@ -806,7 +806,7 @@ mod tests {
 
     #[test]
     fn test_renderer_with_embedded_source() {
-        use crate::embedded::{EmbeddedSource, TemplateResource};
+        use crate::{EmbeddedSource, TemplateResource};
 
         // Create an EmbeddedTemplates source (simulating embed_templates! output)
         static ENTRIES: &[(&str, &str)] = &[

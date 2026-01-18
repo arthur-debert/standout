@@ -15,10 +15,9 @@ use minijinja::Environment;
 use serde::Serialize;
 
 use crate::context::{ContextRegistry, RenderContext};
-use crate::rendering::template::filters::register_filters;
-use crate::rendering::theme::detect_color_mode;
 use crate::setup::SetupError;
-use crate::{OutputMode, StylesheetRegistry, TemplateRegistry, Theme};
+use crate::{detect_color_mode, OutputMode, StylesheetRegistry, TemplateRegistry, Theme};
+use standout_render::template::filters::register_filters;
 
 use super::app::get_terminal_width;
 use super::hooks::Hooks;
@@ -417,7 +416,7 @@ impl AppCore {
             OutputMode::Csv => {
                 let value =
                     serde_json::to_value(data).map_err(|e| SetupError::Config(e.to_string()))?;
-                let (headers, rows) = crate::util::flatten_json_for_csv(&value);
+                let (headers, rows) = crate::flatten_json_for_csv(&value);
 
                 let mut wtr = csv::Writer::from_writer(Vec::new());
                 wtr.write_record(&headers)
