@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING: Removed `clap` feature flag** - The `cli` module and clap integration are now always available. The `clap` feature has been removed.
+
+  ```diff
+  [dependencies]
+  - standout = { version = "2", features = ["clap", "macros"] }
+  + standout = "2"
+  ```
+
+  **Migration:** Remove `features = ["clap"]` from your `Cargo.toml`. If you only used `features = ["macros"]`, note that macros are also now always available.
+
+- **`macros` feature is now a no-op** - The `macros` feature still exists for backwards compatibility but does nothing. All macros (`embed_templates!`, `embed_styles!`, `Dispatch`, `Tabular`, `TabularRow`) are now always available.
+
 ## [2.1.0] - 2026-01-18
 
 ### Added
