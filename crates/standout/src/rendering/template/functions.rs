@@ -46,8 +46,8 @@
 //! ```
 
 use minijinja::{Environment, Error, Value};
-use standout_bbparser::{BBParser, TagTransform, UnknownTagBehavior};
 use serde::Serialize;
+use standout_bbparser::{BBParser, TagTransform, UnknownTagBehavior};
 use std::collections::HashMap;
 
 use super::super::context::{ContextRegistry, RenderContext};
