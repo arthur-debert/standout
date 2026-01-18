@@ -812,7 +812,10 @@ mod tests {
         static ENTRIES: &[(&str, &str)] = &[
             ("greeting.jinja", "Hello, {{ name }}!"),
             ("_partial.jinja", "PARTIAL"),
-            ("with_include.jinja", "Before {% include '_partial' %} After"),
+            (
+                "with_include.jinja",
+                "Before {% include '_partial' %} After",
+            ),
         ];
         let source: EmbeddedSource<TemplateResource> =
             EmbeddedSource::new(ENTRIES, "/nonexistent/path");
@@ -827,13 +830,23 @@ mod tests {
 
         // Test basic rendering
         let output = renderer
-            .render("greeting", &Data { name: "World".into() })
+            .render(
+                "greeting",
+                &Data {
+                    name: "World".into(),
+                },
+            )
             .unwrap();
         assert_eq!(output, "Hello, World!");
 
         // Test extensionless access
         let output2 = renderer
-            .render("greeting.jinja", &Data { name: "Test".into() })
+            .render(
+                "greeting.jinja",
+                &Data {
+                    name: "Test".into(),
+                },
+            )
             .unwrap();
         assert_eq!(output2, "Hello, Test!");
 

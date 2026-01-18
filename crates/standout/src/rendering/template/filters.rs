@@ -47,11 +47,12 @@ mod tests {
         env.add_template("test", "{{ value | style('header') }}")
             .unwrap();
 
-        let result = env.get_template("test").unwrap().render(
-            minijinja::context! {
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(minijinja::context! {
                 value => "hello"
-            },
-        );
+            });
 
         assert!(result.is_err());
         let err = result.unwrap_err();
