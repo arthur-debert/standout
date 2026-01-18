@@ -9,6 +9,7 @@
 //! - Default command
 
 use crate::context::ContextProvider;
+use crate::setup::SetupError;
 use crate::topics::Topic;
 use crate::TemplateRegistry;
 use crate::{EmbeddedStyles, EmbeddedTemplates, Theme};
@@ -99,10 +100,14 @@ impl AppBuilder {
     }
 
     /// Adds topics from a directory. Only .txt and .md files are processed.
-    /// Silently ignores non-existent directories.
-    pub fn topics_dir(mut self, path: impl AsRef<std::path::Path>) -> Self {
-        let _ = self.registry.add_from_directory_if_exists(path);
-        self
+    ///
+    /// # Errors
+    /// Returns error if directory reading fails.
+    pub fn topics_dir(mut self, path: impl AsRef<std::path::Path>) -> Result<Self, SetupError> {
+        self.registry
+            .add_from_directory(path)
+            .map_err(SetupError::Io)?;
+        Ok(self)
     }
 
     /// Sets a custom theme for help rendering.
@@ -175,12 +180,14 @@ impl AppBuilder {
     ///     .styles(embed_styles!("src/styles"))
     ///     .styles_dir("~/.myapp/themes")  // User overrides
     /// ```
-    pub fn styles_dir<P: AsRef<std::path::Path>>(mut self, path: P) -> Self {
+    pub fn styles_dir<P: AsRef<std::path::Path>>(mut self, path: P) -> Result<Self, SetupError> {
         let registry = self
             .stylesheet_registry
             .get_or_insert_with(crate::StylesheetRegistry::new);
-        let _ = registry.add_dir(path);
-        self
+        registry
+            .add_dir(path)
+            .map_err(|e| SetupError::Stylesheet(e.to_string()))?;
+        Ok(self)
     }
 
     /// Sets the default theme name when using embedded styles.
@@ -234,7 +241,7 @@ impl AppBuilder {
     ///     .templates(embed_templates!("src/templates"))
     ///     .templates_dir("~/.myapp/templates")  // User overrides
     /// ```
-    pub fn templates_dir<P: AsRef<std::path::Path>>(mut self, path: P) -> Self {
+    pub fn templates_dir<P: AsRef<std::path::Path>>(mut self, path: P) -> Result<Self, SetupError> {
         if self.template_registry.is_none() {
             self.template_registry = Some(Arc::new(TemplateRegistry::new()));
         }
@@ -242,13 +249,13 @@ impl AppBuilder {
         let arc = self.template_registry.as_mut().unwrap();
         match Arc::get_mut(arc) {
             Some(registry) => {
-                let _ = registry.add_template_dir(path);
+                registry.add_template_dir(path)?;
             }
             None => {
                 panic!("Cannot modify template registry after commands have been dispatched/finalized.");
             }
         }
-        self
+        Ok(self)
     }
 
     /// Sets the file extension for convention-based template resolution.
@@ -354,7 +361,8 @@ mod tests {
                 "info",
                 |_m, _ctx| Ok(HandlerOutput::Render(json!({"name": "app"}))),
                 "{{ name }} v{{ version }}",
-            );
+            )
+            .unwrap();
 
         let cmd = Command::new("app").subcommand(Command::new("info"));
         let matches = cmd.try_get_matches_from(["app", "info"]).unwrap();
@@ -375,7 +383,8 @@ mod tests {
                 "info",
                 |_m, _ctx| Ok(HandlerOutput::Render(json!({"title": "Report"}))),
                 "{{ title }} by {{ author }} ({{ year }})",
-            );
+            )
+            .unwrap();
 
         let cmd = Command::new("app").subcommand(Command::new("info"));
         let matches = cmd.try_get_matches_from(["app", "info"]).unwrap();
@@ -397,7 +406,8 @@ mod tests {
                 "info",
                 |_m, _ctx| Ok(HandlerOutput::Render(json!({}))),
                 "Width: {{ terminal_width }}",
-            );
+            )
+            .unwrap();
 
         let cmd = Command::new("app").subcommand(Command::new("info"));
         let matches = cmd.try_get_matches_from(["app", "info"]).unwrap();
@@ -421,7 +431,8 @@ mod tests {
                 "info",
                 |_m, _ctx| Ok(HandlerOutput::Render(json!({}))),
                 "Mode: {{ mode }}",
-            );
+            )
+            .unwrap();
 
         let cmd = Command::new("app").subcommand(Command::new("info"));
         let matches = cmd.try_get_matches_from(["app", "info"]).unwrap();
@@ -443,7 +454,8 @@ mod tests {
                 "test",
                 |_m, _ctx| Ok(HandlerOutput::Render(json!({"value": "from_data"}))),
                 "{{ value }}",
-            );
+            )
+            .unwrap();
 
         let cmd = Command::new("app").subcommand(Command::new("test"));
         let matches = cmd.try_get_matches_from(["app", "test"]).unwrap();
@@ -464,11 +476,13 @@ mod tests {
                 |_m, _ctx| Ok(HandlerOutput::Render(json!({}))),
                 "{{ app_name }}: list",
             )
+            .unwrap()
             .command(
                 "info",
                 |_m, _ctx| Ok(HandlerOutput::Render(json!({}))),
                 "{{ app_name }}: info",
-            );
+            )
+            .unwrap();
 
         let cmd = Command::new("app")
             .subcommand(Command::new("list"))
@@ -498,7 +512,8 @@ mod tests {
                 "test",
                 |_m, _ctx| Ok(HandlerOutput::Render(json!({"count": 21}))),
                 "Count: {{ count }}, Doubled: {{ doubled_count }}",
-            );
+            )
+            .unwrap();
 
         let cmd = Command::new("app").subcommand(Command::new("test"));
         let matches = cmd.try_get_matches_from(["app", "test"]).unwrap();
@@ -524,7 +539,8 @@ mod tests {
                 "test",
                 |_m, _ctx| Ok(HandlerOutput::Render(json!({}))),
                 "Debug: {{ config.debug }}, Max: {{ config.max_items }}",
-            );
+            )
+            .unwrap();
 
         let cmd = Command::new("app").subcommand(Command::new("test"));
         let matches = cmd.try_get_matches_from(["app", "test"]).unwrap();
@@ -548,7 +564,7 @@ mod tests {
                     })))
                 },
                 "{% for item in items %}{{ item }}{% if not loop.last %}{{ separator }}{% endif %}{% endfor %}",
-            );
+            ).unwrap();
 
         let cmd = Command::new("app").subcommand(Command::new("list"));
         let matches = cmd.try_get_matches_from(["app", "list"]).unwrap();
@@ -568,7 +584,8 @@ mod tests {
                 "test",
                 |_m, _ctx| Ok(HandlerOutput::Render(json!({"data": "value"}))),
                 "{{ data }} + {{ extra }}",
-            );
+            )
+            .unwrap();
 
         let cmd = Command::new("app").subcommand(Command::new("test"));
         let matches = cmd.try_get_matches_from(["app", "test"]).unwrap();
@@ -595,6 +612,8 @@ mod tests {
                     Ok(HandlerOutput::Render(json!({"ok": true})))
                 })
             });
+
+        let builder = builder.unwrap();
 
         // Verify the builder has the commands registered
         assert!(builder.has_command("db.migrate"));

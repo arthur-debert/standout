@@ -283,7 +283,7 @@ impl LocalAppBuilder {
     ///         Ok(Output::Render(data.len()))
     ///     }, "Added. Total: {{ count }}")
     /// ```
-    pub fn command<F, T>(self, path: &str, handler: F, template: &str) -> Self
+    pub fn command<F, T>(self, path: &str, handler: F, template: &str) -> Result<Self, SetupError>
     where
         F: FnMut(&ArgMatches, &CommandContext) -> HandlerResult<T> + 'static,
         T: Serialize + 'static,
@@ -296,6 +296,10 @@ impl LocalAppBuilder {
 
         let recipe = LocalClosureRecipe::new(handler);
 
+        if self.pending_commands.borrow().contains_key(path) {
+            return Err(SetupError::DuplicateCommand(path.to_string()));
+        }
+
         self.pending_commands.borrow_mut().insert(
             path.to_string(),
             PendingLocalCommand {
@@ -304,7 +308,7 @@ impl LocalAppBuilder {
             },
         );
 
-        self
+        Ok(self)
     }
 
     /// Registers a struct handler implementing [`LocalHandler`].
@@ -327,7 +331,12 @@ impl LocalAppBuilder {
     /// LocalApp::builder()
     ///     .command_handler("count", Counter { count: 0 }, "{{ count }}")
     /// ```
-    pub fn command_handler<H, T>(self, path: &str, handler: H, template: &str) -> Self
+    pub fn command_handler<H, T>(
+        self,
+        path: &str,
+        handler: H,
+        template: &str,
+    ) -> Result<Self, SetupError>
     where
         H: LocalHandler<Output = T> + 'static,
         T: Serialize + 'static,
@@ -340,6 +349,10 @@ impl LocalAppBuilder {
 
         let recipe = LocalStructRecipe::new(handler);
 
+        if self.pending_commands.borrow().contains_key(path) {
+            return Err(SetupError::DuplicateCommand(path.to_string()));
+        }
+
         self.pending_commands.borrow_mut().insert(
             path.to_string(),
             PendingLocalCommand {
@@ -348,7 +361,7 @@ impl LocalAppBuilder {
             },
         );
 
-        self
+        Ok(self)
     }
 
     /// Registers hooks for a specific command path.
@@ -523,14 +536,16 @@ mod tests {
     fn test_local_builder_command() {
         let mut counter = 0u32;
 
-        let builder = LocalAppBuilder::new().command(
-            "increment",
-            move |_m, _ctx| {
-                counter += 1;
-                Ok(Output::Render(json!({"count": counter})))
-            },
-            "{{ count }}",
-        );
+        let builder = LocalAppBuilder::new()
+            .command(
+                "increment",
+                move |_m, _ctx| {
+                    counter += 1;
+                    Ok(Output::Render(json!({"count": counter})))
+                },
+                "{{ count }}",
+            )
+            .unwrap();
 
         assert!(builder.has_command("increment"));
     }
@@ -550,8 +565,9 @@ mod tests {
             }
         }
 
-        let builder =
-            LocalAppBuilder::new().command_handler("count", Counter { count: 0 }, "{{ . }}");
+        let builder = LocalAppBuilder::new()
+            .command_handler("count", Counter { count: 0 }, "{{ . }}")
+            .unwrap();
 
         assert!(builder.has_command("count"));
     }
@@ -574,6 +590,7 @@ mod tests {
                 },
                 "",
             )
+            .unwrap()
             .command(
                 "list",
                 move |_m, _ctx| {
@@ -582,7 +599,8 @@ mod tests {
                     ))
                 },
                 "",
-            );
+            )
+            .unwrap();
 
         assert!(builder.has_command("add"));
         assert!(builder.has_command("list"));

@@ -42,7 +42,7 @@ struct PendingCommand {
 /// use standout::cli::App;
 ///
 /// let standout = App::<standout::cli::ThreadSafe>::builder()
-///     .topics_dir("docs/topics")
+///     .topics_dir(".").unwrap()
 ///     .output_flag(Some("format"))
 ///     .build();
 /// ```
@@ -288,6 +288,7 @@ mod tests {
         // 1. Only base exists
         let app = AppBuilder::new()
             .styles_dir(temp_dir.path())
+            .unwrap()
             .build()
             .unwrap();
 
@@ -300,6 +301,7 @@ mod tests {
 
         let app = AppBuilder::new()
             .styles_dir(temp_dir.path())
+            .unwrap()
             .build()
             .unwrap();
 
@@ -310,6 +312,7 @@ mod tests {
 
         let app = AppBuilder::new()
             .styles_dir(temp_dir.path())
+            .unwrap()
             .build()
             .unwrap();
 

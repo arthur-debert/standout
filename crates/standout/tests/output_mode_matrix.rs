@@ -44,6 +44,7 @@ fn test_app_output_mode_auto() {
             |_m: &ArgMatches, _ctx: &CommandContext| Ok(Output::Render(TestData::sample())),
             simple_template(),
         )
+        .unwrap()
         .build()
         .expect("Failed to build app");
 
@@ -63,6 +64,7 @@ fn test_app_output_mode_term() {
             |_m: &ArgMatches, _ctx: &CommandContext| Ok(Output::Render(TestData::sample())),
             simple_template(),
         )
+        .unwrap()
         .build()
         .expect("Failed to build app");
 
@@ -82,6 +84,7 @@ fn test_app_output_mode_text() {
             |_m: &ArgMatches, _ctx: &CommandContext| Ok(Output::Render(TestData::sample())),
             simple_template(),
         )
+        .unwrap()
         .build()
         .expect("Failed to build app");
 
@@ -101,6 +104,7 @@ fn test_app_output_mode_json() {
             |_m: &ArgMatches, _ctx: &CommandContext| Ok(Output::Render(TestData::sample())),
             simple_template(),
         )
+        .unwrap()
         .build()
         .expect("Failed to build app");
 
@@ -122,6 +126,7 @@ fn test_app_output_mode_yaml() {
             |_m: &ArgMatches, _ctx: &CommandContext| Ok(Output::Render(TestData::sample())),
             simple_template(),
         )
+        .unwrap()
         .build()
         .expect("Failed to build app");
 
@@ -142,6 +147,7 @@ fn test_app_output_mode_csv() {
             |_m: &ArgMatches, _ctx: &CommandContext| Ok(Output::Render(TestData::sample())),
             simple_template(),
         )
+        .unwrap()
         .build()
         .expect("Failed to build app");
 
@@ -168,6 +174,7 @@ fn test_local_app_output_mode_auto() {
             |_m: &ArgMatches, _ctx: &CommandContext| Ok(Output::Render(TestData::sample())),
             simple_template(),
         )
+        .unwrap()
         .build()
         .expect("Failed to build app");
 
@@ -187,6 +194,7 @@ fn test_local_app_output_mode_term() {
             |_m: &ArgMatches, _ctx: &CommandContext| Ok(Output::Render(TestData::sample())),
             simple_template(),
         )
+        .unwrap()
         .build()
         .expect("Failed to build app");
 
@@ -206,6 +214,7 @@ fn test_local_app_output_mode_text() {
             |_m: &ArgMatches, _ctx: &CommandContext| Ok(Output::Render(TestData::sample())),
             simple_template(),
         )
+        .unwrap()
         .build()
         .expect("Failed to build app");
 
@@ -225,6 +234,7 @@ fn test_local_app_output_mode_json() {
             |_m: &ArgMatches, _ctx: &CommandContext| Ok(Output::Render(TestData::sample())),
             simple_template(),
         )
+        .unwrap()
         .build()
         .expect("Failed to build app");
 
@@ -246,6 +256,7 @@ fn test_local_app_output_mode_yaml() {
             |_m: &ArgMatches, _ctx: &CommandContext| Ok(Output::Render(TestData::sample())),
             simple_template(),
         )
+        .unwrap()
         .build()
         .expect("Failed to build app");
 
@@ -266,6 +277,7 @@ fn test_local_app_output_mode_csv() {
             |_m: &ArgMatches, _ctx: &CommandContext| Ok(Output::Render(TestData::sample())),
             simple_template(),
         )
+        .unwrap()
         .build()
         .expect("Failed to build app");
 
@@ -295,6 +307,7 @@ fn test_app_and_local_app_produce_same_json() {
             |_m: &ArgMatches, _ctx: &CommandContext| Ok(Output::Render(TestData::sample())),
             simple_template(),
         )
+        .unwrap()
         .build()
         .expect("Failed to build app");
     let app_output = app
@@ -308,6 +321,7 @@ fn test_app_and_local_app_produce_same_json() {
             |_m: &ArgMatches, _ctx: &CommandContext| Ok(Output::Render(TestData::sample())),
             simple_template(),
         )
+        .unwrap()
         .build()
         .expect("Failed to build local app");
     let local_output = local_app
@@ -333,6 +347,7 @@ fn test_app_and_local_app_produce_same_text() {
             |_m: &ArgMatches, _ctx: &CommandContext| Ok(Output::Render(TestData::sample())),
             simple_template(),
         )
+        .unwrap()
         .build()
         .expect("Failed to build app");
     let app_output = app
@@ -346,6 +361,7 @@ fn test_app_and_local_app_produce_same_text() {
             |_m: &ArgMatches, _ctx: &CommandContext| Ok(Output::Render(TestData::sample())),
             simple_template(),
         )
+        .unwrap()
         .build()
         .expect("Failed to build local app");
     let local_output = local_app
@@ -377,6 +393,7 @@ fn test_style_tags_in_term_mode() {
             |_m: &ArgMatches, _ctx: &CommandContext| Ok(Output::Render(TestData::sample())),
             template,
         )
+        .unwrap()
         .build()
         .expect("Failed to build app");
 
@@ -405,6 +422,7 @@ fn test_style_tags_stripped_in_text_mode() {
             |_m: &ArgMatches, _ctx: &CommandContext| Ok(Output::Render(TestData::sample())),
             template,
         )
+        .unwrap()
         .build()
         .expect("Failed to build app");
 
@@ -435,6 +453,7 @@ fn test_style_tags_kept_in_term_debug_mode() {
             |_m: &ArgMatches, _ctx: &CommandContext| Ok(Output::Render(TestData::sample())),
             template,
         )
+        .unwrap()
         .build()
         .expect("Failed to build app");
 

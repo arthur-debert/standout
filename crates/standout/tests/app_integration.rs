@@ -14,6 +14,7 @@ fn test_app_thread_safe_integration() {
             |_m, _ctx| Ok(Output::Render(json!({"msg": "success"}))),
             "{{ msg }}",
         )
+        .unwrap()
         .build()
         .unwrap();
 
@@ -41,6 +42,7 @@ fn test_local_app_integration() {
             },
             "{{ count }}",
         )
+        .unwrap()
         .build()
         .unwrap();
 
@@ -77,6 +79,7 @@ fn test_local_struct_handler() {
 
     let app = LocalApp::builder()
         .command_handler("add", StatefulHandler { count: 0 }, "{{ val }}")
+        .unwrap()
         .build()
         .unwrap();
 
