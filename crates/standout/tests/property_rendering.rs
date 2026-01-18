@@ -3,10 +3,12 @@
 use clap::Command;
 use proptest::prelude::*;
 use serde_json::{json, Value};
+use serde_yaml;
 use standout::cli::{App, Output};
 use standout::{OutputMode, Theme};
 
 // Strategy for generating arbitrary OutputMode values
+// Per design guidelines: all 8 output modes must be covered
 fn output_mode_strategy() -> impl Strategy<Value = OutputMode> {
     prop_oneof![
         Just(OutputMode::Auto),
@@ -14,6 +16,9 @@ fn output_mode_strategy() -> impl Strategy<Value = OutputMode> {
         Just(OutputMode::Text),
         Just(OutputMode::TermDebug),
         Just(OutputMode::Json),
+        Just(OutputMode::Yaml),
+        Just(OutputMode::Xml),
+        Just(OutputMode::Csv),
     ]
 }
 
@@ -72,28 +77,9 @@ proptest! {
 
         let app = builder.build().expect("Failed to build app");
 
+        // Build command and parse args to get ArgMatches
         let cmd = Command::new("app").subcommand(Command::new("test"));
-
-        // Dispatch
-        // We use dispatch_from manually to simulate CLI arg
-        // But dispatch_from runs command parsing.
-        // We can just call run_command directly if we have matches.
-        // Or cleaner: use dispatch() with manually constructed arguments?
-        // Let's use dispatch_from.
-
-        let cli_args = vec!["app", "test"];
-        // We can inject output mode via flag?
-        // App adds output flag by default unless disabled.
-        // But here we want to test passing explicit `mode` to dispatch().
-        // Wait, dispatch_from parses args and determines mode from flagged arg if present,
-        // OR falls back to default.
-        // But App::dispatch takes `OutputMode` argument!
-        // `dispatch_from` CALLS `dispatch` with parsed mode.
-
-        // So let's test `dispatch` directly to force the specific mode we generated.
-        // We need `ArgMatches` for "test" subcommand.
-        let raw_cmd = Command::new("app").subcommand(Command::new("test"));
-        let matches = raw_cmd.try_get_matches_from(cli_args).unwrap();
+        let matches = cmd.try_get_matches_from(["app", "test"]).unwrap();
 
         // Run dispatch
         let result = app.dispatch(matches, mode);
@@ -102,12 +88,19 @@ proptest! {
         // 1. Should be handled
         assert!(result.is_handled());
 
-        // 2. Output check
+        // 2. Structured output validation
         if let Some(output) = result.output() {
-            // For JSON mode, output MUST be valid JSON
-            if matches!(mode, OutputMode::Json) {
-                let parsed: Result<Value, _> = serde_json::from_str(output);
-                assert!(parsed.is_ok(), "JSON output should be parseable: {}", output);
+            match mode {
+                OutputMode::Json => {
+                    let parsed: Result<Value, _> = serde_json::from_str(output);
+                    assert!(parsed.is_ok(), "JSON output should be parseable: {}", output);
+                }
+                OutputMode::Yaml => {
+                    let parsed: Result<Value, _> = serde_yaml::from_str(output);
+                    assert!(parsed.is_ok(), "YAML output should be parseable: {}", output);
+                }
+                // XML and CSV are harder to validate generically, but we verify no panic
+                _ => {}
             }
         }
 
