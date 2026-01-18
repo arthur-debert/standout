@@ -4,7 +4,7 @@ use clap::Command;
 use proptest::prelude::*;
 use serde_json::{json, Value};
 use serde_yaml;
-use standout::cli::{App, Output};
+use standout::cli::{App, Local, Output, ThreadSafe};
 use standout::{OutputMode, Theme};
 
 // Strategy for generating arbitrary OutputMode values
@@ -53,22 +53,45 @@ fn json_data_strategy() -> impl Strategy<Value = Value> {
     )
 }
 
+/// Helper to validate structured output
+fn validate_structured_output(output: &str, mode: OutputMode) {
+    match mode {
+        OutputMode::Json => {
+            let parsed: Result<Value, _> = serde_json::from_str(output);
+            assert!(
+                parsed.is_ok(),
+                "JSON output should be parseable: {}",
+                output
+            );
+        }
+        OutputMode::Yaml => {
+            let parsed: Result<Value, _> = serde_yaml::from_str(output);
+            assert!(
+                parsed.is_ok(),
+                "YAML output should be parseable: {}",
+                output
+            );
+        }
+        // XML and CSV are harder to validate generically, but we verify no panic
+        _ => {}
+    }
+}
+
 proptest! {
+    /// Property test for ThreadSafe handler mode
     #[test]
-    fn test_rendering_invariants(
+    fn test_threadsafe_rendering_invariants(
         mode in output_mode_strategy(),
         theme in theme_strategy(),
         data in json_data_strategy()
     ) {
-        // App definition
-        let builder = App::<standout::cli::ThreadSafe>::builder()
+        let builder = App::<ThreadSafe>::builder()
             .command(
-                "test", // Command name
-                move |_m, _ctx| Ok(Output::Render(data.clone())), // Handler returns prop data
-                "{{ . }}", // Simple template dumping data
+                "test",
+                move |_m, _ctx| Ok(Output::Render(data.clone())),
+                "{{ . }}",
             ).unwrap();
 
-        // Inject theme if generated
         let builder = if let Some(t) = theme {
             builder.theme(t)
         } else {
@@ -77,33 +100,50 @@ proptest! {
 
         let app = builder.build().expect("Failed to build app");
 
-        // Build command and parse args to get ArgMatches
         let cmd = Command::new("app").subcommand(Command::new("test"));
         let matches = cmd.try_get_matches_from(["app", "test"]).unwrap();
 
-        // Run dispatch
         let result = app.dispatch(matches, mode);
 
-        // Verification
-        // 1. Should be handled
+        // Invariants
         assert!(result.is_handled());
-
-        // 2. Structured output validation
         if let Some(output) = result.output() {
-            match mode {
-                OutputMode::Json => {
-                    let parsed: Result<Value, _> = serde_json::from_str(output);
-                    assert!(parsed.is_ok(), "JSON output should be parseable: {}", output);
-                }
-                OutputMode::Yaml => {
-                    let parsed: Result<Value, _> = serde_yaml::from_str(output);
-                    assert!(parsed.is_ok(), "YAML output should be parseable: {}", output);
-                }
-                // XML and CSV are harder to validate generically, but we verify no panic
-                _ => {}
-            }
+            validate_structured_output(output, mode);
         }
+    }
 
-        // 3. No panic occurred (implicit by reaching here)
+    /// Property test for Local handler mode
+    /// Per design guidelines: both handler modes must be tested
+    #[test]
+    fn test_local_rendering_invariants(
+        mode in output_mode_strategy(),
+        theme in theme_strategy(),
+        data in json_data_strategy()
+    ) {
+        let builder = App::<Local>::builder()
+            .command(
+                "test",
+                move |_m, _ctx| Ok(Output::Render(data.clone())),
+                "{{ . }}",
+            ).unwrap();
+
+        let builder = if let Some(t) = theme {
+            builder.theme(t)
+        } else {
+            builder
+        };
+
+        let app = builder.build().expect("Failed to build app");
+
+        let cmd = Command::new("app").subcommand(Command::new("test"));
+        let matches = cmd.try_get_matches_from(["app", "test"]).unwrap();
+
+        let result = app.dispatch(matches, mode);
+
+        // Same invariants as ThreadSafe - feature parity
+        assert!(result.is_handled());
+        if let Some(output) = result.output() {
+            validate_structured_output(output, mode);
+        }
     }
 }
