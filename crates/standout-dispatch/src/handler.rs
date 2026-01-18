@@ -1,13 +1,32 @@
 //! Command handler types.
 //!
-//! This module provides the core types for building command handlers:
+//! This module provides the core types for building **logic handlers** - the
+//! business logic layer in the dispatch pipeline.
+//!
+//! # Design Rationale
+//!
+//! Logic handlers are responsible for **business logic only**. They:
+//!
+//! - Receive parsed CLI arguments (`&ArgMatches`) and execution context
+//! - Perform application logic (database queries, file operations, etc.)
+//! - Return **serializable data** that will be passed to the render handler
+//!
+//! Handlers explicitly do **not** handle:
+//! - Output formatting (that's the render handler's job)
+//! - Template selection (that's configured at the framework level)
+//! - Theme/style decisions (that's the render handler's job)
+//!
+//! This separation keeps handlers focused and testable - you can unit test
+//! a handler by checking the data it returns, without worrying about rendering.
+//!
+//! # Core Types
 //!
 //! - [`CommandContext`]: Environment information passed to handlers
 //! - [`Output`]: What a handler produces (render data, silent, or binary)
-//! - [`HandlerResult`]: The result type for handlers
+//! - [`HandlerResult`]: The result type for handlers (`Result<Output<T>, Error>`)
 //! - [`RunResult`]: The result of running the CLI dispatcher
-//! - [`Handler`]: Trait for thread-safe command handlers
-//! - [`LocalHandler`]: Trait for local (mutable) command handlers
+//! - [`Handler`]: Trait for thread-safe command handlers (`Send + Sync`, `&self`)
+//! - [`LocalHandler`]: Trait for local command handlers (no `Send + Sync`, `&mut self`)
 
 use crate::OutputMode;
 use clap::ArgMatches;

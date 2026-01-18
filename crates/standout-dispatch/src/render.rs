@@ -1,8 +1,50 @@
 //! Render function abstraction.
 //!
-//! Defines the contract between dispatch and renderers.
-//! Dispatch doesn't know about templates - it just knows that
-//! for each command there's a function that turns data into a string.
+//! This module defines the contract between dispatch and renderers. The key design
+//! principle is that **dispatch is render-agnostic**: it doesn't know about templates,
+//! themes, output formats, or any rendering implementation details.
+//!
+//! # Design Rationale
+//!
+//! The render handler is a **pluggable callback** that the consuming framework provides.
+//! This separation exists because:
+//!
+//! 1. **Flexibility**: Different applications may use different renderers (or none at all)
+//! 2. **Separation of concerns**: Business logic (handlers) shouldn't know about presentation
+//! 3. **Runtime configuration**: Format/theme decisions happen at runtime (from CLI args),
+//!    not at compile time
+//!
+//! # The Closure Pattern
+//!
+//! Render handlers capture their context (format, theme, etc.) in a closure:
+//!
+//! ```rust,ignore
+//! // At runtime, after parsing --output=json:
+//! let format = OutputMode::Json;
+//! let theme = &app.theme;
+//! let templates = &app.templates;
+//!
+//! // Create render handler with context baked in
+//! let render_handler = from_fn(move |data, _mode| {
+//!     render_with_format(templates, theme, format, data)
+//! });
+//! ```
+//!
+//! Dispatch calls `render_handler(data, mode)` without knowing what's inside the closure.
+//! All format/theme/template logic lives in the closure, created by the framework layer.
+//!
+//! # TextMode Parameter
+//!
+//! The [`TextMode`] parameter exists for simple use cases where the render handler
+//! wants dispatch to pass through a hint about text styling. For full-featured
+//! frameworks like `standout`, the format is typically captured in the closure instead,
+//! and TextMode can be ignored.
+//!
+//! # Thread Safety
+//!
+//! Two variants are provided:
+//! - [`RenderFn`]: Thread-safe (`Send + Sync`), uses `Arc`
+//! - [`LocalRenderFn`]: Single-threaded, uses `Rc<RefCell>`, allows `FnMut`
 
 use crate::TextMode;
 use std::sync::Arc;

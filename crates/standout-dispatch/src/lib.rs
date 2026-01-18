@@ -1,48 +1,85 @@
-//! Command dispatch and routing for clap-based CLIs.
+//! Command dispatch and orchestration for clap-based CLIs.
 //!
-//! `standout-dispatch` provides the command routing, handler execution, and
-//! hook system for CLI applications. It's designed to work with any renderer
-//! (or no renderer at all for simple imperative output).
+//! `standout-dispatch` provides command routing, handler execution, and a hook
+//! system for CLI applications. It orchestrates the execution flow while remaining
+//! **agnostic to rendering implementation**.
+//!
+//! # Architecture
+//!
+//! Dispatch is an **orchestration layer** that manages this execution flow:
+//!
+//! ```text
+//! parsed CLI args
+//!   → pre-dispatch hook (validation, setup)
+//!   → logic handler (business logic → serializable data)
+//!   → post-dispatch hook (data transformation)
+//!   → render handler (view + data → string output)
+//!   → post-output hook (output transformation)
+//! ```
+//!
+//! ## Design Rationale
+//!
+//! Dispatch deliberately does **not** own rendering or output format logic:
+//!
+//! - **Logic handlers** have a strict input signature (`&ArgMatches`, `&CommandContext`)
+//!   and return serializable data. They focus purely on business logic.
+//!
+//! - **Render handlers** are pluggable callbacks provided by the consuming framework.
+//!   They receive (view name, data) and return a formatted string. All rendering
+//!   decisions (format, theme, template engine) live in the render handler.
+//!
+//! This separation allows:
+//! - Using dispatch without any rendering (just return data)
+//! - Using dispatch with custom renderers (not just standout-render)
+//! - Keeping format/theme/template logic out of the dispatch layer
+//!
+//! ## Render Handler Pattern
+//!
+//! The render handler is a closure that captures rendering context:
+//!
+//! ```rust,ignore
+//! // Framework (e.g., standout) creates the render handler at runtime
+//! // after parsing CLI args to determine format
+//! let format = extract_output_mode(&matches);  // --output=json
+//! let theme = &config.theme;
+//!
+//! let render_handler = move |view: &str, data: &Value| {
+//!     // All format/theme knowledge lives here, not in dispatch
+//!     my_renderer::render(view, data, theme, format)
+//! };
+//!
+//! dispatcher.run_with_renderer(matches, render_handler);
+//! ```
+//!
+//! This pattern means dispatch calls `render_handler(view, data)` without knowing
+//! what format, theme, or template engine is being used.
 //!
 //! # Features
 //!
-//! - **Command routing**: Map command names to handler functions
-//! - **Handler traits**: Thread-safe (`Handler`) and local (`LocalHandler`) variants
-//! - **Hook system**: Pre/post dispatch and post-output hooks
-//! - **Output modes**: Auto TTY detection, structured output (JSON/YAML/CSV/XML)
-//! - **Clap integration**: `--output` flag injection, argument parsing
+//! - **Command routing**: Extract command paths from clap `ArgMatches`
+//! - **Handler traits**: Thread-safe ([`Handler`]) and local ([`LocalHandler`]) variants
+//! - **Hook system**: Pre/post dispatch and post-output hooks for cross-cutting concerns
+//! - **Render abstraction**: Pluggable render handlers via [`RenderFn`] / [`LocalRenderFn`]
 //!
-//! # Output Mode Ownership
+//! # Usage
 //!
-//! Dispatch owns the `OutputMode` enum and handles:
-//! - Auto mode (TTY detection to choose Term vs Text)
-//! - Structured serialization (JSON, YAML, CSV, XML)
-//! - Passing `TextMode` to render functions for text output
-//!
-//! Renderers receive `TextMode` and handle:
-//! - Styled: Apply styles (ANSI escape codes)
-//! - Plain: Strip style tags
-//! - Debug: Keep tags visible
-//!
-//! # Usage Without Rendering
-//!
-//! For dispatch-only usage (no templates, no styles):
+//! ## Standalone (no rendering framework)
 //!
 //! ```rust,ignore
-//! use standout_dispatch::{Dispatcher, Output, TextMode};
+//! use standout_dispatch::{Handler, Output, from_fn};
+//!
+//! // Simple render handler that just serializes to JSON
+//! let render = from_fn(|data, _| Ok(serde_json::to_string_pretty(data)?));
 //!
 //! Dispatcher::builder()
-//!     .command("list", list_handler, |data, _mode| {
-//!         // Imperative formatting - TextMode ignored
-//!         Ok(format_list_output(&data))
-//!     })
+//!     .command("list", list_handler, render)
 //!     .build()?
 //!     .run(cmd, args);
 //! ```
 //!
-//! # Integration with standout-render
+//! ## With standout framework
 //!
-//! The `standout` crate provides integration that wires templates to render functions:
+//! The `standout` crate provides full integration with templates and themes:
 //!
 //! ```rust,ignore
 //! use standout::{App, embed_templates};
@@ -53,6 +90,9 @@
 //!     .build()?
 //!     .run(cmd, args);
 //! ```
+//!
+//! In this case, `standout` creates the render handler internally, injecting
+//! the template registry, theme, and output format from CLI args.
 
 // Core modules
 mod dispatch;

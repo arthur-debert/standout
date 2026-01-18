@@ -1,14 +1,33 @@
 //! Hook system for pre/post command execution.
 //!
-//! Hooks allow you to run custom code before and after command handlers execute.
-//! They are registered per-command and support chaining with transformation.
+//! Hooks allow you to run custom code at specific points in the dispatch pipeline.
+//! They enable cross-cutting concerns (logging, validation, transformation) without
+//! polluting handler logic.
+//!
+//! # Pipeline Position
+//!
+//! Hooks fit into the dispatch flow as follows:
+//!
+//! ```text
+//! parsed CLI args
+//!   → PRE-DISPATCH HOOK ← (validation, auth checks, setup)
+//!   → logic handler
+//!   → POST-DISPATCH HOOK ← (data transformation, enrichment)
+//!   → render handler
+//!   → POST-OUTPUT HOOK ← (output transformation, logging)
+//! ```
 //!
 //! # Hook Points
 //!
 //! - **Pre-dispatch**: Runs before the command handler. Can abort execution.
+//!   Use for: authentication, input validation, resource acquisition.
+//!
 //! - **Post-dispatch**: Runs after the handler but before rendering. Receives the raw
 //!   handler data as `serde_json::Value`. Can inspect, modify, or replace the data.
+//!   Use for: adding metadata, data transformation, caching.
+//!
 //! - **Post-output**: Runs after output is generated. Can transform output or abort.
+//!   Use for: logging, clipboard copy, output filtering.
 
 use std::fmt;
 use std::sync::Arc;
