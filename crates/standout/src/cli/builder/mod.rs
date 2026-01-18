@@ -138,12 +138,17 @@ impl AppBuilder {
         let context_registry = &self.context_registry;
 
         // Build dispatch functions from recipes
+        // Note: template_registry is not passed here because it would require Clone.
+        // Dispatch closures created this way won't support {% include %} directives.
+        // For full include support, use build() which creates the App with proper Arc sharing.
         let mut commands = HashMap::new();
         for (path, pending) in self.pending_commands.borrow().iter() {
-            let dispatch =
-                pending
-                    .recipe
-                    .create_dispatch(&pending.template, context_registry, &theme);
+            let dispatch = pending.recipe.create_dispatch(
+                &pending.template,
+                context_registry,
+                &theme,
+                None, // No template registry for lazy dispatch - includes not supported
+            );
             commands.insert(path.clone(), dispatch);
         }
 
@@ -182,8 +187,6 @@ impl AppBuilder {
     /// ```
     pub fn build(mut self) -> Result<App, SetupError> {
         use super::core::AppCore;
-        use std::sync::Arc;
-
         // Resolve theme: explicit theme takes precedence, then stylesheet registry
         let theme = if let Some(theme) = self.theme.take() {
             Some(theme)
@@ -205,8 +208,8 @@ impl AppBuilder {
             None
         };
 
-        // Wrap template registry in Arc for sharing across commands
-        let template_registry = self.template_registry.take().map(Arc::new);
+        // Wrap template registry in Arc for sharing
+        let template_registry = self.template_registry.take().map(std::sync::Arc::new);
 
         // Build the AppCore with all shared configuration
         let core = AppCore {

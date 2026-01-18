@@ -3,15 +3,14 @@
 //! This module provides [`GroupBuilder`] for creating nested command hierarchies
 //! with a fluent API, and [`CommandConfig`] for inline command configuration.
 
-use crate::context::{ContextRegistry, RenderContext};
-use crate::{render_auto_with_context, Theme};
+use crate::context::ContextRegistry;
+use crate::{TemplateRegistry, Theme};
 use clap::ArgMatches;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::app::get_terminal_width;
-use super::dispatch::{DispatchFn, DispatchOutput};
+use super::dispatch::{render_handler_output, DispatchFn, DispatchOutput};
 use crate::cli::handler::{
     CommandContext, FnHandler, Handler, HandlerResult, Output as HandlerOutput,
 };
@@ -48,6 +47,7 @@ pub(crate) trait CommandRecipe: Send + Sync {
         template: &str,
         context_registry: &ContextRegistry,
         theme: &Theme,
+        template_registry: Option<Arc<TemplateRegistry>>,
     ) -> DispatchFn;
 }
 
@@ -110,6 +110,7 @@ where
         template: &str,
         context_registry: &ContextRegistry,
         theme: &Theme,
+        template_registry: Option<Arc<TemplateRegistry>>,
     ) -> DispatchFn {
         let handler = self.handler.clone();
         let template = template.to_string();
@@ -122,32 +123,19 @@ where
 
                 match result {
                     Ok(HandlerOutput::Render(data)) => {
-                        let mut json_data = serde_json::to_value(&data)
+                        let json_data = serde_json::to_value(&data)
                             .map_err(|e| format!("Failed to serialize handler result: {}", e))?;
 
-                        if let Some(hooks) = hooks {
-                            json_data = hooks
-                                .run_post_dispatch(matches, ctx, json_data)
-                                .map_err(|e| format!("Hook error: {}", e))?;
-                        }
-
-                        let render_ctx = RenderContext::new(
-                            ctx.output_mode,
-                            get_terminal_width(),
-                            &theme,
-                            &json_data,
-                        );
-
-                        let output = render_auto_with_context(
+                        render_handler_output(
+                            json_data,
+                            matches,
+                            ctx,
+                            hooks,
                             &template,
-                            &json_data,
                             &theme,
-                            ctx.output_mode,
                             &context_registry,
-                            &render_ctx,
+                            template_registry.as_deref(),
                         )
-                        .map_err(|e| e.to_string())?;
-                        Ok(DispatchOutput::Text(output))
                     }
                     Err(e) => Err(format!("Error: {}", e)),
                     Ok(HandlerOutput::Silent) => Ok(DispatchOutput::Silent),
@@ -222,6 +210,7 @@ where
         template: &str,
         context_registry: &ContextRegistry,
         theme: &Theme,
+        template_registry: Option<Arc<TemplateRegistry>>,
     ) -> DispatchFn {
         let handler = self.handler.clone();
         let template = template.to_string();
@@ -234,32 +223,19 @@ where
 
                 match result {
                     Ok(HandlerOutput::Render(data)) => {
-                        let mut json_data = serde_json::to_value(&data)
+                        let json_data = serde_json::to_value(&data)
                             .map_err(|e| format!("Failed to serialize handler result: {}", e))?;
 
-                        if let Some(hooks) = hooks {
-                            json_data = hooks
-                                .run_post_dispatch(matches, ctx, json_data)
-                                .map_err(|e| format!("Hook error: {}", e))?;
-                        }
-
-                        let render_ctx = RenderContext::new(
-                            ctx.output_mode,
-                            get_terminal_width(),
-                            &theme,
-                            &json_data,
-                        );
-
-                        let output = render_auto_with_context(
+                        render_handler_output(
+                            json_data,
+                            matches,
+                            ctx,
+                            hooks,
                             &template,
-                            &json_data,
                             &theme,
-                            ctx.output_mode,
                             &context_registry,
-                            &render_ctx,
+                            template_registry.as_deref(),
                         )
-                        .map_err(|e| e.to_string())?;
-                        Ok(DispatchOutput::Text(output))
                     }
                     Err(e) => Err(format!("Error: {}", e)),
                     Ok(HandlerOutput::Silent) => Ok(DispatchOutput::Silent),
@@ -316,6 +292,7 @@ impl CommandRecipe for ErasedConfigRecipe {
         template: &str,
         context_registry: &ContextRegistry,
         theme: &Theme,
+        template_registry: Option<Arc<TemplateRegistry>>,
     ) -> DispatchFn {
         let config = self
             .config
@@ -328,6 +305,7 @@ impl CommandRecipe for ErasedConfigRecipe {
             template.to_string(),
             context_registry.clone(),
             theme.clone(),
+            template_registry,
         )
     }
 }
@@ -438,6 +416,7 @@ pub(crate) trait ErasedCommandConfig {
         template: String,
         context_registry: ContextRegistry,
         theme: Theme,
+        template_registry: Option<Arc<TemplateRegistry>>,
     ) -> DispatchFn;
 }
 
@@ -597,10 +576,7 @@ impl GroupBuilder {
     /// When the CLI is invoked without a subcommand (a "naked" invocation),
     /// the default command is automatically used.
     ///
-    /// # Panics
-    ///
-    /// Panics if a default command has already been set, as only one
-    /// default command can be defined.
+    /// If called multiple times, the last call wins (standard builder semantics).
     ///
     /// # Example
     ///
@@ -611,12 +587,6 @@ impl GroupBuilder {
     ///     .default_command("list"))  // "list" is used when no command specified
     /// ```
     pub fn default_command(mut self, name: &str) -> Self {
-        if self.default_command.is_some() {
-            panic!(
-                "Only one default command can be defined. '{}' is already set as default.",
-                self.default_command.as_ref().unwrap()
-            );
-        }
         self.default_command = Some(name.to_string());
         self
     }
@@ -656,6 +626,7 @@ where
         template: String,
         context_registry: ContextRegistry,
         theme: Theme,
+        template_registry: Option<Arc<TemplateRegistry>>,
     ) -> DispatchFn {
         let handler = Arc::new(self.handler);
 
@@ -665,32 +636,19 @@ where
 
                 match result {
                     Ok(HandlerOutput::Render(data)) => {
-                        let mut json_data = serde_json::to_value(&data)
+                        let json_data = serde_json::to_value(&data)
                             .map_err(|e| format!("Failed to serialize handler result: {}", e))?;
 
-                        if let Some(hooks) = hooks {
-                            json_data = hooks
-                                .run_post_dispatch(matches, ctx, json_data)
-                                .map_err(|e| format!("Hook error: {}", e))?;
-                        }
-
-                        let render_ctx = RenderContext::new(
-                            ctx.output_mode,
-                            get_terminal_width(),
-                            &theme,
-                            &json_data,
-                        );
-
-                        let output = render_auto_with_context(
+                        render_handler_output(
+                            json_data,
+                            matches,
+                            ctx,
+                            hooks,
                             &template,
-                            &json_data,
                             &theme,
-                            ctx.output_mode,
                             &context_registry,
-                            &render_ctx,
+                            template_registry.as_deref(),
                         )
-                        .map_err(|e| e.to_string())?;
-                        Ok(DispatchOutput::Text(output))
                     }
                     Err(e) => Err(format!("Error: {}", e)),
                     Ok(HandlerOutput::Silent) => Ok(DispatchOutput::Silent),
@@ -738,6 +696,7 @@ where
         template: String,
         context_registry: ContextRegistry,
         theme: Theme,
+        template_registry: Option<Arc<TemplateRegistry>>,
     ) -> DispatchFn {
         let handler = Arc::new(self.handler);
 
@@ -747,32 +706,19 @@ where
 
                 match result {
                     Ok(HandlerOutput::Render(data)) => {
-                        let mut json_data = serde_json::to_value(&data)
+                        let json_data = serde_json::to_value(&data)
                             .map_err(|e| format!("Failed to serialize handler result: {}", e))?;
 
-                        if let Some(hooks) = hooks {
-                            json_data = hooks
-                                .run_post_dispatch(matches, ctx, json_data)
-                                .map_err(|e| format!("Hook error: {}", e))?;
-                        }
-
-                        let render_ctx = RenderContext::new(
-                            ctx.output_mode,
-                            get_terminal_width(),
-                            &theme,
-                            &json_data,
-                        );
-
-                        let output = render_auto_with_context(
+                        render_handler_output(
+                            json_data,
+                            matches,
+                            ctx,
+                            hooks,
                             &template,
-                            &json_data,
                             &theme,
-                            ctx.output_mode,
                             &context_registry,
-                            &render_ctx,
+                            template_registry.as_deref(),
                         )
-                        .map_err(|e| e.to_string())?;
-                        Ok(DispatchOutput::Text(output))
                     }
                     Err(e) => Err(format!("Error: {}", e)),
                     Ok(HandlerOutput::Silent) => Ok(DispatchOutput::Silent),
@@ -851,12 +797,14 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Only one default command can be defined")]
-    fn test_group_builder_duplicate_default_command_panics() {
-        let _ = GroupBuilder::new()
+    fn test_group_builder_duplicate_default_command_last_wins() {
+        // Standard builder semantics: last call wins
+        let group = GroupBuilder::new()
             .command("list", |_m, _ctx| Ok(HandlerOutput::Render(json!({}))))
             .command("add", |_m, _ctx| Ok(HandlerOutput::Render(json!({}))))
             .default_command("list")
             .default_command("add");
+
+        assert_eq!(group.default_command, Some("add".to_string()));
     }
 }

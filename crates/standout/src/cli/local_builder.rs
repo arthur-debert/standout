@@ -44,123 +44,12 @@ use std::rc::Rc;
 use clap::ArgMatches;
 use serde::Serialize;
 
-use crate::context::{ContextRegistry, RenderContext};
-
+use crate::context::ContextRegistry;
+use crate::OutputMode;
 use crate::TemplateRegistry;
-use crate::{OutputMode, Theme};
+use crate::Theme;
 
-/// Renders a template with optional template registry support for includes.
-///
-/// This is similar to `render_auto_with_context` but also accepts a template
-/// registry for `{% include %}` directive support.
-fn render_with_registry(
-    template: &str,
-    data: &serde_json::Value,
-    theme: &Theme,
-    mode: OutputMode,
-    context_registry: &ContextRegistry,
-    render_ctx: &RenderContext,
-    template_registry: Option<&TemplateRegistry>,
-) -> Result<String, minijinja::Error> {
-    use crate::rendering::template::filters::register_filters;
-    use crate::rendering::theme::detect_color_mode;
-    use minijinja::Environment;
-    use standout_bbparser::{BBParser, TagTransform, UnknownTagBehavior};
-
-    // For structured modes, serialize directly
-    if mode.is_structured() {
-        return match mode {
-            OutputMode::Json => serde_json::to_string_pretty(data).map_err(|e| {
-                minijinja::Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
-            }),
-            OutputMode::Yaml => serde_yaml::to_string(data).map_err(|e| {
-                minijinja::Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
-            }),
-            OutputMode::Xml => quick_xml::se::to_string(data).map_err(|e| {
-                minijinja::Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
-            }),
-            OutputMode::Csv => {
-                let (headers, rows) = crate::util::flatten_json_for_csv(data);
-                let mut wtr = csv::Writer::from_writer(Vec::new());
-                wtr.write_record(&headers).map_err(|e| {
-                    minijinja::Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
-                })?;
-                for row in rows {
-                    wtr.write_record(&row).map_err(|e| {
-                        minijinja::Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
-                    })?;
-                }
-                let bytes = wtr.into_inner().map_err(|e| {
-                    minijinja::Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
-                })?;
-                String::from_utf8(bytes).map_err(|e| {
-                    minijinja::Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
-                })
-            }
-            _ => unreachable!("is_structured() returned true for non-structured mode"),
-        };
-    }
-
-    let color_mode = detect_color_mode();
-    let styles = theme.resolve_styles(Some(color_mode));
-
-    // Validate style aliases before rendering
-    styles.validate().map_err(|e| {
-        minijinja::Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
-    })?;
-
-    let mut env = Environment::new();
-    register_filters(&mut env);
-
-    // Load all templates from registry if available (enables {% include %})
-    if let Some(registry) = template_registry {
-        for name in registry.names() {
-            if let Ok(content) = registry.get_content(name) {
-                env.add_template_owned(name.to_string(), content)?;
-            }
-        }
-    }
-
-    env.add_template_owned("_inline".to_string(), template.to_string())?;
-    let tmpl = env.get_template("_inline")?;
-
-    // Build combined context
-    let context_values = context_registry.resolve(render_ctx);
-    let mut combined: std::collections::HashMap<String, minijinja::Value> =
-        std::collections::HashMap::new();
-
-    // Add context values first (lower priority)
-    for (key, value) in context_values {
-        combined.insert(key, value);
-    }
-
-    // Add data values (higher priority)
-    if let Some(obj) = data.as_object() {
-        for (key, value) in obj {
-            combined.insert(key.clone(), minijinja::Value::from_serialize(value));
-        }
-    }
-
-    // Pass 1: MiniJinja template rendering
-    let minijinja_output = tmpl.render(&combined)?;
-
-    // Pass 2: BBParser style tag processing
-    let transform = match mode {
-        OutputMode::Term | OutputMode::Auto => TagTransform::Apply,
-        OutputMode::TermDebug => TagTransform::Keep,
-        _ => TagTransform::Remove,
-    };
-    let resolved_styles = styles.to_resolved_map();
-    let parser =
-        BBParser::new(resolved_styles, transform).unknown_behavior(UnknownTagBehavior::Passthrough);
-    let final_output = parser.parse(&minijinja_output);
-
-    Ok(final_output)
-}
-
-use super::app::get_terminal_width;
-
-use super::dispatch::{DispatchOutput, LocalDispatchFn};
+use super::dispatch::{render_handler_output, DispatchOutput, LocalDispatchFn};
 use super::handler::{CommandContext, HandlerResult, LocalFnHandler, LocalHandler, Output};
 use super::hooks::Hooks;
 use super::local_app::LocalApp;
@@ -223,33 +112,19 @@ where
 
                 match result {
                     Ok(Output::Render(data)) => {
-                        let mut json_data = serde_json::to_value(&data)
+                        let json_data = serde_json::to_value(&data)
                             .map_err(|e| format!("Failed to serialize handler result: {}", e))?;
 
-                        if let Some(hooks) = hooks {
-                            json_data = hooks
-                                .run_post_dispatch(matches, ctx, json_data)
-                                .map_err(|e| format!("Hook error: {}", e))?;
-                        }
-
-                        let render_ctx = RenderContext::new(
-                            ctx.output_mode,
-                            get_terminal_width(),
-                            &theme,
-                            &json_data,
-                        );
-
-                        let output = render_with_registry(
+                        render_handler_output(
+                            json_data,
+                            matches,
+                            ctx,
+                            hooks,
                             &template,
-                            &json_data,
                             &theme,
-                            ctx.output_mode,
                             &context_registry,
-                            &render_ctx,
                             template_registry.as_deref(),
                         )
-                        .map_err(|e| e.to_string())?;
-                        Ok(DispatchOutput::Text(output))
                     }
                     Err(e) => Err(format!("Error: {}", e)),
                     Ok(Output::Silent) => Ok(DispatchOutput::Silent),
@@ -307,33 +182,19 @@ where
 
                 match result {
                     Ok(Output::Render(data)) => {
-                        let mut json_data = serde_json::to_value(&data)
+                        let json_data = serde_json::to_value(&data)
                             .map_err(|e| format!("Failed to serialize handler result: {}", e))?;
 
-                        if let Some(hooks) = hooks {
-                            json_data = hooks
-                                .run_post_dispatch(matches, ctx, json_data)
-                                .map_err(|e| format!("Hook error: {}", e))?;
-                        }
-
-                        let render_ctx = RenderContext::new(
-                            ctx.output_mode,
-                            get_terminal_width(),
-                            &theme,
-                            &json_data,
-                        );
-
-                        let output = render_with_registry(
+                        render_handler_output(
+                            json_data,
+                            matches,
+                            ctx,
+                            hooks,
                             &template,
-                            &json_data,
                             &theme,
-                            ctx.output_mode,
                             &context_registry,
-                            &render_ctx,
                             template_registry.as_deref(),
                         )
-                        .map_err(|e| e.to_string())?;
-                        Ok(DispatchOutput::Text(output))
                     }
                     Err(e) => Err(format!("Error: {}", e)),
                     Ok(Output::Silent) => Ok(DispatchOutput::Silent),
