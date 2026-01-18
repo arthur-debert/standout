@@ -817,6 +817,164 @@ pub fn render_auto_with_context<T: Serialize>(
     }
 }
 
+/// Auto-dispatches with context injection and template registry support.
+///
+/// This is the most complete rendering function, supporting:
+/// - Auto-dispatch between template rendering and JSON serialization
+/// - Context injection for additional template variables
+/// - Template registry for `{% include %}` directive support
+///
+/// When a template registry is provided, all templates from the registry are loaded
+/// into the MiniJinja environment, enabling `{% include "partial" %}` directives.
+///
+/// # Arguments
+///
+/// * `template` - Template content string (the actual template, not a name)
+/// * `data` - Any serializable data to render or serialize
+/// * `theme` - Theme definitions for the `style` filter
+/// * `mode` - Output mode determining the output format
+/// * `context_registry` - Additional context objects to inject
+/// * `render_context` - Information about the render environment
+/// * `template_registry` - Optional template registry for include support
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use standout::{render_auto_with_registry, Theme, OutputMode, TemplateRegistry};
+/// use standout::context::{RenderContext, ContextRegistry};
+///
+/// // Create registry with main template and partial
+/// let registry = TemplateRegistry::from_embedded_entries(&[
+///     ("_header.jinja", "[title]{{ title }}[/title]"),
+///     ("main.jinja", "{% include '_header' %}\n{{ content }}"),
+/// ]);
+///
+/// let data = json!({"title": "Hello", "content": "World"});
+/// let context_registry = ContextRegistry::new();
+/// let render_ctx = RenderContext::new(OutputMode::Text, None, &theme, &data);
+///
+/// // Get the main template content
+/// let template = registry.get_content("main").unwrap();
+///
+/// // Render with include support
+/// let output = render_auto_with_registry(
+///     &template,
+///     &data,
+///     &theme,
+///     OutputMode::Text,
+///     &context_registry,
+///     &render_ctx,
+///     Some(&registry),
+/// ).unwrap();
+/// // Output: "Hello\nWorld"
+/// ```
+pub fn render_auto_with_registry<T: Serialize>(
+    template: &str,
+    data: &T,
+    theme: &Theme,
+    mode: OutputMode,
+    context_registry: &ContextRegistry,
+    render_context: &RenderContext,
+    template_registry: Option<&super::registry::TemplateRegistry>,
+) -> Result<String, Error> {
+    if mode.is_structured() {
+        match mode {
+            OutputMode::Json => serde_json::to_string_pretty(data)
+                .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())),
+            OutputMode::Yaml => serde_yaml::to_string(data)
+                .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())),
+            OutputMode::Xml => quick_xml::se::to_string(data)
+                .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())),
+            OutputMode::Csv => {
+                let value = serde_json::to_value(data).map_err(|e| {
+                    Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
+                })?;
+                let (headers, rows) = crate::util::flatten_json_for_csv(&value);
+
+                let mut wtr = csv::Writer::from_writer(Vec::new());
+                wtr.write_record(&headers).map_err(|e| {
+                    Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
+                })?;
+                for row in rows {
+                    wtr.write_record(&row).map_err(|e| {
+                        Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
+                    })?;
+                }
+                let bytes = wtr.into_inner().map_err(|e| {
+                    Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
+                })?;
+                String::from_utf8(bytes)
+                    .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string()))
+            }
+            _ => unreachable!("is_structured() returned true for non-structured mode"),
+        }
+    } else {
+        render_with_context_and_registry(
+            template,
+            data,
+            theme,
+            mode,
+            context_registry,
+            render_context,
+            template_registry,
+        )
+    }
+}
+
+/// Renders a template with context injection and template registry support.
+///
+/// Like [`render_with_context`], but also accepts an optional template registry
+/// to enable `{% include %}` directives in templates.
+///
+/// When a registry is provided, all templates from the registry are loaded into
+/// the MiniJinja environment before rendering, allowing templates to include
+/// other templates by name.
+fn render_with_context_and_registry<T: Serialize>(
+    template: &str,
+    data: &T,
+    theme: &Theme,
+    mode: OutputMode,
+    context_registry: &ContextRegistry,
+    render_context: &RenderContext,
+    template_registry: Option<&super::registry::TemplateRegistry>,
+) -> Result<String, Error> {
+    let color_mode = detect_color_mode();
+    let styles = theme.resolve_styles(Some(color_mode));
+
+    // Validate style aliases before rendering
+    styles
+        .validate()
+        .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string()))?;
+
+    let mut env = Environment::new();
+    register_filters(&mut env);
+
+    // Load all templates from registry if provided (enables {% include %})
+    if let Some(registry) = template_registry {
+        for name in registry.names() {
+            if let Ok(content) = registry.get_content(name) {
+                env.add_template_owned(name.to_string(), content)?;
+            }
+        }
+    }
+
+    // Add the inline template (may override a registry template with same name)
+    env.add_template_owned("_inline".to_string(), template.to_string())?;
+    let tmpl = env.get_template("_inline")?;
+
+    // Build the combined context: data + injected context
+    // Data fields take precedence over context fields
+    let combined = build_combined_context(data, context_registry, render_context)?;
+
+    // Pass 1: MiniJinja template rendering
+    let minijinja_output = tmpl.render(&combined)?;
+
+    // Pass 2: BBParser style tag processing
+    let final_output = apply_style_tags(&minijinja_output, &styles, mode);
+
+    Ok(final_output)
+}
+
 /// Builds a combined context from data and injected context.
 ///
 /// Data fields take precedence over context fields.

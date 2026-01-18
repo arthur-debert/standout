@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **LocalApp now supports `{% include %}` directives** - Template includes now work correctly in LocalApp when a template registry is configured via `.templates()`. Previously, inline templates in LocalApp could not resolve `{% include %}` directives because the MiniJinja environment was created with only the single inline template. Now, when a template registry is provided, all templates from the registry are loaded into the environment, enabling full template composition.
+
+  **Example:**
+  ```rust
+  use standout::cli::{LocalApp, Output};
+  use standout::embed_templates;
+
+  LocalApp::builder()
+      .templates(embed_templates!("src/templates"))  // Contains _header.jinja
+      .command("show", |_m, _ctx| {
+          Ok(Output::Render(json!({"title": "Hello"})))
+      }, "{% include '_header' %}\n{{ content }}")  // Now works!
+      .build()?
+      .run(cmd, args);
+  ```
+
+### Added
+
+- **`render_auto_with_registry` function** - New rendering function that accepts an optional `TemplateRegistry` parameter for include support. This is the most complete rendering function, supporting auto-dispatch, context injection, and template includes.
+
 ## [1.1.0] - 2026-01-18
 
 ### Added

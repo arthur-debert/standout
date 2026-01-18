@@ -40,6 +40,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use clap::ArgMatches;
 use serde::Serialize;
@@ -47,7 +48,7 @@ use serde::Serialize;
 use crate::context::{ContextRegistry, RenderContext};
 
 use crate::TemplateRegistry;
-use crate::{render_auto_with_context, OutputMode, Theme};
+use crate::{render_auto_with_registry, OutputMode, Theme};
 
 use super::app::get_terminal_width;
 
@@ -64,6 +65,7 @@ trait LocalCommandRecipe {
         template: &str,
         context_registry: &ContextRegistry,
         theme: &Theme,
+        template_registry: Option<Arc<TemplateRegistry>>,
     ) -> LocalDispatchFn;
 }
 
@@ -100,6 +102,7 @@ where
         template: &str,
         context_registry: &ContextRegistry,
         theme: &Theme,
+        template_registry: Option<Arc<TemplateRegistry>>,
     ) -> LocalDispatchFn {
         let mut handler = LocalFnHandler::new(self.handler);
         let template = template.to_string();
@@ -128,13 +131,14 @@ where
                             &json_data,
                         );
 
-                        let output = render_auto_with_context(
+                        let output = render_auto_with_registry(
                             &template,
                             &json_data,
                             &theme,
                             ctx.output_mode,
                             &context_registry,
                             &render_ctx,
+                            template_registry.as_deref(),
                         )
                         .map_err(|e| e.to_string())?;
                         Ok(DispatchOutput::Text(output))
@@ -183,6 +187,7 @@ where
         template: &str,
         context_registry: &ContextRegistry,
         theme: &Theme,
+        template_registry: Option<Arc<TemplateRegistry>>,
     ) -> LocalDispatchFn {
         let template = template.to_string();
         let context_registry = context_registry.clone();
@@ -210,13 +215,14 @@ where
                             &json_data,
                         );
 
-                        let output = render_auto_with_context(
+                        let output = render_auto_with_registry(
                             &template,
                             &json_data,
                             &theme,
                             ctx.output_mode,
                             &context_registry,
                             &render_ctx,
+                            template_registry.as_deref(),
                         )
                         .map_err(|e| e.to_string())?;
                         Ok(DispatchOutput::Text(output))
@@ -472,7 +478,11 @@ impl LocalAppBuilder {
         String::new()
     }
 
-    fn ensure_commands_finalized(&self, theme: &Theme) {
+    fn ensure_commands_finalized(
+        &self,
+        theme: &Theme,
+        template_registry: Option<Arc<TemplateRegistry>>,
+    ) {
         if self.finalized_commands.borrow().is_some() {
             return;
         }
@@ -484,10 +494,12 @@ impl LocalAppBuilder {
 
         // Drain the pending commands (take ownership)
         for (path, pending_cmd) in pending.drain() {
-            let dispatch =
-                pending_cmd
-                    .recipe
-                    .create_dispatch(&pending_cmd.template, context_registry, theme);
+            let dispatch = pending_cmd.recipe.create_dispatch(
+                &pending_cmd.template,
+                context_registry,
+                theme,
+                template_registry.clone(),
+            );
             commands.insert(path, dispatch);
         }
 
@@ -519,7 +531,8 @@ impl LocalAppBuilder {
         // Finalize commands before building
         // Use the resolved theme (failed previously because self.theme was taken)
         let effective_theme = theme.clone().unwrap_or_default();
-        self.ensure_commands_finalized(&effective_theme);
+        let template_registry = self.template_registry.take().map(Arc::new);
+        self.ensure_commands_finalized(&effective_theme, template_registry);
 
         Ok(LocalApp {
             // registry: self.registry,
@@ -612,5 +625,66 @@ mod tests {
 
         assert!(builder.has_command("add"));
         assert!(builder.has_command("list"));
+    }
+
+    #[test]
+    fn test_local_app_template_includes() {
+        use crate::embedded::{EmbeddedSource, TemplateResource};
+        use clap::Command;
+
+        // Create an EmbeddedTemplates source (simulating embed_templates! output)
+        static ENTRIES: &[(&str, &str)] = &[("_header.jinja", "=== {{ title }} ===")];
+        let embedded: crate::EmbeddedTemplates =
+            EmbeddedSource::<TemplateResource>::new(ENTRIES, "/nonexistent");
+
+        // Create a LocalApp with template registry and a command using include
+        let mut app = LocalAppBuilder::new()
+            .templates(embedded)
+            .command(
+                "show",
+                |_m, _ctx| {
+                    Ok(Output::Render(
+                        json!({"title": "Hello", "content": "World"}),
+                    ))
+                },
+                "{% include '_header' %}\n{{ content }}",
+            )
+            .build()
+            .unwrap();
+
+        let cmd = Command::new("test").subcommand(Command::new("show"));
+
+        let result = app.dispatch_from(cmd, ["test", "show"]);
+        assert!(result.is_handled());
+
+        let output = result.output().unwrap();
+        // The include should have been resolved
+        assert!(
+            output.contains("=== Hello ==="),
+            "Expected include to be resolved, got: {}",
+            output
+        );
+        assert!(output.contains("World"));
+    }
+
+    #[test]
+    fn test_local_app_without_registry_still_works() {
+        use clap::Command;
+
+        // LocalApp without a template registry should still work with inline templates
+        let mut app = LocalAppBuilder::new()
+            .command(
+                "greet",
+                |_m, _ctx| Ok(Output::Render(json!({"name": "Alice"}))),
+                "Hello, {{ name }}!",
+            )
+            .build()
+            .unwrap();
+
+        let cmd = Command::new("test").subcommand(Command::new("greet"));
+
+        let result = app.dispatch_from(cmd, ["test", "greet"]);
+        assert!(result.is_handled());
+        assert_eq!(result.output(), Some("Hello, Alice!"));
     }
 }
