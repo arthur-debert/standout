@@ -1,7 +1,7 @@
 #![cfg(feature = "clap")]
 
 use clap::Command;
-use insta::assert_snapshot;
+use insta::{assert_json_snapshot, assert_snapshot};
 use serde_json::json;
 use standout::cli::{App, Output};
 use standout::OutputMode;
@@ -55,12 +55,10 @@ fn test_snapshots_json_output() {
     let result = app.dispatch(matches, OutputMode::Json);
     let output = result.output().unwrap();
 
-    // Verify structured output via snapshot
-    // Sort keys to ensure stable snapshots if serde order varies?
-    // Usually serde_json preserves order of insertion or alphabetical?
-    // `json!` macro preserves order. `serde_json::to_string_pretty` might reorder?
-    // Let's snapshot the raw string.
-    assert_snapshot!("json_list_output", output);
+    // Use assert_json_snapshot for semantic comparison
+    // This normalizes key ordering, preventing spurious failures across platforms
+    let json_value: serde_json::Value = serde_json::from_str(output).unwrap();
+    assert_json_snapshot!("json_list_output", json_value);
 }
 
 #[test]
@@ -82,21 +80,7 @@ fn test_snapshots_error_handling() {
 
     let result = app.dispatch(matches, OutputMode::Term);
 
-    // Result should be handled (Result::Handled) but containing error text?
-    // Wait, App::dispatch returns RunResult.
-    // If handler returns Err, App usually converts it to string error message?
-    // Let's check `execution.rs`.
-    // It calls `handler`. If Err, it converts to `Err(String)`.
-    // Then dispatch catches it?
-    // Ah, `dispatch` returns `RunResult::Handled(output)`.
-    // If handler returns Err, `dispatch` might return `RunResult` containing the error string?
-    // Actually `CommandRecipe::create_dispatch` returns `Result<DispatchOutput, String>`.
-    // `dispatch` calls `recipe.dispatch()`.
-    // If it returns Err(msg), `dispatch` prints it (if run()) or returns it?
-    // `dispatch` implementation:
-    // match recipe.dispatch(...) { Ok(output) => RunResult::Handled(output), Err(msg) => RunResult::Handled(format!("Error: {}", msg)) }
-    // So output should contain "Error: ...".
-
+    // Handler errors are converted to "Error: {message}" in RunResult::Handled
     let output = result.output().unwrap();
     assert_snapshot!("error_output", output);
 }
