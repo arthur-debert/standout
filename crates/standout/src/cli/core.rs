@@ -538,4 +538,166 @@ mod tests {
             .unwrap();
         assert_eq!(result, "Hello, Alice!");
     }
+
+    #[test]
+    fn test_render_inline_yaml_mode() {
+        let core = AppCore::new();
+        let data = serde_json::json!({"name": "test", "count": 42});
+
+        let result = core
+            .render_inline("ignored", &data, OutputMode::Yaml)
+            .unwrap();
+        assert!(result.contains("name: test"));
+        assert!(result.contains("count: 42"));
+    }
+
+    #[test]
+    fn test_render_inline_xml_mode() {
+        use serde::Serialize;
+
+        #[derive(Serialize)]
+        struct Data {
+            name: String,
+            count: i32,
+        }
+
+        let core = AppCore::new();
+        let data = Data {
+            name: "test".to_string(),
+            count: 42,
+        };
+
+        let result = core
+            .render_inline("ignored", &data, OutputMode::Xml)
+            .unwrap();
+        assert!(result.contains("<name>test</name>"));
+        assert!(result.contains("<count>42</count>"));
+    }
+
+    #[test]
+    fn test_render_inline_csv_mode() {
+        let core = AppCore::new();
+        let data = serde_json::json!({"name": "test", "count": 42});
+
+        let result = core
+            .render_inline("ignored", &data, OutputMode::Csv)
+            .unwrap();
+        // CSV should have headers and values
+        assert!(result.contains("name"));
+        assert!(result.contains("count"));
+        assert!(result.contains("test"));
+        assert!(result.contains("42"));
+    }
+
+    #[test]
+    fn test_render_inline_with_include() {
+        use crate::TemplateRegistry;
+
+        // Create a template registry with a partial
+        let mut registry = TemplateRegistry::new();
+        registry.add_inline("_header.j2", "=== {{ title }} ===");
+
+        let mut core = AppCore::new();
+        core.template_registry = Some(Arc::new(registry));
+
+        let data = serde_json::json!({"title": "My Title", "body": "Content here"});
+
+        // Template that includes the header partial
+        let template = r#"{% include "_header.j2" %}
+{{ body }}"#;
+
+        let result = core
+            .render_inline(template, &data, OutputMode::Text)
+            .unwrap();
+        assert!(result.contains("=== My Title ==="));
+        assert!(result.contains("Content here"));
+    }
+
+    #[test]
+    fn test_render_with_template_registry() {
+        use crate::TemplateRegistry;
+
+        // Create a template registry with main template and partial
+        let mut registry = TemplateRegistry::new();
+        // Note: include inherits loop context, so we use item.name/item.value
+        registry.add_inline("_item.j2", "- {{ item.name }}: {{ item.value }}");
+        registry.add_inline(
+            "list.j2",
+            r#"Items:
+{% for item in items %}{% include "_item.j2" %}
+{% endfor %}"#,
+        );
+
+        let mut core = AppCore::new();
+        core.template_registry = Some(Arc::new(registry));
+
+        let data = serde_json::json!({
+            "items": [
+                {"name": "foo", "value": 1},
+                {"name": "bar", "value": 2}
+            ]
+        });
+
+        let result = core.render("list.j2", &data, OutputMode::Text).unwrap();
+        assert!(result.contains("Items:"));
+        assert!(result.contains("- foo: 1"));
+        assert!(result.contains("- bar: 2"));
+    }
+
+    #[test]
+    fn test_theme_accessor() {
+        let mut core = AppCore::new();
+        assert!(core.theme().is_none());
+
+        core.theme = Some(Theme::default());
+        assert!(core.theme().is_some());
+    }
+
+    #[test]
+    fn test_theme_names_empty_without_registry() {
+        let core = AppCore::new();
+        assert!(core.theme_names().is_empty());
+    }
+
+    #[test]
+    fn test_template_names_empty_without_registry() {
+        let core = AppCore::new();
+        assert_eq!(core.template_names().count(), 0);
+    }
+
+    #[test]
+    fn test_template_names_with_registry() {
+        use crate::TemplateRegistry;
+
+        let mut registry = TemplateRegistry::new();
+        registry.add_inline("foo.j2", "foo");
+        registry.add_inline("bar.j2", "bar");
+
+        let mut core = AppCore::new();
+        core.template_registry = Some(Arc::new(registry));
+
+        let names: Vec<_> = core.template_names().collect();
+        assert_eq!(names.len(), 2);
+        assert!(names.contains(&"foo.j2"));
+        assert!(names.contains(&"bar.j2"));
+    }
+
+    #[test]
+    fn test_get_hooks() {
+        let mut core = AppCore::new();
+        assert!(core.get_hooks("list").is_none());
+
+        core.command_hooks.insert("list".to_string(), Hooks::new());
+        assert!(core.get_hooks("list").is_some());
+        assert!(core.get_hooks("other").is_none());
+    }
+
+    #[test]
+    fn test_default_command() {
+        let mut core = AppCore::new();
+        assert!(core.default_command().is_none());
+
+        core.default_command = Some("list".to_string());
+        assert_eq!(core.default_command(), Some("list"));
+    }
 }
