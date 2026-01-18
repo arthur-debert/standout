@@ -98,31 +98,24 @@
 mod dispatch;
 mod handler;
 mod hooks;
-mod output;
 mod render;
-mod serialize;
 
-// Re-export core types
+// Re-export command routing utilities
 pub use dispatch::{
     extract_command_path, get_deepest_matches, has_subcommand, insert_default_command,
     path_to_string, string_to_path,
 };
 
+// Re-export handler types
 pub use handler::{
     CommandContext, FnHandler, Handler, HandlerResult, LocalFnHandler, LocalHandler, Output,
     RunResult,
 };
 
+// Re-export hook types
 pub use hooks::{
     HookError, HookPhase, Hooks, PostDispatchFn, PostOutputFn, PreDispatchFn, RenderedOutput,
 };
 
-pub use output::{OutputDestination, OutputMode, TextMode};
-
-pub use render::{
-    from_fn, from_fn_mut, identity_render, json_render, LocalRenderFn, RenderError, RenderFn,
-};
-
-pub use serialize::{
-    serialize_csv, serialize_structured, to_json, to_xml, to_yaml, SerializeError,
-};
+// Re-export render abstraction
+pub use render::{from_fn, from_fn_mut, LocalRenderFn, RenderError, RenderFn};

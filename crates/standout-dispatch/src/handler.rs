@@ -28,17 +28,20 @@
 //! - [`Handler`]: Trait for thread-safe command handlers (`Send + Sync`, `&self`)
 //! - [`LocalHandler`]: Trait for local command handlers (no `Send + Sync`, `&mut self`)
 
-use crate::OutputMode;
 use clap::ArgMatches;
 use serde::Serialize;
 
 /// Context passed to command handlers.
 ///
-/// Provides information about the execution environment.
-#[derive(Debug, Clone)]
+/// Provides information about the execution environment. Note that output format
+/// is deliberately **not** included here - format decisions are made by the
+/// render handler, not by logic handlers.
+///
+/// If handlers need format-aware behavior (e.g., skip expensive formatting for
+/// JSON output), the consuming framework can extend this context or pass format
+/// information through other means.
+#[derive(Debug, Clone, Default)]
 pub struct CommandContext {
-    /// The output mode for rendering (term, text, json, etc.)
-    pub output_mode: OutputMode,
     /// The command path being executed (e.g., ["config", "get"])
     pub command_path: Vec<String>,
 }
@@ -246,11 +249,15 @@ mod tests {
     #[test]
     fn test_command_context_creation() {
         let ctx = CommandContext {
-            output_mode: OutputMode::Json,
-            command_path: vec!["test".into()],
+            command_path: vec!["config".into(), "get".into()],
         };
-        assert!(ctx.output_mode.is_structured());
-        assert_eq!(ctx.command_path.len(), 1);
+        assert_eq!(ctx.command_path, vec!["config", "get"]);
+    }
+
+    #[test]
+    fn test_command_context_default() {
+        let ctx = CommandContext::default();
+        assert!(ctx.command_path.is_empty());
     }
 
     #[test]
@@ -326,10 +333,7 @@ mod tests {
             Ok(Output::Render(json!({"status": "ok"})))
         });
 
-        let ctx = CommandContext {
-            output_mode: OutputMode::Auto,
-            command_path: vec![],
-        };
+        let ctx = CommandContext::default();
         let matches = clap::Command::new("test").get_matches_from(vec!["test"]);
 
         let result = handler.handle(&matches, &ctx);
@@ -345,10 +349,7 @@ mod tests {
             Ok(Output::Render(counter))
         });
 
-        let ctx = CommandContext {
-            output_mode: OutputMode::Auto,
-            command_path: vec![],
-        };
+        let ctx = CommandContext::default();
         let matches = clap::Command::new("test").get_matches_from(vec!["test"]);
 
         let _ = handler.handle(&matches, &ctx);

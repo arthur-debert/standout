@@ -284,11 +284,9 @@ impl fmt::Debug for Hooks {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::OutputMode;
 
     fn test_context() -> CommandContext {
         CommandContext {
-            output_mode: OutputMode::Text,
             command_path: vec!["test".into()],
         }
     }
