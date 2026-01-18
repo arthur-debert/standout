@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **New `standout-render` crate** - Extracted the rendering layer into a standalone crate for users who need rich terminal output without CLI framework features.
+
+  The new crate provides:
+  - Two-pass template rendering (MiniJinja + BBCode-style styling)
+  - Adaptive themes with light/dark mode support
+  - Output modes (Auto, Term, Text, JSON, YAML, CSV, XML)
+  - Tabular formatting with Unicode support
+  - File-based resources with hot-reload in dev, embedded in release
+
+  **Usage:**
+  ```rust
+  // For render-only use cases (no CLI framework)
+  use standout_render::{render, Theme};
+
+  // Full framework users continue using standout (unchanged API)
+  use standout::{render, Theme, cli::App};
+  ```
+
+  The main `standout` crate re-exports everything from `standout-render`, so existing code continues to work without changes.
+
 ### Changed
 
 - **BREAKING: `App` is now generic over `HandlerMode`** - `App` and `LocalApp` have been unified into a single generic type `App<M: HandlerMode>`. `LocalApp` is now a type alias for `App<Local>`.

@@ -1,7 +1,7 @@
 //! Error types for setup operations.
 
-use crate::rendering::template::registry::RegistryError;
 use minijinja::Error as JinjaError;
+use standout_render::RegistryError;
 
 /// Error type for setup operations.
 #[derive(Debug)]

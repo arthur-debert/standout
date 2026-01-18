@@ -16,26 +16,23 @@
 //! # Example
 //!
 //! ```rust,ignore
-//! use standout::{embed_templates, embed_styles};
-//! use standout::cli::App;
+//! use standout_render::{EmbeddedSource, TemplateResource, TemplateRegistry};
 //!
-//! let app = App::builder()
-//!     .templates(embed_templates!("src/templates"))
-//!     .styles(embed_styles!("src/styles"))
-//!     .build()?;
+//! // Create from macro output (typically done by embed_templates!/embed_styles!)
+//! static ENTRIES: &[(&str, &str)] = &[("list.jinja", "{{ items }}")];
+//! let source: EmbeddedSource<TemplateResource> = EmbeddedSource::new(ENTRIES, "src/templates");
 //!
-//! // In debug: reads from "src/templates" if it exists
-//! // In release: uses embedded content
-//! let output = app.render("list", &data, OutputMode::Term)?;
+//! // Convert to registry
+//! let registry: TemplateRegistry = source.into();
 //! ```
 
 use std::marker::PhantomData;
 use std::path::Path;
 
 use crate::file_loader::{build_embedded_registry, walk_dir};
-use crate::rendering::style::{StylesheetRegistry, STYLESHEET_EXTENSIONS};
-use crate::rendering::template::{walk_template_dir, TemplateRegistry};
-use crate::rendering::theme::Theme;
+use crate::style::{StylesheetRegistry, STYLESHEET_EXTENSIONS};
+use crate::template::{walk_template_dir, TemplateRegistry};
+use crate::theme::Theme;
 
 /// Marker type for template resources.
 #[derive(Debug, Clone, Copy)]

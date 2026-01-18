@@ -216,39 +216,37 @@
 //!     .run(cmd, std::env::args());
 //! ```
 
-// Internal modules
-mod embedded;
-pub mod file_loader;
-mod rendering;
+// Internal modules (standout-specific)
 mod setup;
-mod util;
 
 // Public submodules
 pub mod topics;
 
-// Re-export rendering submodules as public
-pub use rendering::context;
-pub use rendering::style;
-pub use rendering::tabular;
+// Re-export everything from standout-render
+// This provides the rendering layer without CLI knowledge
+pub use standout_render::context;
+pub use standout_render::file_loader;
+pub use standout_render::style;
+pub use standout_render::tabular;
 
 // Re-export minijinja::Error for convenience
 pub use minijinja::Error;
 
-// Style module exports (including former stylesheet exports)
-pub use rendering::style::{
+// Style module exports (from standout-render)
+pub use standout_render::{
     parse_css, parse_stylesheet, ColorDef, StyleAttributes, StyleDefinition, StyleValidationError,
     StyleValue, Styles, StylesheetError, StylesheetRegistry, ThemeVariants,
     DEFAULT_MISSING_STYLE_INDICATOR, STYLESHEET_EXTENSIONS,
 };
 
-// Theme module exports
-pub use rendering::theme::{detect_color_mode, set_theme_detector, ColorMode, Theme};
+// Theme module exports (from standout-render)
+pub use standout_render::{detect_color_mode, set_theme_detector, ColorMode, Theme};
 
-// Output module exports
-pub use rendering::output::{write_binary_output, write_output, OutputDestination, OutputMode};
+// Output module exports (from standout-render)
+pub use standout_render::{write_binary_output, write_output, OutputDestination, OutputMode};
 
-// Render module exports
-pub use rendering::template::{
+// Render module exports (from standout-render)
+pub use standout_render::{
     render,
     render_auto,
     render_auto_with_context,
@@ -271,20 +269,32 @@ pub use rendering::template::{
 // Re-export BBParser types for template validation
 pub use standout_bbparser::{UnknownTagError, UnknownTagErrors, UnknownTagKind};
 
-// Utility exports
-pub use util::{rgb_to_ansi256, rgb_to_truecolor, truncate_to_width};
+// Utility exports (from standout-render)
+pub use standout_render::{
+    flatten_json_for_csv, rgb_to_ansi256, rgb_to_truecolor, truncate_to_width,
+};
 
-// Embedded source types (for macros)
-pub use embedded::{
+// File loader exports (from standout-render)
+pub use standout_render::{
+    build_embedded_registry, extension_priority, strip_extension, walk_dir, FileRegistry,
+    FileRegistryConfig, LoadError, LoadedEntry, LoadedFile,
+};
+
+// Embedded source types (from standout-render, for macros)
+pub use standout_render::{
     EmbeddedSource, EmbeddedStyles, EmbeddedTemplates, StylesheetResource, TemplateResource,
 };
 
-// Setup error type
+// Setup error type (standout-specific)
 pub use setup::SetupError;
 
 // Macro re-exports (when `macros` feature is enabled)
 #[cfg(feature = "macros")]
 pub use standout_macros::{embed_styles, embed_templates};
+
+// Tabular derive macros (when `macros` feature is enabled)
+#[cfg(feature = "macros")]
+pub use standout_macros::{Tabular, TabularRow};
 
 // CLI integration (when `clap` feature is enabled)
 #[cfg(feature = "clap")]

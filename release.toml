@@ -1,7 +1,7 @@
 # cargo-release configuration for standout workspace
 # See: https://github.com/crate-ci/cargo-release/blob/master/docs/reference.md
 
-# Keep both crates on the same version
+# Keep all crates on the same version
 shared-version = true
 
 # Automatically update dependent crate versions when releasing
