@@ -172,12 +172,18 @@ pub struct ThreadSafe;
 pub struct Local;
 
 impl HandlerMode for ThreadSafe {
-    type DispatchWrapper<F> = Arc<F> where F: ?Sized;
+    type DispatchWrapper<F>
+        = Arc<F>
+    where
+        F: ?Sized;
     const REQUIRES_SEND_SYNC: bool = true;
 }
 
 impl HandlerMode for Local {
-    type DispatchWrapper<F> = Rc<RefCell<F>> where F: ?Sized;
+    type DispatchWrapper<F>
+        = Rc<RefCell<F>>
+    where
+        F: ?Sized;
     const REQUIRES_SEND_SYNC: bool = false;
 }
 

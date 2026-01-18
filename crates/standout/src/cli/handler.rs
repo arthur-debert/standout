@@ -404,7 +404,8 @@ pub trait LocalHandler {
     ///
     /// Unlike [`Handler::handle`], this takes `&mut self`, allowing
     /// direct mutation of handler state.
-    fn handle(&mut self, matches: &ArgMatches, ctx: &CommandContext) -> HandlerResult<Self::Output>;
+    fn handle(&mut self, matches: &ArgMatches, ctx: &CommandContext)
+        -> HandlerResult<Self::Output>;
 }
 
 /// A wrapper that implements LocalHandler for FnMut closures.
@@ -633,11 +634,7 @@ mod tests {
         impl LocalHandler for MutableCounter {
             type Output = u32;
 
-            fn handle(
-                &mut self,
-                _m: &ArgMatches,
-                _ctx: &CommandContext,
-            ) -> HandlerResult<u32> {
+            fn handle(&mut self, _m: &ArgMatches, _ctx: &CommandContext) -> HandlerResult<u32> {
                 self.count += 1;
                 Ok(Output::Render(self.count))
             }

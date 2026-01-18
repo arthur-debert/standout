@@ -51,14 +51,11 @@ use crate::{render_auto_with_context, OutputMode, Theme};
 
 use super::app::get_terminal_width;
 
-use super::dispatch::{
-    DispatchOutput, LocalDispatchFn,
-};
+use super::dispatch::{DispatchOutput, LocalDispatchFn};
 use super::handler::{CommandContext, HandlerResult, LocalFnHandler, LocalHandler, Output};
 use super::hooks::Hooks;
 use super::local_app::LocalApp;
 use crate::setup::SetupError;
-
 
 /// Recipe for creating local dispatch closures.
 trait LocalCommandRecipe {
@@ -487,11 +484,10 @@ impl LocalAppBuilder {
 
         // Drain the pending commands (take ownership)
         for (path, pending_cmd) in pending.drain() {
-            let dispatch = pending_cmd.recipe.create_dispatch(
-                &pending_cmd.template,
-                context_registry,
-                &theme,
-            );
+            let dispatch =
+                pending_cmd
+                    .recipe
+                    .create_dispatch(&pending_cmd.template, context_registry, &theme);
             commands.insert(path, dispatch);
         }
 
@@ -574,11 +570,7 @@ mod tests {
         impl LocalHandler for Counter {
             type Output = u32;
 
-            fn handle(
-                &mut self,
-                _m: &ArgMatches,
-                _ctx: &CommandContext,
-            ) -> HandlerResult<u32> {
+            fn handle(&mut self, _m: &ArgMatches, _ctx: &CommandContext) -> HandlerResult<u32> {
                 self.count += 1;
                 Ok(Output::Render(self.count))
             }
@@ -610,7 +602,11 @@ mod tests {
             )
             .command(
                 "list",
-                move |_m, _ctx| Ok(Output::Render(json!({"items": state_list.borrow().clone()}))),
+                move |_m, _ctx| {
+                    Ok(Output::Render(
+                        json!({"items": state_list.borrow().clone()}),
+                    ))
+                },
                 "",
             );
 

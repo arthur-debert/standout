@@ -1,8 +1,8 @@
 #![cfg(feature = "clap")]
-use standout::cli::{LocalApp, Output};
-use standout::Theme;
 use clap::Command;
 use console::Style;
+use standout::cli::{LocalApp, Output};
+use standout::Theme;
 
 #[test]
 fn test_theme_preservation_bug() {
@@ -25,15 +25,19 @@ fn test_theme_preservation_bug() {
     // 3. Run to string (verify output mode handling too)
     // We register the subcommand "test" so clap parses it correctly.
     let cmd = Command::new("app").subcommand(Command::new("test"));
-    
+
     // We simulate passing "--output=term" to force terminal output with colors
     let result = app.run_to_string(cmd, ["app", "--output=term", "test"]);
-    
+
     match result {
         standout::cli::RunResult::Handled(output) => {
             // 4. Verification: If theme works, output should contain ANSI red code: \x1b[31m
-            assert!(output.contains("\x1b[31m"), "Output should contain Red ANSI code, but got: {:?}", output);
-        },
+            assert!(
+                output.contains("\x1b[31m"),
+                "Output should contain Red ANSI code, but got: {:?}",
+                output
+            );
+        }
         _ => panic!("Expected handled result"),
     }
 }

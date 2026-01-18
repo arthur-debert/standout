@@ -38,7 +38,6 @@ use std::collections::HashMap;
 
 use clap::{Arg, ArgAction, ArgMatches, Command};
 
-
 use crate::OutputMode;
 use crate::Theme;
 
@@ -130,7 +129,16 @@ impl LocalApp {
                     .long(flag)
                     .value_name("MODE")
                     .global(true)
-                    .value_parser(["auto", "term", "text", "term-debug", "json", "yaml", "xml", "csv"])
+                    .value_parser([
+                        "auto",
+                        "term",
+                        "text",
+                        "term-debug",
+                        "json",
+                        "yaml",
+                        "xml",
+                        "csv",
+                    ])
                     .default_value("auto")
                     .help("Output mode: auto, term, text, term-debug, json, yaml, xml, or csv"),
             );
