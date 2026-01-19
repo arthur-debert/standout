@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/standout",
     "crates/standout-bbparser",
+    "crates/standout-dispatch",
     "crates/standout-macros",
     "crates/standout-render",
 ]
