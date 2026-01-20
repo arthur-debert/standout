@@ -7,6 +7,9 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 DOCS_VERSION=""
 OUTPUT_ROOT="public"
 SOURCE_DIR="$PROJECT_DIR"
+BANNER_CSS_REL="assets/version-banner.css"
+BANNER_JS_REL="assets/version-banner.js"
+BANNER_SOURCE_DIR="$PROJECT_DIR/docs/assets"
 
 usage() {
     echo "Usage: $0 <version> [--output <dir>] [--source <dir>]" >&2
@@ -67,6 +70,69 @@ if [[ ! -d "$SOURCE_DIR/docs" ]]; then
     echo "Missing docs directory in $SOURCE_DIR" >&2
     exit 1
 fi
+
+if [[ ! -f "$BANNER_SOURCE_DIR/version-banner.css" || ! -f "$BANNER_SOURCE_DIR/version-banner.js" ]]; then
+    echo "Missing version banner assets in $BANNER_SOURCE_DIR" >&2
+    exit 1
+fi
+
+mkdir -p "$SOURCE_DIR/docs/assets"
+cp "$BANNER_SOURCE_DIR/version-banner.css" "$SOURCE_DIR/docs/assets/version-banner.css"
+cp "$BANNER_SOURCE_DIR/version-banner.js" "$SOURCE_DIR/docs/assets/version-banner.js"
+
+python3 - "$SOURCE_DIR/book.toml" "$BANNER_CSS_REL" "$BANNER_JS_REL" <<'PY'
+import sys
+from pathlib import Path
+
+book_toml = Path(sys.argv[1])
+css_rel = sys.argv[2]
+js_rel = sys.argv[3]
+
+text = book_toml.read_text()
+has_css = "additional-css" in text
+has_js = "additional-js" in text
+
+if has_css and has_js:
+    raise SystemExit(0)
+
+lines = text.splitlines()
+out = []
+inserted = False
+in_output = False
+
+for line in lines:
+    stripped = line.strip()
+    if stripped == "[output.html]":
+        in_output = True
+        out.append(line)
+        continue
+    if in_output and stripped.startswith("[") and stripped != "[output.html]":
+        if not inserted:
+            if not has_css:
+                out.append(f'additional-css = ["{css_rel}"]')
+            if not has_js:
+                out.append(f'additional-js = ["{js_rel}"]')
+            inserted = True
+        in_output = False
+    out.append(line)
+
+if in_output and not inserted:
+    if not has_css:
+        out.append(f'additional-css = ["{css_rel}"]')
+    if not has_js:
+        out.append(f'additional-js = ["{js_rel}"]')
+    inserted = True
+
+if not inserted:
+    out.append("")
+    out.append("[output.html]")
+    if not has_css:
+        out.append(f'additional-css = ["{css_rel}"]')
+    if not has_js:
+        out.append(f'additional-js = ["{js_rel}"]')
+
+book_toml.write_text("\n".join(out) + "\n")
+PY
 
 mkdir -p "$OUTPUT_ROOT"
 
