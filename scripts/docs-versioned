@@ -9,7 +9,7 @@ OUTPUT_ROOT="public"
 SOURCE_DIR="$PROJECT_DIR"
 BANNER_CSS_REL="assets/version-banner.css"
 BANNER_JS_REL="assets/version-banner.js"
-BANNER_SOURCE_DIR="$PROJECT_DIR/docs/assets"
+BANNER_SOURCE_DIR="$PROJECT_DIR/assets"
 
 usage() {
     echo "Usage: $0 <version> [--output <dir>] [--source <dir>]" >&2
@@ -77,9 +77,9 @@ if [[ ! -f "$BANNER_SOURCE_DIR/version-banner.css" || ! -f "$BANNER_SOURCE_DIR/v
 fi
 
 if [[ "$SOURCE_DIR" != "$PROJECT_DIR" ]]; then
-    mkdir -p "$SOURCE_DIR/docs/assets"
-    cp "$BANNER_SOURCE_DIR/version-banner.css" "$SOURCE_DIR/docs/assets/version-banner.css"
-    cp "$BANNER_SOURCE_DIR/version-banner.js" "$SOURCE_DIR/docs/assets/version-banner.js"
+    mkdir -p "$SOURCE_DIR/assets"
+    cp "$BANNER_SOURCE_DIR/version-banner.css" "$SOURCE_DIR/assets/version-banner.css"
+    cp "$BANNER_SOURCE_DIR/version-banner.js" "$SOURCE_DIR/assets/version-banner.js"
 fi
 
 python3 - "$SOURCE_DIR/book.toml" "$BANNER_CSS_REL" "$BANNER_JS_REL" <<'PY'
