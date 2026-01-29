@@ -1,6 +1,11 @@
 #!/bin/bash
 set -e
 
+# CI checks script - used by both pre-commit hook and GitHub Actions.
+# Pre-commit hook: .git/hooks/pre-commit -> symlink to this file
+# GitHub Actions: .github/workflows/ci.yml calls this script
+# Rust version: pinned in rust-toolchain.toml (respected by both local rustup and CI)
+
 echo "=== CI Checks ==="
 
 echo "[1/5] cargo check (all packages)"

@@ -17,9 +17,8 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@1.93.0
-        with:
-          components: rustfmt, clippy
+        uses: dtolnay/rust-toolchain@stable
+        # Version and components are read from rust-toolchain.toml
 
       - name: Cache cargo registry
         uses: actions/cache@v4
