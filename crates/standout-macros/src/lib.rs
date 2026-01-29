@@ -15,6 +15,7 @@
 //! - [`Dispatch`] - Generate dispatch configuration from clap `Subcommand` enums
 //! - [`Tabular`] - Generate `TabularSpec` from struct field annotations
 //! - [`TabularRow`] - Generate optimized row extraction without JSON serialization
+//! - [`Seekable`] - Generate query-enabled accessor functions for Seeker
 //!
 //! # Design Philosophy
 //!
@@ -39,6 +40,7 @@
 
 mod dispatch;
 mod embed;
+mod seeker;
 mod tabular;
 
 use proc_macro::TokenStream;
@@ -272,6 +274,123 @@ pub fn tabular_derive(input: TokenStream) -> TokenStream {
 pub fn tabular_row_derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     tabular::tabular_row_derive_impl(input)
+        .unwrap_or_else(|e| e.to_compile_error())
+        .into()
+}
+
+/// Derives the `Seekable` trait for query-enabled structs.
+///
+/// This macro generates an implementation of the `Seekable` trait from
+/// `standout-seeker`, enabling type-safe field access for query operations.
+///
+/// # Field Attributes
+///
+/// | Attribute | Description |
+/// |-----------|-------------|
+/// | `String` | String field (supports Eq, Ne, Contains, StartsWith, EndsWith, Regex) |
+/// | `Number` | Numeric field (supports Eq, Ne, Gt, Gte, Lt, Lte) |
+/// | `Timestamp` | Timestamp field (supports Eq, Ne, Before, After, Gt, Gte, Lt, Lte) |
+/// | `Enum` | Enum field (supports Eq, Ne, In) - requires `SeekerEnum` impl |
+/// | `Bool` | Boolean field (supports Eq, Ne, Is) |
+/// | `skip` | Exclude this field from queries |
+/// | `rename = "..."` | Use a custom name for queries |
+///
+/// # Generated Code
+///
+/// The macro generates:
+///
+/// 1. Field name constants (e.g., `Task::NAME`, `Task::PRIORITY`)
+/// 2. Implementation of `Seekable::seeker_field_value()`
+///
+/// # Example
+///
+/// ```ignore
+/// use standout_macros::Seekable;
+/// use standout_seeker::{Query, Seekable};
+///
+/// #[derive(Seekable)]
+/// struct Task {
+/// struct Task {
+///     #[seek(String)]
+///     name: String,
+///
+///     #[seek(Number)]
+///     priority: u8,
+///
+///     #[seek(Bool)]
+///     done: bool,
+///
+///     #[seek(skip)]
+///     internal_id: u64,
+/// }
+///
+/// let tasks = vec![
+///     Task { name: "Write docs".into(), priority: 3, done: false, internal_id: 1 },
+///     Task { name: "Fix bug".into(), priority: 5, done: true, internal_id: 2 },
+/// ];
+///
+/// let query = Query::new()
+///     .and_gte(Task::PRIORITY, 3u8)
+///     .not_eq(Task::DONE, true)
+///     .build();
+///
+/// let results = query.filter(&tasks, Task::accessor);
+/// assert_eq!(results.len(), 1);
+/// assert_eq!(results[0].name, "Write docs");
+/// ```
+///
+/// # Enum Fields
+///
+/// For enum fields, implement `SeekerEnum` on your enum type:
+///
+/// ```ignore
+/// use standout_seeker::SeekerEnum;
+///
+/// #[derive(Clone, Copy)]
+/// enum Status { Pending, Active, Done }
+///
+/// impl SeekerEnum for Status {
+///     fn seeker_discriminant(&self) -> u32 {
+///         match self {
+///             Status::Pending => 0,
+///             Status::Active => 1,
+///             Status::Done => 2,
+///         }
+///     }
+/// }
+///
+/// #[derive(Seekable)]
+/// struct Task {
+///     #[seek(Enum)]
+///     status: Status,
+/// }
+/// ```
+///
+/// # Timestamp Fields
+///
+/// For timestamp fields, implement `SeekerTimestamp` on your datetime type:
+///
+/// ```ignore
+/// use standout_seeker::{SeekerTimestamp, Timestamp};
+///
+/// struct MyDateTime(i64);
+///
+/// impl SeekerTimestamp for MyDateTime {
+///     fn seeker_timestamp(&self) -> Timestamp {
+///         Timestamp::from_millis(self.0)
+///     }
+/// }
+///
+/// #[derive(Seekable)]
+/// struct Event {
+///     #[seek(Timestamp)]
+///     created_at: MyDateTime,
+/// }
+/// ```
+#[proc_macro_derive(Seekable, attributes(seek))]
+pub fn seekable_derive(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    seeker::seekable_derive_impl(input)
         .unwrap_or_else(|e| e.to_compile_error())
         .into()
 }

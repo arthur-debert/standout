@@ -671,15 +671,88 @@ proptest! {
 
 ---
 
-## Phase 2: Derive Macros (Future)
+## Phase 2: Derive Macros
 
-**Out of scope for current work.**
+**Status: Implemented**
 
-Will provide:
-- `#[derive(Seekable)]` for structs
-- `#[seek(...)]` field attributes
-- Auto-generated accessor functions
-- Field name constants for type-safe queries
+The `#[derive(Seekable)]` macro generates accessor functions and field constants.
+
+### Field Attributes
+
+| Attribute | Description |
+|-----------|-------------|
+| `#[seek(String)]` | String field (Eq, Ne, Contains, StartsWith, EndsWith, Regex) |
+| `#[seek(Number)]` | Numeric field (Eq, Ne, Gt, Gte, Lt, Lte) |
+| `#[seek(Timestamp)]` | Timestamp field (Eq, Ne, Before, After) - requires `SeekerTimestamp` impl |
+| `#[seek(Enum)]` | Enum field (Eq, Ne, In) - requires `SeekerEnum` impl |
+| `#[seek(Bool)]` | Boolean field (Eq, Ne, Is) |
+| `#[seek(skip)]` | Exclude field from queries |
+| `#[seek(ty = "enum")]` | Alternative syntax for reserved keywords |
+| `rename = "..."` | Custom query field name |
+
+### Generated Code
+
+For each annotated field, the macro generates:
+
+1. **Field constant**: `Task::NAME`, `Task::PRIORITY`, etc. (SCREAMING_SNAKE_CASE)
+2. **Seekable trait impl**: `seeker_field_value()` method
+3. **Accessor function**: `Task::accessor()` for use with `Query::filter()`
+
+### Example
+
+```rust
+use standout_macros::Seekable;
+use standout_seeker::{Query, Seekable, SeekerEnum};
+
+#[derive(Clone, Copy)]
+enum Status { Pending, Active, Done }
+
+impl SeekerEnum for Status {
+    fn seeker_discriminant(&self) -> u32 {
+        match self {
+            Status::Pending => 0,
+            Status::Active => 1,
+            Status::Done => 2,
+        }
+    }
+}
+
+#[derive(Seekable)]
+struct Task {
+    #[seek(String)]
+    name: String,
+
+    #[seek(Number)]
+    priority: u8,
+
+    #[seek(Enum)]
+    status: Status,
+
+    #[seek(Bool)]
+    done: bool,
+
+    #[seek(skip)]
+    internal_id: u64,
+}
+
+// Usage with Query
+let tasks = vec![/* ... */];
+let query = Query::new()
+    .and_gte(Task::PRIORITY, 3u8)
+    .not_eq(Task::DONE, true)
+    .build();
+
+let results = query.filter(&tasks, Task::accessor);
+```
+
+### Helper Traits
+
+For enum and timestamp fields, implement the corresponding traits:
+
+- **`SeekerEnum`**: `fn seeker_discriminant(&self) -> u32`
+- **`SeekerTimestamp`**: `fn seeker_timestamp(&self) -> Timestamp`
+
+Built-in `SeekerTimestamp` implementations exist for `i64` and `u64`.
 
 ---
 
