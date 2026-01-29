@@ -294,5 +294,11 @@ pub use standout_macros::{embed_styles, embed_templates};
 // Tabular derive macros
 pub use standout_macros::{Tabular, TabularRow};
 
+// Seeker query engine (re-export from standout-seeker)
+pub use standout_seeker as seeker;
+
+// Seeker derive macro
+pub use standout_macros::Seekable;
+
 // CLI integration
 pub mod cli;

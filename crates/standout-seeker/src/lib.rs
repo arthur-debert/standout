@@ -80,6 +80,7 @@ mod error;
 mod op;
 mod ordering;
 mod query;
+mod traits;
 mod value;
 
 // Re-export public API
@@ -88,4 +89,5 @@ pub use error::{Result, SeekerError};
 pub use op::Op;
 pub use ordering::{compare_values, Dir, OrderBy};
 pub use query::Query;
+pub use traits::{Seekable, SeekerEnum, SeekerTimestamp};
 pub use value::{Number, Timestamp, Value};
