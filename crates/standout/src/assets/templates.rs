@@ -37,9 +37,16 @@ const LIST_VIEW_TEMPLATE: &str = r#"{% if intro %}
 {% if items | length == 0 %}
 {{ empty_message | default("No items found.") }}
 {% else %}
+{% if tabular_spec %}
+{% set t = tabular(tabular_spec) %}
+{% for item in items %}
+{{ t.row_from(item) }}
+{% endfor %}
+{% else %}
 {% for item in items %}
 {{ item }}
 {% endfor %}
+{% endif %}
 {% endif %}
 {% if ending %}
 

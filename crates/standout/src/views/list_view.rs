@@ -22,6 +22,7 @@
 use serde::Serialize;
 
 use super::{Message, MessageLevel};
+use crate::tabular::TabularSpec;
 
 /// Result type for list view handlers.
 ///
@@ -52,6 +53,10 @@ pub struct ListViewResult<T> {
     /// Applied filters summary (for "filtered by: ...").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filter_summary: Option<String>,
+
+    /// Tabular specification for rendering.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tabular_spec: Option<TabularSpec>,
 }
 
 impl<T> ListViewResult<T> {
@@ -64,6 +69,7 @@ impl<T> ListViewResult<T> {
             messages: Vec::new(),
             total_count: None,
             filter_summary: None,
+            tabular_spec: None,
         }
     }
 
@@ -104,6 +110,7 @@ pub struct ListViewBuilder<T> {
     messages: Vec<Message>,
     total_count: Option<usize>,
     filter_summary: Option<String>,
+    tabular_spec: Option<TabularSpec>,
 }
 
 impl<T> ListViewBuilder<T> {
@@ -116,6 +123,7 @@ impl<T> ListViewBuilder<T> {
             messages: Vec::new(),
             total_count: None,
             filter_summary: None,
+            tabular_spec: None,
         }
     }
 
@@ -175,6 +183,12 @@ impl<T> ListViewBuilder<T> {
         self
     }
 
+    /// Set the tabular specification.
+    pub fn tabular_spec(mut self, spec: TabularSpec) -> Self {
+        self.tabular_spec = Some(spec);
+        self
+    }
+
     /// Build the `ListViewResult`.
     pub fn build(self) -> ListViewResult<T> {
         ListViewResult {
@@ -184,6 +198,7 @@ impl<T> ListViewBuilder<T> {
             messages: self.messages,
             total_count: self.total_count,
             filter_summary: self.filter_summary,
+            tabular_spec: self.tabular_spec,
         }
     }
 }
@@ -308,6 +323,7 @@ mod tests {
         assert!(!json.contains("\"messages\""));
         assert!(!json.contains("\"total_count\""));
         assert!(!json.contains("\"filter_summary\""));
+        assert!(!json.contains("\"tabular_spec\""));
     }
 
     #[test]

@@ -40,6 +40,8 @@
 //! | `nested` | Treat variant as nested subcommand | false |
 //! | `skip` | Skip this variant | false |
 //! | `default` | Use as default command when no subcommand specified | false |
+//! | `list_view` | Enable ListView integration | false |
+//! | `item_type` | Type name for tabular spec injection | None |
 //!
 //! # Generated Code
 //!
@@ -72,6 +74,8 @@ struct VariantAttrs {
     nested: bool,
     skip: bool,
     default: bool,
+    list_view: bool,
+    item_type: Option<String>,
 }
 
 /// Information extracted from a single enum variant
@@ -165,6 +169,20 @@ impl Parse for VariantAttrs {
                 }
                 Meta::Path(p) if p.is_ident("default") => {
                     attrs.default = true;
+                }
+                Meta::Path(p) if p.is_ident("list_view") => {
+                    attrs.list_view = true;
+                }
+                Meta::NameValue(nv) if nv.path.is_ident("item_type") => {
+                    if let Expr::Lit(expr_lit) = &nv.value {
+                        if let syn::Lit::Str(lit_str) = &expr_lit.lit {
+                            attrs.item_type = Some(lit_str.value());
+                        } else {
+                            return Err(Error::new(nv.value.span(), "expected string literal"));
+                        }
+                    } else {
+                        return Err(Error::new(nv.value.span(), "expected string literal"));
+                    }
                 }
                 _ => {
                     return Err(Error::new(
@@ -336,14 +354,49 @@ pub fn dispatch_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                     path
                 });
 
-                let has_config = v.attrs.template.is_some()
+                // If list_view is enabled, default template if not set
+                let mut v_template = v.attrs.template.clone();
+                if v.attrs.list_view && v_template.is_none() {
+                    v_template = Some("standout/list-view".to_string());
+                }
+
+                let has_config = v_template.is_some()
                     || v.attrs.pre_dispatch.is_some()
                     || v.attrs.post_dispatch.is_some()
-                    || v.attrs.post_output.is_some();
+                    || v.attrs.post_output.is_some()
+                    || (v.attrs.list_view && v.attrs.item_type.is_some());
+
+                // Determine the handler expression (original or wrapped)
+                let handler_expr = if v.attrs.list_view {
+                     if let Some(item_type_str) = &v.attrs.item_type {
+                        let item_type_path: syn::Path = syn::parse_str(item_type_str)
+                            .expect("Failed to parse item_type as path");
+                        // Generate wrapper to inject tabular spec
+                        quote! {
+                            |matches, ctx| {
+                                let result = #handler_path(matches, ctx);
+                                result.map(|output| {
+                                    match output {
+                                        ::standout::cli::handler::Output::Render(mut lv) => {
+                                             // Inject tabular spec from the Item type
+                                             lv.tabular_spec = Some(<#item_type_path as ::standout::tabular::Tabular>::tabular_spec());
+                                             ::standout::cli::handler::Output::Render(lv)
+                                        }
+                                        o => o
+                                    }
+                                })
+                            }
+                        }
+                     } else {
+                        quote! { #handler_path }
+                     }
+                } else {
+                    quote! { #handler_path }
+                };
 
                 if has_config {
                     // Use command_with for custom configuration
-                    let template_call = v.attrs.template.as_ref().map(|t| {
+                    let template_call = v_template.as_ref().map(|t| {
                         quote! { __cfg = __cfg.template(#t); }
                     });
                     let pre_dispatch_call = v.attrs.pre_dispatch.as_ref().map(|p| {
@@ -357,7 +410,7 @@ pub fn dispatch_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                     });
 
                     quote! {
-                        let __builder = __builder.command_with(#cmd_name, #handler_path, |mut __cfg| {
+                        let __builder = __builder.command_with(#cmd_name, #handler_expr, |mut __cfg| {
                             #template_call
                             #pre_dispatch_call
                             #post_dispatch_call
@@ -368,7 +421,7 @@ pub fn dispatch_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                 } else {
                     // Simple command registration
                     quote! {
-                        let __builder = __builder.command(#cmd_name, #handler_path);
+                        let __builder = __builder.command(#cmd_name, #handler_expr);
                     }
                 }
             }
