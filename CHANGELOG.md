@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-01-30
+
 ### Added
 
 - **Context Extensions for dependency injection** - Pre-dispatch hooks can now inject state that handlers retrieve, enabling dependency injection without modifying handler signatures.
@@ -649,7 +651,8 @@ let output = render_with_output(template, &data, &theme, OutputMode::Term)?;
   - Command handler system with `dispatch_from` convenience method
   - Archive variant support in clap integration
 
-[Unreleased]: https://github.com/arthur-debert/standout/compare/standout-v3.2.0...HEAD
+[Unreleased]: https://github.com/arthur-debert/standout/compare/standout-v3.3.0...HEAD
+[3.3.0]: https://github.com/arthur-debert/standout/compare/standout-v3.2.0...standout-v3.3.0
 [3.2.0]: https://github.com/arthur-debert/standout/compare/standout-v3.1.0...standout-v3.2.0
 [3.1.0]: https://github.com/arthur-debert/standout/compare/standout-v3.0.0...standout-v3.1.0
 [3.0.0]: https://github.com/arthur-debert/standout/compare/standout-v2.1.0...standout-v3.0.0
