@@ -863,11 +863,7 @@ pub fn render_auto_with_engine(
         let context_map = build_combined_context(data, context_registry, render_context)?;
         
         // Merge into a single Value for the engine
-        let combined_value = serde_json::Value::Object(
-            context_map.into_iter()
-                .map(|(k, v)| (k, serde_json::to_value(v).unwrap_or(serde_json::Value::Null)))
-                .collect()
-        );
+        let combined_value = serde_json::Value::Object(context_map.into_iter().collect());
 
         // Render template
         let template_output = if engine.has_template(template) {
