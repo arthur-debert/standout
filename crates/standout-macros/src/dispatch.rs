@@ -76,6 +76,9 @@ struct VariantAttrs {
     default: bool,
     list_view: bool,
     item_type: Option<String>,
+    pipe_to: Option<String>,
+    pipe_through: Option<String>,
+    pipe_to_clipboard: bool,
 }
 
 /// Information extracted from a single enum variant
@@ -176,13 +179,38 @@ impl Parse for VariantAttrs {
                 Meta::NameValue(nv) if nv.path.is_ident("item_type") => {
                     if let Expr::Lit(expr_lit) = &nv.value {
                         if let syn::Lit::Str(lit_str) = &expr_lit.lit {
-                            attrs.item_type = Some(lit_str.value());
+                             attrs.item_type = Some(lit_str.value());
+                        } else {
+                             return Err(Error::new(nv.value.span(), "expected string literal"));
+                        }
+                    } else {
+                        return Err(Error::new(nv.value.span(), "expected string literal"));
+                    }
+                }
+                Meta::NameValue(nv) if nv.path.is_ident("pipe_to") => {
+                    if let Expr::Lit(expr_lit) = &nv.value {
+                        if let syn::Lit::Str(lit_str) = &expr_lit.lit {
+                            attrs.pipe_to = Some(lit_str.value());
                         } else {
                             return Err(Error::new(nv.value.span(), "expected string literal"));
                         }
                     } else {
                         return Err(Error::new(nv.value.span(), "expected string literal"));
                     }
+                }
+                Meta::NameValue(nv) if nv.path.is_ident("pipe_through") => {
+                     if let Expr::Lit(expr_lit) = &nv.value {
+                        if let syn::Lit::Str(lit_str) = &expr_lit.lit {
+                            attrs.pipe_through = Some(lit_str.value());
+                        } else {
+                            return Err(Error::new(nv.value.span(), "expected string literal"));
+                        }
+                    } else {
+                        return Err(Error::new(nv.value.span(), "expected string literal"));
+                    }
+                }
+                Meta::Path(p) if p.is_ident("pipe_to_clipboard") => {
+                    attrs.pipe_to_clipboard = true;
                 }
                 _ => {
                     return Err(Error::new(
@@ -364,7 +392,10 @@ pub fn dispatch_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                     || v.attrs.pre_dispatch.is_some()
                     || v.attrs.post_dispatch.is_some()
                     || v.attrs.post_output.is_some()
-                    || (v.attrs.list_view && v.attrs.item_type.is_some());
+                    || (v.attrs.list_view && v.attrs.item_type.is_some())
+                    || v.attrs.pipe_to.is_some()
+                    || v.attrs.pipe_through.is_some()
+                    || v.attrs.pipe_to_clipboard;
 
                 // Determine the handler expression (original or wrapped)
                 let handler_expr = if v.attrs.list_view {
@@ -408,13 +439,28 @@ pub fn dispatch_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                     let post_output_call = v.attrs.post_output.as_ref().map(|p| {
                         quote! { __cfg = __cfg.post_output(#p); }
                     });
+                    let pipe_to_call = v.attrs.pipe_to.as_ref().map(|p| {
+                        quote! { __cfg = __cfg.pipe_to(#p); }
+                    });
+                    let pipe_through_call = v.attrs.pipe_through.as_ref().map(|p| {
+                        quote! { __cfg = __cfg.pipe_through(#p); }
+                    });
+                     let pipe_clipboard_call = if v.attrs.pipe_to_clipboard {
+                        Some(quote! { __cfg = __cfg.pipe_to_clipboard(); })
+                    } else {
+                        None
+                    };
 
                     quote! {
                         let __builder = __builder.command_with(#cmd_name, #handler_expr, |mut __cfg| {
                             #template_call
                             #pre_dispatch_call
                             #post_dispatch_call
+                            #post_dispatch_call
                             #post_output_call
+                            #pipe_to_call
+                            #pipe_through_call
+                            #pipe_clipboard_call
                             __cfg
                         });
                     }
