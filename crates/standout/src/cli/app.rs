@@ -214,11 +214,7 @@ impl<M: HandlerMode> App<M> {
         let path_str = path.join(".");
 
         if let Some(dispatch) = self.commands.get(&path_str) {
-            let mut ctx = CommandContext {
-                command_path: path,
-                app_state: self.core.app_state.clone(),
-                ..Default::default()
-            };
+            let mut ctx = CommandContext::new(path, self.core.app_state.clone());
 
             let hooks = self.core.get_hooks(&path_str);
 
@@ -401,11 +397,10 @@ impl<M: HandlerMode> App<M> {
         F: FnOnce(&ArgMatches, &CommandContext) -> HandlerResult<T>,
         T: Serialize,
     {
-        let mut ctx = CommandContext {
-            command_path: path.split('.').map(String::from).collect(),
-            app_state: self.core.app_state.clone(),
-            ..Default::default()
-        };
+        let mut ctx = CommandContext::new(
+            path.split('.').map(String::from).collect(),
+            self.core.app_state.clone(),
+        );
 
         let hooks = self.core.get_hooks(path);
 

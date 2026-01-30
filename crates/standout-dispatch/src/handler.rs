@@ -310,6 +310,19 @@ pub struct CommandContext {
     pub extensions: Extensions,
 }
 
+impl CommandContext {
+    /// Creates a new CommandContext with the given path and shared app state.
+    ///
+    /// This is more efficient than `Default::default()` when you already have app_state.
+    pub fn new(command_path: Vec<String>, app_state: Arc<Extensions>) -> Self {
+        Self {
+            command_path,
+            app_state,
+            extensions: Extensions::new(),
+        }
+    }
+}
+
 impl Default for CommandContext {
     fn default() -> Self {
         Self {
