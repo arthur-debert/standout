@@ -36,7 +36,7 @@ pub enum TruncateAt {
 }
 
 /// How a column handles content that exceeds its width.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Overflow {
     /// Truncate content with an ellipsis marker.
     Truncate {
@@ -224,7 +224,7 @@ impl Width {
 }
 
 /// Configuration for a single column in a table.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Column {
     /// Optional column name/identifier.
     pub name: Option<String>,
@@ -614,7 +614,7 @@ impl Col {
 }
 
 /// Decorations for table rows (separators, prefixes, suffixes).
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Decorations {
     /// Separator between columns (e.g., "  " or " │ ").
     pub column_sep: String,
@@ -664,7 +664,7 @@ impl Decorations {
 }
 
 /// Complete specification for a flat data layout (Table or CSV).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FlatDataSpec {
     /// Column specifications.
     pub columns: Vec<Column>,
