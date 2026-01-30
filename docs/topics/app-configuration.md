@@ -37,7 +37,9 @@ app.run(Cli::command(), std::env::args());
 .templates(embed_templates!("src/templates"))
 ```
 
-Collects files matching: `.jinja`, `.jinja2`, `.j2`, `.txt` (in priority order).
+Collects files matching: `.jinja`, `.jinja2`, `.j2`, `.stpl`, `.txt` (in priority order).
+
+> **Custom template engines:** For advanced use cases, `standout-render` supports pluggable template engines. See the [Template Engines](../crates/standout-render/docs/topics/template-engines.md) topic for details on using `SimpleEngine` or implementing custom engines.
 
 Directory structure:
 

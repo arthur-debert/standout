@@ -1,6 +1,8 @@
 # Templating
 
-`standout-render` uses a two-pass templating system that combines the power of MiniJinja for logic and data binding with a custom BBCode-like syntax for styling. This separation keeps templates readable while providing full control over both content and presentation.
+`standout-render` uses a two-pass templating system that combines a template engine for logic and data binding with a custom BBCode-like syntax for styling. This separation keeps templates readable while providing full control over both content and presentation.
+
+The default engine is MiniJinja (Jinja2-compatible), but alternative engines are available. See [Template Engines](template-engines.md) for options including a lightweight `SimpleEngine` for reduced binary size.
 
 ---
 
@@ -255,12 +257,14 @@ let output = renderer.render("greeting", &data)?;
 
 ### File Extensions
 
-Supported extensions (in priority order): `.jinja`, `.jinja2`, `.j2`, `.txt`
+Supported extensions (in priority order): `.jinja`, `.jinja2`, `.j2`, `.stpl`, `.txt`
 
 When you request `"report"`, the registry checks:
 - Inline template named `"report"`
 - `report.jinja` in registered directories
-- `report.jinja2`, `report.j2`, `report.txt` (lower priority)
+- `report.jinja2`, `report.j2`, `report.stpl`, `report.txt` (lower priority)
+
+The `.stpl` extension is for SimpleEngine templates. See [Template Engines](template-engines.md) for details.
 
 ### Template Names
 

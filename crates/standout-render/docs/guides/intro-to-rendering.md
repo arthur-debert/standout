@@ -166,9 +166,11 @@ See [File System Resources](../topics/file-system-resources.md) for details on h
 
 ## Best-of-Breed Specialized Formats
 
-### Templates: MiniJinja
+### Templates: MiniJinja (Default)
 
-`standout-render` uses MiniJinja templates—a Rust implementation of Jinja2, a de facto standard for rich and powerful templating. The simple syntax and powerful features let you map template text to actual output much easier than `println!` spreads.
+`standout-render` uses MiniJinja templates by default—a Rust implementation of Jinja2, a de facto standard for rich and powerful templating. The simple syntax and powerful features let you map template text to actual output much easier than `println!` spreads.
+
+> **Alternative engines available:** For simpler templates or smaller binaries, see [Template Engines](../topics/template-engines.md) for lightweight alternatives like `SimpleEngine`.
 
 ```jinja
 {% if message %}[accent]{{ message }}[/accent]{% endif %}
