@@ -155,8 +155,11 @@ impl HookError {
 }
 
 /// Type alias for pre-dispatch hook functions.
+///
+/// Pre-dispatch hooks receive mutable access to [`CommandContext`], allowing them
+/// to inject state into `ctx.extensions` that handlers can retrieve.
 pub type PreDispatchFn =
-    Arc<dyn Fn(&ArgMatches, &CommandContext) -> Result<(), HookError> + Send + Sync>;
+    Arc<dyn Fn(&ArgMatches, &mut CommandContext) -> Result<(), HookError> + Send + Sync>;
 
 /// Type alias for post-dispatch hook functions.
 pub type PostDispatchFn = Arc<
@@ -194,9 +197,28 @@ impl Hooks {
     }
 
     /// Adds a pre-dispatch hook.
+    ///
+    /// Pre-dispatch hooks receive mutable access to [`CommandContext`], allowing
+    /// state injection via `ctx.extensions`. Handlers can then retrieve this state.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use standout_dispatch::{Hooks, HookError};
+    ///
+    /// struct ApiClient { base_url: String }
+    ///
+    /// let hooks = Hooks::new()
+    ///     .pre_dispatch(|_matches, ctx| {
+    ///         ctx.extensions.insert(ApiClient {
+    ///             base_url: "https://api.example.com".into()
+    ///         });
+    ///         Ok(())
+    ///     });
+    /// ```
     pub fn pre_dispatch<F>(mut self, f: F) -> Self
     where
-        F: Fn(&ArgMatches, &CommandContext) -> Result<(), HookError> + Send + Sync + 'static,
+        F: Fn(&ArgMatches, &mut CommandContext) -> Result<(), HookError> + Send + Sync + 'static,
     {
         self.pre_dispatch.push(Arc::new(f));
         self
@@ -231,10 +253,12 @@ impl Hooks {
     }
 
     /// Runs all pre-dispatch hooks.
+    ///
+    /// Hooks receive mutable access to the context, allowing state injection.
     pub fn run_pre_dispatch(
         &self,
         matches: &ArgMatches,
-        ctx: &CommandContext,
+        ctx: &mut CommandContext,
     ) -> Result<(), HookError> {
         for hook in &self.pre_dispatch {
             hook(matches, ctx)?;
@@ -288,6 +312,7 @@ mod tests {
     fn test_context() -> CommandContext {
         CommandContext {
             command_path: vec!["test".into()],
+            ..Default::default()
         }
     }
 
@@ -335,9 +360,9 @@ mod tests {
             Ok(())
         });
 
-        let ctx = test_context();
+        let mut ctx = test_context();
         let matches = test_matches();
-        let result = hooks.run_pre_dispatch(&matches, &ctx);
+        let result = hooks.run_pre_dispatch(&matches, &mut ctx);
 
         assert!(result.is_ok());
         assert!(called.load(std::sync::atomic::Ordering::SeqCst));
@@ -349,11 +374,62 @@ mod tests {
             .pre_dispatch(|_, _| Err(HookError::pre_dispatch("first fails")))
             .pre_dispatch(|_, _| panic!("should not be called"));
 
-        let ctx = test_context();
+        let mut ctx = test_context();
         let matches = test_matches();
-        let result = hooks.run_pre_dispatch(&matches, &ctx);
+        let result = hooks.run_pre_dispatch(&matches, &mut ctx);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_pre_dispatch_injects_extensions() {
+        struct TestState {
+            value: i32,
+        }
+
+        let hooks = Hooks::new().pre_dispatch(|_, ctx| {
+            ctx.extensions.insert(TestState { value: 42 });
+            Ok(())
+        });
+
+        let mut ctx = test_context();
+        let matches = test_matches();
+
+        // Before hook runs, extension is not present
+        assert!(!ctx.extensions.contains::<TestState>());
+
+        hooks.run_pre_dispatch(&matches, &mut ctx).unwrap();
+
+        // After hook runs, extension is available
+        let state = ctx.extensions.get::<TestState>().unwrap();
+        assert_eq!(state.value, 42);
+    }
+
+    #[test]
+    fn test_pre_dispatch_multiple_hooks_share_context() {
+        struct Counter {
+            count: i32,
+        }
+
+        let hooks = Hooks::new()
+            .pre_dispatch(|_, ctx| {
+                ctx.extensions.insert(Counter { count: 1 });
+                Ok(())
+            })
+            .pre_dispatch(|_, ctx| {
+                // Second hook can read and modify what first hook inserted
+                if let Some(counter) = ctx.extensions.get_mut::<Counter>() {
+                    counter.count += 10;
+                }
+                Ok(())
+            });
+
+        let mut ctx = test_context();
+        let matches = test_matches();
+        hooks.run_pre_dispatch(&matches, &mut ctx).unwrap();
+
+        let counter = ctx.extensions.get::<Counter>().unwrap();
+        assert_eq!(counter.count, 11);
     }
 
     #[test]

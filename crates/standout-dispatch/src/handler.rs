@@ -22,6 +22,7 @@
 //! # Core Types
 //!
 //! - [`CommandContext`]: Environment information passed to handlers
+//! - [`Extensions`]: Type-safe container for injecting custom state
 //! - [`Output`]: What a handler produces (render data, silent, or binary)
 //! - [`HandlerResult`]: The result type for handlers (`Result<Output<T>, Error>`)
 //! - [`RunResult`]: The result of running the CLI dispatcher
@@ -30,20 +31,157 @@
 
 use clap::ArgMatches;
 use serde::Serialize;
+use std::any::{Any, TypeId};
+use std::collections::HashMap;
+use std::fmt;
+
+/// Type-safe container for injecting custom state into handlers.
+///
+/// Extensions allow pre-dispatch hooks to inject state that handlers can retrieve.
+/// This enables dependency injection without modifying handler signatures.
+///
+/// # Example
+///
+/// ```rust
+/// use standout_dispatch::{Extensions, CommandContext};
+///
+/// // Define your state types
+/// struct ApiClient { base_url: String }
+/// struct UserScope { user_id: u64 }
+///
+/// // In a pre-dispatch hook, inject state
+/// let mut ctx = CommandContext::default();
+/// ctx.extensions.insert(ApiClient { base_url: "https://api.example.com".into() });
+/// ctx.extensions.insert(UserScope { user_id: 42 });
+///
+/// // In a handler, retrieve state
+/// if let Some(api) = ctx.extensions.get::<ApiClient>() {
+///     println!("API base: {}", api.base_url);
+/// }
+/// ```
+#[derive(Default)]
+pub struct Extensions {
+    map: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
+}
+
+impl Extensions {
+    /// Creates a new empty extensions container.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Inserts a value into the extensions.
+    ///
+    /// If a value of this type already exists, it is replaced and returned.
+    pub fn insert<T: Send + Sync + 'static>(&mut self, val: T) -> Option<T> {
+        self.map
+            .insert(TypeId::of::<T>(), Box::new(val))
+            .and_then(|boxed| boxed.downcast().ok().map(|b| *b))
+    }
+
+    /// Gets a reference to a value of the specified type.
+    ///
+    /// Returns `None` if no value of this type exists.
+    pub fn get<T: 'static>(&self) -> Option<&T> {
+        self.map
+            .get(&TypeId::of::<T>())
+            .and_then(|boxed| boxed.downcast_ref())
+    }
+
+    /// Gets a mutable reference to a value of the specified type.
+    ///
+    /// Returns `None` if no value of this type exists.
+    pub fn get_mut<T: 'static>(&mut self) -> Option<&mut T> {
+        self.map
+            .get_mut(&TypeId::of::<T>())
+            .and_then(|boxed| boxed.downcast_mut())
+    }
+
+    /// Removes a value of the specified type, returning it if it existed.
+    pub fn remove<T: 'static>(&mut self) -> Option<T> {
+        self.map
+            .remove(&TypeId::of::<T>())
+            .and_then(|boxed| boxed.downcast().ok().map(|b| *b))
+    }
+
+    /// Returns `true` if the extensions contain a value of the specified type.
+    pub fn contains<T: 'static>(&self) -> bool {
+        self.map.contains_key(&TypeId::of::<T>())
+    }
+
+    /// Returns the number of extensions stored.
+    pub fn len(&self) -> usize {
+        self.map.len()
+    }
+
+    /// Returns `true` if no extensions are stored.
+    pub fn is_empty(&self) -> bool {
+        self.map.is_empty()
+    }
+
+    /// Removes all extensions.
+    pub fn clear(&mut self) {
+        self.map.clear();
+    }
+}
+
+impl fmt::Debug for Extensions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Extensions")
+            .field("len", &self.map.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl Clone for Extensions {
+    fn clone(&self) -> Self {
+        // Extensions cannot be cloned because Box<dyn Any> isn't Clone.
+        // Return empty extensions on clone - this is a limitation but
+        // matches the behavior of http::Extensions.
+        Self::new()
+    }
+}
 
 /// Context passed to command handlers.
 ///
-/// Provides information about the execution environment. Note that output format
-/// is deliberately not included here - format decisions are made by the
-/// render handler, not by logic handlers.
+/// Provides information about the execution environment plus an extensions
+/// container for injecting custom state via pre-dispatch hooks.
 ///
-/// If handlers need format-aware behavior (e.g., skip expensive formatting for
-/// JSON output), the consuming framework can extend this context or pass format
-/// information through other means.
-#[derive(Debug, Clone, Default)]
+/// Note that output format is deliberately not included here - format decisions
+/// are made by the render handler, not by logic handlers.
+///
+/// # Extensions
+///
+/// Pre-dispatch hooks can inject state into `extensions` that handlers retrieve:
+///
+/// ```rust
+/// use standout_dispatch::{Hooks, HookError, CommandContext};
+///
+/// struct Database { /* ... */ }
+///
+/// let hooks = Hooks::new()
+///     .pre_dispatch(|_matches, ctx| {
+///         ctx.extensions.insert(Database { /* ... */ });
+///         Ok(())
+///     });
+///
+/// // In handler:
+/// fn my_handler(matches: &clap::ArgMatches, ctx: &CommandContext) -> anyhow::Result<()> {
+///     let db = ctx.extensions.get::<Database>()
+///         .ok_or_else(|| anyhow::anyhow!("Database not initialized"))?;
+///     // use db...
+///     Ok(())
+/// }
+/// ```
+#[derive(Debug, Default)]
 pub struct CommandContext {
     /// The command path being executed (e.g., ["config", "get"])
     pub command_path: Vec<String>,
+
+    /// Type-safe container for custom state injection.
+    ///
+    /// Pre-dispatch hooks can insert values that handlers retrieve.
+    pub extensions: Extensions,
 }
 
 /// What a handler produces.
@@ -250,6 +388,7 @@ mod tests {
     fn test_command_context_creation() {
         let ctx = CommandContext {
             command_path: vec!["config".into(), "get".into()],
+            extensions: Extensions::new(),
         };
         assert_eq!(ctx.command_path, vec!["config", "get"]);
     }
@@ -258,6 +397,114 @@ mod tests {
     fn test_command_context_default() {
         let ctx = CommandContext::default();
         assert!(ctx.command_path.is_empty());
+        assert!(ctx.extensions.is_empty());
+    }
+
+    // Extensions tests
+    #[test]
+    fn test_extensions_insert_and_get() {
+        struct MyState {
+            value: i32,
+        }
+
+        let mut ext = Extensions::new();
+        assert!(ext.is_empty());
+
+        ext.insert(MyState { value: 42 });
+        assert!(!ext.is_empty());
+        assert_eq!(ext.len(), 1);
+
+        let state = ext.get::<MyState>().unwrap();
+        assert_eq!(state.value, 42);
+    }
+
+    #[test]
+    fn test_extensions_get_mut() {
+        struct Counter {
+            count: i32,
+        }
+
+        let mut ext = Extensions::new();
+        ext.insert(Counter { count: 0 });
+
+        if let Some(counter) = ext.get_mut::<Counter>() {
+            counter.count += 1;
+        }
+
+        assert_eq!(ext.get::<Counter>().unwrap().count, 1);
+    }
+
+    #[test]
+    fn test_extensions_multiple_types() {
+        struct TypeA(i32);
+        struct TypeB(String);
+
+        let mut ext = Extensions::new();
+        ext.insert(TypeA(1));
+        ext.insert(TypeB("hello".into()));
+
+        assert_eq!(ext.len(), 2);
+        assert_eq!(ext.get::<TypeA>().unwrap().0, 1);
+        assert_eq!(ext.get::<TypeB>().unwrap().0, "hello");
+    }
+
+    #[test]
+    fn test_extensions_replace() {
+        struct Value(i32);
+
+        let mut ext = Extensions::new();
+        ext.insert(Value(1));
+
+        let old = ext.insert(Value(2));
+        assert_eq!(old.unwrap().0, 1);
+        assert_eq!(ext.get::<Value>().unwrap().0, 2);
+    }
+
+    #[test]
+    fn test_extensions_remove() {
+        struct Value(i32);
+
+        let mut ext = Extensions::new();
+        ext.insert(Value(42));
+
+        let removed = ext.remove::<Value>();
+        assert_eq!(removed.unwrap().0, 42);
+        assert!(ext.is_empty());
+        assert!(ext.get::<Value>().is_none());
+    }
+
+    #[test]
+    fn test_extensions_contains() {
+        struct Present;
+        struct Absent;
+
+        let mut ext = Extensions::new();
+        ext.insert(Present);
+
+        assert!(ext.contains::<Present>());
+        assert!(!ext.contains::<Absent>());
+    }
+
+    #[test]
+    fn test_extensions_clear() {
+        struct A;
+        struct B;
+
+        let mut ext = Extensions::new();
+        ext.insert(A);
+        ext.insert(B);
+        assert_eq!(ext.len(), 2);
+
+        ext.clear();
+        assert!(ext.is_empty());
+    }
+
+    #[test]
+    fn test_extensions_missing_type_returns_none() {
+        struct NotInserted;
+
+        let ext = Extensions::new();
+        assert!(ext.get::<NotInserted>().is_none());
     }
 
     #[test]

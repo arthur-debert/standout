@@ -261,12 +261,101 @@ Binary output bypasses the render function entirely.
 ```rust
 pub struct CommandContext {
     pub command_path: Vec<String>,
+    pub extensions: Extensions,
 }
 ```
 
 **command_path**: The subcommand chain as a vector, e.g., `["db", "migrate"]`. Useful for logging or conditional logic.
 
-`CommandContext` is intentionally minimal. Application-specific context (config, connections) should be captured in struct handlers or closures:
+**extensions**: A type-safe container for injected state. Pre-dispatch hooks can insert values that handlers retrieve.
+
+---
+
+## Extensions
+
+`Extensions` is a type-safe map for dependency injection. Pre-dispatch hooks inject state that handlers retrieve without modifying the handler signature.
+
+### Injecting State (in pre-dispatch hooks)
+
+```rust
+use standout_dispatch::{Hooks, HookError};
+
+struct Database { connection_string: String }
+struct Config { max_results: usize }
+
+let hooks = Hooks::new()
+    .pre_dispatch(|_matches, ctx| {
+        ctx.extensions.insert(Database {
+            connection_string: std::env::var("DATABASE_URL")
+                .map_err(|_| HookError::pre_dispatch("DATABASE_URL required"))?
+        });
+        ctx.extensions.insert(Config { max_results: 100 });
+        Ok(())
+    });
+```
+
+### Retrieving State (in handlers)
+
+```rust
+fn list_handler(matches: &ArgMatches, ctx: &CommandContext) -> HandlerResult<Vec<Item>> {
+    let db = ctx.extensions.get::<Database>()
+        .ok_or_else(|| anyhow::anyhow!("Database not configured"))?;
+    let config = ctx.extensions.get::<Config>()
+        .ok_or_else(|| anyhow::anyhow!("Config not configured"))?;
+
+    let items = db.query_items(config.max_results)?;
+    Ok(Output::Render(items))
+}
+```
+
+### Extensions API
+
+| Method | Description |
+|--------|-------------|
+| `insert<T>(value)` | Insert a value, returns previous if any |
+| `get<T>()` | Get immutable reference, returns `Option<&T>` |
+| `get_mut<T>()` | Get mutable reference, returns `Option<&mut T>` |
+| `remove<T>()` | Remove and return value |
+| `contains<T>()` | Check if type exists |
+| `len()` | Number of stored values |
+| `is_empty()` | True if no values stored |
+| `clear()` | Remove all values |
+
+### Why Use Extensions?
+
+Extensions solve the problem of passing dependencies to handlers when using the `#[derive(Dispatch)]` macro. Without extensions, macro-generated dispatch code calls handler functions with a fixed signature—there's no way to inject database connections, API clients, or configuration.
+
+**Without extensions** (the closure capture pattern):
+
+```rust
+// Works with explicit closures, but NOT with derive macro
+let db = Arc::new(database);
+App::builder()
+    .command("list", move |m, ctx| {
+        let items = db.query()?;  // captured
+        Ok(Output::Render(items))
+    }, template)
+```
+
+**With extensions** (works with derive macro):
+
+```rust
+// Pre-dispatch hook injects dependencies
+let hooks = Hooks::new().pre_dispatch(|_m, ctx| {
+    ctx.extensions.insert(database);
+    Ok(())
+});
+
+// Handler retrieves them - works with both closures AND derive macro
+fn list_handler(m: &ArgMatches, ctx: &CommandContext) -> HandlerResult<Items> {
+    let db = ctx.extensions.get::<Database>().unwrap();
+    Ok(Output::Render(db.query()?))
+}
+```
+
+### Alternative: Struct Handlers
+
+For simpler cases without the derive macro, struct handlers remain a valid approach:
 
 ```rust
 struct MyHandler {
@@ -283,6 +372,8 @@ impl Handler for MyHandler {
     }
 }
 ```
+
+Choose extensions when using `#[derive(Dispatch)]` or when you want hook-based dependency injection. Choose struct handlers when building handlers programmatically with explicit state.
 
 ---
 
@@ -327,6 +418,7 @@ fn test_list_handler() {
 
     let ctx = CommandContext {
         command_path: vec!["list".into()],
+        ..Default::default()
     };
 
     let result = list_handler(&matches, &ctx);
@@ -362,6 +454,7 @@ fn test_local_handler_state_mutation() {
     let matches = cmd.try_get_matches_from(["test"]).unwrap();
     let ctx = CommandContext {
         command_path: vec!["count".into()],
+        ..Default::default()
     };
 
     // State accumulates across calls

@@ -116,14 +116,17 @@ impl AppBuilder {
         // Look up handler
         let commands = self.get_commands();
         if let Some(dispatch) = commands.get(&path_str) {
-            let ctx = CommandContext { command_path: path };
+            let mut ctx = CommandContext {
+                command_path: path,
+                ..Default::default()
+            };
 
             // Get hooks for this command (used for pre-dispatch, post-dispatch, and post-output)
             let hooks = self.command_hooks.get(&path_str);
 
-            // Run pre-dispatch hooks if registered
+            // Run pre-dispatch hooks if registered (hooks can inject state via ctx.extensions)
             if let Some(hooks) = hooks {
-                if let Err(e) = hooks.run_pre_dispatch(&matches, &ctx) {
+                if let Err(e) = hooks.run_pre_dispatch(&matches, &mut ctx) {
                     return RunResult::Handled(format!("Hook error: {}", e));
                 }
             }
