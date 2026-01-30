@@ -8,7 +8,7 @@
 //! Templates can be loaded from directories on the filesystem:
 //!
 //! ```rust,ignore
-//! use standout::{Renderer, Theme};
+//! use standout_render::{Renderer, Theme};
 //!
 //! let mut renderer = Renderer::new(Theme::new())?;
 //! renderer.add_template_dir("./templates")?;
@@ -67,7 +67,7 @@ use crate::EmbeddedTemplates;
 /// # Example: Inline Templates
 ///
 /// ```rust
-/// use standout::{Renderer, Theme};
+/// use standout_render::{Renderer, Theme};
 /// use console::Style;
 /// use serde::Serialize;
 ///
@@ -92,7 +92,7 @@ use crate::EmbeddedTemplates;
 /// # Example: File-Based Templates
 ///
 /// ```rust,ignore
-/// use standout::{Renderer, Theme};
+/// use standout_render::{Renderer, Theme};
 ///
 /// let mut renderer = Renderer::new(Theme::new())?;
 ///
@@ -118,7 +118,7 @@ use crate::EmbeddedTemplates;
 /// cargo run -- todos list
 /// ```
 pub struct Renderer {
-    engine: MiniJinjaEngine,
+    engine: Box<dyn TemplateEngine>,
     /// Registry for file-based template resolution
     registry: TemplateRegistry,
     /// Whether the registry has been initialized from directories
@@ -140,6 +140,7 @@ impl Renderer {
     /// # Errors
     ///
     /// Returns an error if any style aliases are invalid (dangling or cyclic).
+    /// Returns an error if any style aliases are invalid (dangling or cyclic).
     pub fn new(theme: Theme) -> Result<Self, RenderError> {
         Self::with_output(theme, OutputMode::Auto)
     }
@@ -153,6 +154,17 @@ impl Renderer {
     ///
     /// Returns an error if any style aliases are invalid (dangling or cyclic).
     pub fn with_output(theme: Theme, mode: OutputMode) -> Result<Self, RenderError> {
+        Self::with_output_and_engine(theme, mode, Box::new(MiniJinjaEngine::new()))
+    }
+
+    /// Creates a new renderer with explicit output mode and template engine.
+    /// 
+    /// This allows injecting a custom template engine implementation.
+    pub fn with_output_and_engine(
+        theme: Theme,
+        mode: OutputMode,
+        engine: Box<dyn TemplateEngine>,
+    ) -> Result<Self, RenderError> {
         // Validate style aliases before creating the renderer
         theme
             .validate()
@@ -162,7 +174,6 @@ impl Renderer {
         let color_mode = super::super::theme::detect_color_mode();
         let styles = theme.resolve_styles(Some(color_mode));
 
-        let engine = MiniJinjaEngine::new();
         Ok(Self {
             engine,
             registry: TemplateRegistry::new(),
@@ -276,7 +287,7 @@ impl Renderer {
     ///
     /// ```rust,ignore
     /// // Generated at build time
-    /// let embedded = standout::embed_templates!("./templates");
+    /// let embedded = standout_render::embed_templates!("./templates");
     ///
     /// let mut renderer = Renderer::new(theme)?;
     /// renderer.with_embedded(embedded);
@@ -298,7 +309,7 @@ impl Renderer {
     /// # Example
     ///
     /// ```rust,ignore
-    /// use standout::{embed_templates, Renderer, Theme};
+    /// use standout_render::{embed_templates, Renderer, Theme};
     ///
     /// let mut renderer = Renderer::new(Theme::new())?;
     /// renderer.with_embedded_source(embed_templates!("./templates"));
@@ -431,18 +442,21 @@ impl Renderer {
             .get(name)
             .is_ok_and(|t| matches!(t, ResolvedTemplate::Inline(_)));
 
+        // Convert data to serde_json::Value for the engine
+        let data_value = serde_json::to_value(data)?;
+
         // In release mode: always use engine cache if available.
         // In debug mode: only use engine cache if it's an inline template (which doesn't change on disk).
         let template_output = if !cfg!(debug_assertions) || is_inline {
             // Try to render with the engine's cached template
-            match self.engine.render_named(name, data) {
+            match self.engine.render_named(name, &data_value) {
                 Ok(output) => output,
                 Err(_) => {
                     // Template not in cache, load and render
                     self.ensure_registry_initialized()?;
                     let content = self.get_template_content(name)?;
                     self.engine.add_template(name, &content)?;
-                    self.engine.render_named(name, data)?
+                    self.engine.render_named(name, &data_value)?
                 }
             }
         } else {
@@ -450,7 +464,7 @@ impl Renderer {
             self.ensure_registry_initialized()?;
             let content = self.get_template_content(name)?;
             self.engine.add_template(name, &content)?;
-            self.engine.render_named(name, data)?
+            self.engine.render_named(name, &data_value)?
         };
 
         // Pass 2: BBParser style tag processing
@@ -848,5 +862,65 @@ mod tests {
         struct Empty {}
         let output3 = renderer.render("with_include", &Empty {}).unwrap();
         assert_eq!(output3, "Before PARTIAL After");
+    }
+    #[test]
+    fn test_renderer_with_custom_engine() {
+        use std::collections::HashMap;
+        
+        struct MockEngine {
+            templates: HashMap<String, String>,
+        }
+        
+        impl TemplateEngine for MockEngine {
+            fn add_template(&mut self, name: &str, source: &str) -> Result<(), RenderError> {
+                self.templates.insert(name.to_string(), source.to_string());
+                Ok(())
+            }
+            
+            fn has_template(&self, name: &str) -> bool {
+                self.templates.contains_key(name)
+            }
+            
+            fn render_template(&self, source: &str, data: &serde_json::Value) -> Result<String, RenderError> {
+                 Ok(format!("Mock Render: {} data={}", source, data))
+            }
+            
+            fn render_named(&self, name: &str, data: &serde_json::Value) -> Result<String, RenderError> {
+                if let Some(src) = self.templates.get(name) {
+                     Ok(format!("Mock Named: {} data={}", src, data))
+                } else {
+                     Err(RenderError::TemplateNotFound(name.to_string()))
+                }
+            }
+
+            fn render_with_context(
+                &self,
+                template: &str,
+                data: &serde_json::Value,
+                _context: HashMap<String, serde_json::Value>,
+            ) -> Result<String, RenderError> {
+                self.render_template(template, data)
+            }
+
+            fn supports_includes(&self) -> bool { false }
+            fn supports_filters(&self) -> bool { false }
+            fn supports_control_flow(&self) -> bool { false }
+        }
+
+        let engine = Box::new(MockEngine { templates: HashMap::new() });
+        let mut renderer = Renderer::with_output_and_engine(Theme::new(), OutputMode::Text, engine).unwrap();
+
+        renderer.add_template("test", "content").unwrap();
+        
+        #[derive(Serialize)]
+        struct Data { val: i32 }
+        
+        let output = renderer.render("test", &Data { val: 42 }).unwrap();
+        // The mock engine formats as "Mock Render: {}" or "Mock Named: {}"
+        // Since we added it as named template, render() calls render_named logic.
+        // Wait, render() logic:
+        // if debug_assertions || is_inline -> render_named
+        // The MockEngine::render_named returns "Mock Named: content data={...}"
+        assert_eq!(output, "Mock Named: content data={\"val\":42}");
     }
 }

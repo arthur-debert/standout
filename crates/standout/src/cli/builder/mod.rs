@@ -119,6 +119,11 @@ pub struct AppBuilder {
     /// Stored as `Arc<Extensions>` so it can be cloned cheaply into CommandContext.
     /// During builder phase, `Arc::get_mut` is used since only the builder holds the Arc.
     pub(crate) app_state: Arc<Extensions>,
+
+    /// Optional template engine.
+    ///
+    /// If not provided, a default MiniJinja engine will be created.
+    pub(crate) template_engine: Arc<Box<dyn standout_render::template::TemplateEngine>>,
 }
 
 impl Default for AppBuilder {
@@ -151,6 +156,7 @@ impl AppBuilder {
             include_framework_templates: true,
             include_framework_styles: true,
             app_state: Arc::new(Extensions::new()),
+            template_engine: Arc::new(Box::new(standout_render::template::MiniJinjaEngine::new())),
         }
     }
 
@@ -221,6 +227,14 @@ impl AppBuilder {
         self
     }
 
+    /// sets a custom template engine to be used for rendering.
+    ///
+    /// If not set, the default MiniJinja engine will be used.
+    pub fn template_engine(mut self, engine: Box<dyn standout_render::template::TemplateEngine>) -> Self {
+        self.template_engine = Arc::new(engine);
+        self
+    }
+
     /// Ensures all pending commands have been finalized into dispatch functions.
     ///
     /// This method is called lazily on first dispatch. It creates the actual
@@ -244,7 +258,7 @@ impl AppBuilder {
                 &pending.template,
                 context_registry,
                 &theme,
-                self.template_registry.clone(),
+                self.template_engine.clone(),
             );
             commands.insert(path.clone(), dispatch);
         }
@@ -287,13 +301,10 @@ impl AppBuilder {
         use crate::assets::FRAMEWORK_TEMPLATES;
 
         // Add framework templates if enabled (BEFORE finalizing commands)
-        // This must happen before ensure_commands_finalized() because that method
-        // clones the template_registry Arc.
         if self.include_framework_templates {
             match self.template_registry.as_mut() {
                 Some(arc) => {
                     // Get mutable access to the registry
-                    // This works because nothing has cloned the Arc yet
                     if let Some(registry) = Arc::get_mut(arc) {
                         registry.add_framework_entries(FRAMEWORK_TEMPLATES);
                     } else {
@@ -310,7 +321,23 @@ impl AppBuilder {
             };
         }
 
-        // Ensure commands are finalized
+        // Populate engine with templates from registry
+        // We use Arc::get_mut to mutate the engine in-place before sharing it
+        if let Some(registry) = &self.template_registry {
+             if let Some(engine_box) = Arc::get_mut(&mut self.template_engine) {
+                for name in registry.names() {
+                    if let Ok(content) = registry.get_content(name) {
+                        let _ = engine_box.add_template(name, &content);
+                    }
+                }
+             } else {
+                 // If we can't get mut, it means the engine is already shared (e.g. via ensure_commands_finalized called early?)
+                 // In that case, we can't add templates.
+                 // This might be a warning condition?
+             }
+        }
+
+        // Ensure commands are finalized (captures the engine)
         self.ensure_commands_finalized();
         let commands = self
             .finalized_commands
@@ -353,6 +380,7 @@ impl AppBuilder {
             stylesheet_registry: self.stylesheet_registry,
             context_registry: self.context_registry,
             app_state: self.app_state,
+            template_engine: self.template_engine,
         };
 
         Ok(App {

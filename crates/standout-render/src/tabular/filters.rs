@@ -64,7 +64,7 @@ use super::util::{
 ///
 /// ```rust,ignore
 /// use minijinja::Environment;
-/// use standout::tabular::filters::register_tabular_filters;
+/// use standout_render::tabular::filters::register_tabular_filters;
 ///
 /// let mut env = Environment::new();
 /// register_tabular_filters(&mut env);
@@ -523,7 +523,7 @@ fn parse_border_style(s: &str) -> BorderStyle {
 /// # Example
 ///
 /// ```rust,ignore
-/// use standout::tabular::{Tabular, filters::formatter_from_type};
+/// use standout_render::tabular::{Tabular, filters::formatter_from_type};
 /// use minijinja::context;
 ///
 /// #[derive(Tabular)]
@@ -554,7 +554,7 @@ pub fn formatter_from_type<T: Tabular>(width: usize) -> Value {
 /// # Example
 ///
 /// ```rust,ignore
-/// use standout::tabular::{Tabular, BorderStyle, filters::table_from_type};
+/// use standout_render::tabular::{Tabular, BorderStyle, filters::table_from_type};
 /// use minijinja::context;
 ///
 /// #[derive(Tabular)]

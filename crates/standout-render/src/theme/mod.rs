@@ -42,14 +42,14 @@
 //! it for testing with [`set_theme_detector`]:
 //!
 //! ```rust,ignore
-//! standout::set_theme_detector(|| ColorMode::Dark);
+//! standout_render::set_theme_detector(|| ColorMode::Dark);
 //! ```
 //!
 //! ## Construction
 //!
 //! Programmatic (for compile-time themes):
 //! ```rust
-//! use standout::Theme;
+//! use standout_render::Theme;
 //! use console::Style;
 //!
 //! let theme = Theme::new()
@@ -61,7 +61,7 @@
 //!
 //! YAML (for user-customizable themes):
 //! ```rust
-//! let theme = standout::Theme::from_yaml(r#"
+//! let theme = standout_render::Theme::from_yaml(r#"
 //! header: { fg: cyan, bold: true }
 //! panel:
 //!   fg: gray

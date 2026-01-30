@@ -168,7 +168,7 @@ impl Default for ThemeVariants {
 /// # Example
 ///
 /// ```rust
-/// use standout::style::parse_stylesheet;
+/// use standout_render::style::parse_stylesheet;
 ///
 /// let yaml = r#"
 /// header:

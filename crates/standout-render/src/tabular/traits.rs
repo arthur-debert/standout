@@ -12,7 +12,7 @@ use super::TabularSpec;
 /// # Example
 ///
 /// ```ignore
-/// use standout::tabular::{Tabular, TabularSpec};
+/// use standout_render::tabular::{Tabular, TabularSpec};
 /// use serde::Serialize;
 ///
 /// #[derive(Serialize, Tabular)]
@@ -43,7 +43,7 @@ pub trait Tabular {
 /// # Example
 ///
 /// ```ignore
-/// use standout::tabular::TabularRow;
+/// use standout_render::tabular::TabularRow;
 ///
 /// #[derive(TabularRow)]
 /// struct Task {

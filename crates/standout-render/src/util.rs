@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 /// # Example
 ///
 /// ```rust
-/// use standout::rgb_to_ansi256;
+/// use standout_render::rgb_to_ansi256;
 ///
 /// // Pure red maps to ANSI 196
 /// assert_eq!(rgb_to_ansi256((255, 0, 0)), 196);
@@ -55,7 +55,7 @@ pub fn rgb_to_truecolor(rgb: (u8, u8, u8)) -> (u8, u8, u8) {
 /// # Example
 ///
 /// ```rust
-/// use standout::truncate_to_width;
+/// use standout_render::truncate_to_width;
 ///
 /// assert_eq!(truncate_to_width("Hello", 10), "Hello");
 /// assert_eq!(truncate_to_width("Hello World", 6), "Hello…");

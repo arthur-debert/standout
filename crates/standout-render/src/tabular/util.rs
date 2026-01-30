@@ -16,7 +16,7 @@ use console::{measure_text_width, pad_str, Alignment};
 /// # Example
 ///
 /// ```rust
-/// use standout::tabular::display_width;
+/// use standout_render::tabular::display_width;
 ///
 /// assert_eq!(display_width("hello"), 5);
 /// assert_eq!(display_width("\x1b[31mred\x1b[0m"), 3);  // ANSI codes ignored
@@ -42,7 +42,7 @@ pub fn display_width(s: &str) -> usize {
 /// # Example
 ///
 /// ```rust
-/// use standout::tabular::truncate_end;
+/// use standout_render::tabular::truncate_end;
 ///
 /// assert_eq!(truncate_end("Hello World", 8, "…"), "Hello W…");
 /// assert_eq!(truncate_end("Short", 10, "…"), "Short");
@@ -80,7 +80,7 @@ pub fn truncate_end(s: &str, max_width: usize, ellipsis: &str) -> String {
 /// # Example
 ///
 /// ```rust
-/// use standout::tabular::truncate_start;
+/// use standout_render::tabular::truncate_start;
 ///
 /// assert_eq!(truncate_start("Hello World", 8, "…"), "…o World");
 /// assert_eq!(truncate_start("/path/to/file.rs", 12, "…"), "…/to/file.rs");
@@ -117,7 +117,7 @@ pub fn truncate_start(s: &str, max_width: usize, ellipsis: &str) -> String {
 /// # Example
 ///
 /// ```rust
-/// use standout::tabular::truncate_middle;
+/// use standout_render::tabular::truncate_middle;
 ///
 /// assert_eq!(truncate_middle("Hello World", 8, "…"), "Hel…orld");
 /// assert_eq!(truncate_middle("abcdefghij", 7, "..."), "ab...ij");
@@ -155,7 +155,7 @@ pub fn truncate_middle(s: &str, max_width: usize, ellipsis: &str) -> String {
 /// # Example
 ///
 /// ```rust
-/// use standout::tabular::pad_left;
+/// use standout_render::tabular::pad_left;
 ///
 /// assert_eq!(pad_left("42", 5), "   42");
 /// assert_eq!(pad_left("hello", 3), "hello");  // No truncation
@@ -171,7 +171,7 @@ pub fn pad_left(s: &str, width: usize) -> String {
 /// # Example
 ///
 /// ```rust
-/// use standout::tabular::pad_right;
+/// use standout_render::tabular::pad_right;
 ///
 /// assert_eq!(pad_right("42", 5), "42   ");
 /// assert_eq!(pad_right("hello", 3), "hello");  // No truncation
@@ -188,7 +188,7 @@ pub fn pad_right(s: &str, width: usize) -> String {
 /// # Example
 ///
 /// ```rust
-/// use standout::tabular::pad_center;
+/// use standout_render::tabular::pad_center;
 ///
 /// assert_eq!(pad_center("hi", 6), "  hi  ");
 /// assert_eq!(pad_center("hi", 5), " hi  ");  // Extra space on right
@@ -212,7 +212,7 @@ pub fn pad_center(s: &str, width: usize) -> String {
 /// # Example
 ///
 /// ```rust
-/// use standout::tabular::wrap;
+/// use standout_render::tabular::wrap;
 ///
 /// let lines = wrap("hello world foo", 11);
 /// assert_eq!(lines, vec!["hello world", "foo"]);
@@ -224,7 +224,7 @@ pub fn pad_center(s: &str, width: usize) -> String {
 /// let lines = wrap("supercalifragilistic", 10);
 /// assert!(lines.len() >= 2);
 /// for line in &lines {
-///     assert!(standout::tabular::display_width(line) <= 10);
+///     assert!(standout_render::tabular::display_width(line) <= 10);
 /// }
 /// ```
 pub fn wrap(s: &str, width: usize) -> Vec<String> {
@@ -247,7 +247,7 @@ pub fn wrap(s: &str, width: usize) -> Vec<String> {
 /// # Example
 ///
 /// ```rust
-/// use standout::tabular::wrap_indent;
+/// use standout_render::tabular::wrap_indent;
 ///
 /// let lines = wrap_indent("hello world foo bar", 12, 2);
 /// assert_eq!(lines, vec!["hello world", "  foo bar"]);

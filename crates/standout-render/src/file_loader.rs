@@ -53,7 +53,7 @@
 //! Register directories and access resources by name:
 //!
 //! ```rust,ignore
-//! use standout::file_loader::{FileRegistry, FileRegistryConfig};
+//! use standout_render::file_loader::{FileRegistry, FileRegistryConfig};
 //!
 //! let config = FileRegistryConfig {
 //!     extensions: &[".yaml", ".yml"],
@@ -73,7 +73,7 @@
 //!
 //! ```rust,ignore
 //! // At compile time, walks directory and embeds all files
-//! let styles = standout::embed_styles!("./styles");
+//! let styles = standout_render::embed_styles!("./styles");
 //!
 //! // Same API - resources accessed by name
 //! let theme = styles.get("themes/dark")?;
@@ -191,7 +191,7 @@ impl LoadedFile {
 /// # Example
 ///
 /// ```rust
-/// use standout::file_loader::extension_priority;
+/// use standout_render::file_loader::extension_priority;
 ///
 /// let extensions = &[".yaml", ".yml"];
 /// assert_eq!(extension_priority("config.yaml", extensions), 0);
@@ -215,7 +215,7 @@ pub fn extension_priority(name: &str, extensions: &[&str]) -> usize {
 /// # Example
 ///
 /// ```rust
-/// use standout::file_loader::strip_extension;
+/// use standout_render::file_loader::strip_extension;
 ///
 /// let extensions = &[".yaml", ".yml"];
 /// assert_eq!(strip_extension("config.yaml", extensions), "config");
@@ -254,7 +254,7 @@ pub fn strip_extension(name: &str, extensions: &[&str]) -> String {
 /// # Example
 ///
 /// ```rust,ignore
-/// use standout::file_loader::build_embedded_registry;
+/// use standout_render::file_loader::build_embedded_registry;
 ///
 /// let entries = &[
 ///     ("config.yaml", "key: value"),

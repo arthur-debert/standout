@@ -40,7 +40,7 @@
 //! For programmatic control and CSV export:
 //!
 //! ```rust
-//! use standout::tabular::{FlatDataSpec, Column, Width, Align, TabularFormatter};
+//! use standout_render::tabular::{FlatDataSpec, Column, Width, Align, TabularFormatter};
 //!
 //! let spec = FlatDataSpec::builder()
 //!     .column(Column::new(Width::Fixed(8)))
@@ -68,7 +68,7 @@
 //! ## Utility Functions
 //!
 //! ```rust
-//! use standout::tabular::{display_width, truncate_end, pad_right, wrap};
+//! use standout_render::tabular::{display_width, truncate_end, pad_right, wrap};
 //!
 //! let text = "Hello World";
 //! let truncated = truncate_end(text, 8, "…");  // "Hello W…"

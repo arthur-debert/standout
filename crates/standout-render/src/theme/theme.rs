@@ -19,7 +19,7 @@
 //! ## Programmatic (Builder API)
 //!
 //! ```rust
-//! use standout::Theme;
+//! use standout_render::Theme;
 //! use console::Style;
 //!
 //! let theme = Theme::new()
@@ -33,7 +33,7 @@
 //! ## From YAML
 //!
 //! ```rust
-//! use standout::Theme;
+//! use standout_render::Theme;
 //!
 //! let theme = Theme::from_yaml(r#"
 //! header:
@@ -78,7 +78,7 @@ use super::adaptive::ColorMode;
 /// # Example: Programmatic Construction
 ///
 /// ```rust
-/// use standout::Theme;
+/// use standout_render::Theme;
 /// use console::Style;
 ///
 /// let theme = Theme::new()
@@ -95,7 +95,7 @@ use super::adaptive::ColorMode;
 /// # Example: From YAML
 ///
 /// ```rust
-/// use standout::Theme;
+/// use standout_render::Theme;
 ///
 /// let theme = Theme::from_yaml(r#"
 /// panel:
@@ -171,7 +171,7 @@ impl Theme {
     /// # Example
     ///
     /// ```rust,ignore
-    /// use standout::Theme;
+    /// use standout_render::Theme;
     ///
     /// let theme = Theme::from_file("./themes/darcula.yaml")?;
     /// assert_eq!(theme.name(), Some("darcula"));
@@ -213,7 +213,7 @@ impl Theme {
     /// # Example
     ///
     /// ```rust
-    /// use standout::Theme;
+    /// use standout_render::Theme;
     ///
     /// let theme = Theme::from_yaml(r#"
     /// header:
@@ -311,7 +311,7 @@ impl Theme {
     /// # Example
     ///
     /// ```rust
-    /// use standout::Theme;
+    /// use standout_render::Theme;
     /// use console::Style;
     ///
     /// let theme = Theme::new()
@@ -345,7 +345,7 @@ impl Theme {
     /// # Example
     ///
     /// ```rust
-    /// use standout::Theme;
+    /// use standout_render::Theme;
     /// use console::Style;
     ///
     /// let theme = Theme::new()
@@ -385,7 +385,7 @@ impl Theme {
     /// # Example
     ///
     /// ```rust
-    /// use standout::{Theme, ColorMode};
+    /// use standout_render::{Theme, ColorMode};
     /// use console::Style;
     ///
     /// let theme = Theme::new()
@@ -474,7 +474,7 @@ impl Theme {
     /// # Example
     ///
     /// ```rust
-    /// use standout::Theme;
+    /// use standout_render::Theme;
     /// use console::Style;
     ///
     /// let base = Theme::new().add("text", Style::new().dim());

@@ -29,6 +29,9 @@ pub enum RenderError {
 
     /// Other operational error.
     OperationError(String),
+
+    /// Error during context resolution or conversion.
+    ContextError(String),
 }
 
 impl fmt::Display for RenderError {
@@ -40,6 +43,7 @@ impl fmt::Display for RenderError {
             RenderError::StyleError(msg) => write!(f, "style error: {}", msg),
             RenderError::IoError(err) => write!(f, "I/O error: {}", err),
             RenderError::OperationError(msg) => write!(f, "{}", msg),
+            RenderError::ContextError(msg) => write!(f, "context error: {}", msg),
         }
     }
 }

@@ -5,7 +5,7 @@
 //! [`MiniJinjaEngine`], which provides full template functionality.
 
 use minijinja::{Environment, Value};
-use serde::Serialize;
+
 use std::collections::HashMap;
 
 use crate::error::RenderError;
@@ -26,7 +26,7 @@ pub trait TemplateEngine: Send + Sync {
     /// This compiles and renders the template in one step. For repeated
     /// rendering of the same template, use [`add_template`](Self::add_template)
     /// and [`render_named`](Self::render_named).
-    fn render_template<T: Serialize>(&self, template: &str, data: &T) -> Result<String, RenderError>;
+    fn render_template(&self, template: &str, data: &serde_json::Value) -> Result<String, RenderError>;
 
     /// Adds a named template to the engine.
     ///
@@ -36,17 +36,20 @@ pub trait TemplateEngine: Send + Sync {
     /// Renders a previously registered template.
     ///
     /// The template must have been added via [`add_template`](Self::add_template).
-    fn render_named<T: Serialize>(&mut self, name: &str, data: &T) -> Result<String, RenderError>;
+    fn render_named(&self, name: &str, data: &serde_json::Value) -> Result<String, RenderError>;
+
+    /// Checks if a template with the given name exists.
+    fn has_template(&self, name: &str) -> bool;
 
     /// Renders a template with additional context values merged in.
     ///
     /// The `context` values are merged with the serialized `data`. If there are
     /// key conflicts, `data` takes precedence.
-    fn render_with_context<T: Serialize>(
+    fn render_with_context(
         &self,
         template: &str,
-        data: &T,
-        context: HashMap<String, Value>,
+        data: &serde_json::Value,
+        context: HashMap<String, serde_json::Value>,
     ) -> Result<String, RenderError>;
 
     /// Whether this engine supports template includes (`{% include %}`).
@@ -73,14 +76,18 @@ pub trait TemplateEngine: Send + Sync {
 /// use standout_render::template::MiniJinjaEngine;
 /// use standout_render::template::TemplateEngine;
 /// use serde::Serialize;
+/// use serde_json::json;
 ///
 /// #[derive(Serialize)]
 /// struct Data { name: String }
 ///
 /// let engine = MiniJinjaEngine::new();
+/// let data = Data { name: "World".into() };
+/// let data_value = serde_json::to_value(&data).unwrap();
+///
 /// let output = engine.render_template(
 ///     "Hello, {{ name }}!",
-///     &Data { name: "World".into() },
+///     &data_value,
 /// ).unwrap();
 /// assert_eq!(output, "Hello, World!");
 /// ```
@@ -120,13 +127,9 @@ impl Default for MiniJinjaEngine {
 }
 
 impl TemplateEngine for MiniJinjaEngine {
-    fn render_template<T: Serialize>(&self, template: &str, data: &T) -> Result<String, RenderError> {
-        // Create a temporary environment for one-off rendering
-        let mut env = Environment::new();
-        register_filters(&mut env);
-        env.add_template_owned("_inline".to_string(), template.to_string())?;
-        let tmpl = env.get_template("_inline")?;
-        Ok(tmpl.render(data)?)
+    fn render_template(&self, template: &str, data: &serde_json::Value) -> Result<String, RenderError> {
+        let value = Value::from_serialize(data);
+        Ok(self.env.render_str(template, value)?)
     }
 
     fn add_template(&mut self, name: &str, source: &str) -> Result<(), RenderError> {
@@ -135,33 +138,35 @@ impl TemplateEngine for MiniJinjaEngine {
         Ok(())
     }
 
-    fn render_named<T: Serialize>(&mut self, name: &str, data: &T) -> Result<String, RenderError> {
+    fn render_named(&self, name: &str, data: &serde_json::Value) -> Result<String, RenderError> {
         let tmpl = self.env.get_template(name)?;
-        Ok(tmpl.render(data)?)
+        let value = Value::from_serialize(data);
+        Ok(tmpl.render(value)?)
     }
 
-    fn render_with_context<T: Serialize>(
+    fn has_template(&self, name: &str) -> bool {
+        self.env.get_template(name).is_ok()
+    }
+
+    fn render_with_context(
         &self,
         template: &str,
-        data: &T,
-        context: HashMap<String, Value>,
+        data: &serde_json::Value,
+        context: HashMap<String, serde_json::Value>,
     ) -> Result<String, RenderError> {
-        // Create a temporary environment
-        let mut env = Environment::new();
-        register_filters(&mut env);
-        env.add_template_owned("_inline".to_string(), template.to_string())?;
-        let tmpl = env.get_template("_inline")?;
-
         // Merge data into context (data takes precedence)
-        let mut combined = context;
-        let data_value = serde_json::to_value(data)?;
-        if let serde_json::Value::Object(map) = data_value {
+        let mut combined = HashMap::new();
+         for (key, value) in context {
+            combined.insert(key, Value::from_serialize(&value));
+        }
+        
+        if let serde_json::Value::Object(map) = data {
             for (key, value) in map {
-                combined.insert(key, Value::from_serialize(&value));
+                combined.insert(key.clone(), Value::from_serialize(&value));
             }
         }
 
-        Ok(tmpl.render(&combined)?)
+        Ok(self.env.render_str(template, &combined)?)
     }
 
     fn supports_includes(&self) -> bool {
@@ -223,8 +228,9 @@ mod tests {
             name: "World".into(),
             count: 42,
         };
+        let data_value = serde_json::to_value(&data).unwrap();
         let output = engine
-            .render_template("Hello, {{ name }}!", &data)
+            .render_template("Hello, {{ name }}!", &data_value)
             .unwrap();
         assert_eq!(output, "Hello, World!");
     }
@@ -241,8 +247,9 @@ mod tests {
         let data = ListData {
             items: vec!["a".into(), "b".into(), "c".into()],
         };
+        let data_value = serde_json::to_value(&data).unwrap();
         let output = engine
-            .render_template("{% for item in items %}{{ item }},{% endfor %}", &data)
+            .render_template("{% for item in items %}{{ item }},{% endfor %}", &data_value)
             .unwrap();
         assert_eq!(output, "a,b,c,");
     }
@@ -258,14 +265,15 @@ mod tests {
             name: "World".into(),
             count: 0,
         };
-        let output = engine.render_named("greeting", &data).unwrap();
+        let data_value = serde_json::to_value(&data).unwrap();
+        let output = engine.render_named("greeting", &data_value).unwrap();
         assert_eq!(output, "Hello, World!");
     }
 
     #[test]
     fn test_minijinja_engine_template_error() {
         let engine = MiniJinjaEngine::new();
-        let result = engine.render_template("{{ unclosed", &());
+        let result = engine.render_template("{{ unclosed", &serde_json::Value::Null);
         assert!(result.is_err());
     }
 
@@ -279,13 +287,14 @@ mod tests {
         }
 
         let mut context = HashMap::new();
-        context.insert("version".to_string(), Value::from("1.0.0"));
+        context.insert("version".to_string(), serde_json::Value::String("1.0.0".into()));
 
         let data = Data {
             name: "Test".into(),
         };
+        let data_value = serde_json::to_value(&data).unwrap();
         let output = engine
-            .render_with_context("{{ name }} v{{ version }}", &data, context)
+            .render_with_context("{{ name }} v{{ version }}", &data_value, context)
             .unwrap();
         assert_eq!(output, "Test v1.0.0");
     }

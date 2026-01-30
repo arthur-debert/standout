@@ -21,7 +21,7 @@ pub const DEFAULT_MISSING_STYLE_INDICATOR: &str = "(!?)";
 /// # Example
 ///
 /// ```rust
-/// use standout::Styles;
+/// use standout_render::Styles;
 /// use console::Style;
 ///
 /// let styles = Styles::new()
@@ -70,7 +70,7 @@ impl Styles {
     /// # Example
     ///
     /// ```rust
-    /// use standout::Styles;
+    /// use standout_render::Styles;
     ///
     /// let styles = Styles::new()
     ///     .missing_indicator("[MISSING]")
@@ -93,7 +93,7 @@ impl Styles {
     /// # Example
     ///
     /// ```rust
-    /// use standout::Styles;
+    /// use standout_render::Styles;
     /// use console::Style;
     ///
     /// let styles = Styles::new()
@@ -139,7 +139,7 @@ impl Styles {
     /// # Example
     ///
     /// ```rust
-    /// use standout::{Styles, StyleValidationError};
+    /// use standout_render::{Styles, StyleValidationError};
     /// use console::Style;
     ///
     /// // Valid: alias chain resolves
@@ -251,7 +251,7 @@ impl Styles {
     /// # Example
     ///
     /// ```rust
-    /// use standout::Styles;
+    /// use standout_render::Styles;
     /// use console::Style;
     ///
     /// let styles = Styles::new()
@@ -301,7 +301,7 @@ impl Styles {
     /// # Example
     ///
     /// ```rust
-    /// use standout::Styles;
+    /// use standout_render::Styles;
     /// use console::Style;
     ///
     /// let styles = Styles::new()

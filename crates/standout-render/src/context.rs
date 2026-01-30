@@ -24,7 +24,7 @@
 //! # Example
 //!
 //! ```rust,ignore
-//! use standout::context::{RenderContext, ContextProvider};
+//! use standout_render::context::{RenderContext, ContextProvider};
 //! use minijinja::value::Object;
 //! use std::sync::Arc;
 //!
@@ -74,8 +74,8 @@ use std::sync::Arc;
 /// # Example
 ///
 /// ```rust
-/// use standout::context::RenderContext;
-/// use standout::{OutputMode, Theme};
+/// use standout_render::context::RenderContext;
+/// use standout_render::{OutputMode, Theme};
 ///
 /// let ctx = RenderContext {
 ///     output_mode: OutputMode::Term,
@@ -163,7 +163,7 @@ impl<'a> RenderContext<'a> {
 /// create dynamic providers:
 ///
 /// ```rust,ignore
-/// use standout::context::{RenderContext, ContextProvider};
+/// use standout_render::context::{RenderContext, ContextProvider};
 ///
 /// // Closure-based provider
 /// let provider = |ctx: &RenderContext| MyObject {

@@ -170,6 +170,7 @@ pub use template::{
     render,
     render_auto,
     render_auto_with_context,
+    render_auto_with_engine,
     render_auto_with_spec,
     render_with_context,
     render_with_mode,

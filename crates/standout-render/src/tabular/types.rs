@@ -567,7 +567,7 @@ impl ColumnBuilder {
 /// Provides a concise API for common column configurations:
 ///
 /// ```rust
-/// use standout::tabular::Col;
+/// use standout_render::tabular::Col;
 ///
 /// let col = Col::fixed(10);           // Fixed width 10
 /// let col = Col::min(5);              // At least 5, grows to fit
