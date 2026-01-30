@@ -73,20 +73,48 @@ Hooks are functions that run at specific points in the pipeline. They let you in
 
 ### Three Phases
 
-**Pre-dispatch**: Runs before the handler. Can abort execution.
+**Pre-dispatch**: Runs before the handler. Can abort execution or inject state.
 
-Use for: authentication checks, input validation, logging start time.
+Use for: authentication checks, input validation, logging start time, **dependency injection**.
+
+Pre-dispatch hooks receive `&mut CommandContext`, allowing them to inject state via `ctx.extensions` that handlers can retrieve:
 
 ```rust
 use standout_dispatch::{Hooks, HookError};
 
-Hooks::new().pre_dispatch(|matches, ctx| {
-    if !is_authenticated() {
-        return Err(HookError::pre_dispatch("authentication required"));
-    }
-    Ok(())
-})
+// Define your state types
+struct ApiClient { base_url: String }
+struct UserSession { user_id: u64 }
+
+Hooks::new()
+    .pre_dispatch(|matches, ctx| {
+        // Validate auth and inject client
+        let token = std::env::var("API_TOKEN")
+            .map_err(|_| HookError::pre_dispatch("API_TOKEN required"))?;
+
+        ctx.extensions.insert(ApiClient {
+            base_url: "https://api.example.com".into()
+        });
+        ctx.extensions.insert(UserSession { user_id: 42 });
+        Ok(())
+    })
 ```
+
+Handlers then retrieve the injected state:
+
+```rust
+fn list_handler(matches: &ArgMatches, ctx: &CommandContext) -> HandlerResult<Vec<Item>> {
+    let api = ctx.extensions.get::<ApiClient>()
+        .ok_or_else(|| anyhow::anyhow!("ApiClient not initialized"))?;
+    let session = ctx.extensions.get::<UserSession>()
+        .ok_or_else(|| anyhow::anyhow!("UserSession not initialized"))?;
+
+    let items = api.fetch_items(session.user_id)?;
+    Ok(Output::Render(items))
+}
+```
+
+See the [Handler Contract](handler-contract.md#extensions) for full `Extensions` API documentation.
 
 **Post-dispatch**: Runs after the handler, before rendering. Can transform data.
 
@@ -270,10 +298,13 @@ fn main() -> anyhow::Result<()> {
     // 5. Parse and dispatch
     let matches = cmd.get_matches();
     let path = extract_command_path(&matches);
-    let ctx = CommandContext { command_path: path.clone() };
+    let mut ctx = CommandContext {
+        command_path: path.clone(),
+        ..Default::default()
+    };
 
-    // Run pre-dispatch hooks
-    hooks.run_pre_dispatch(&matches, &ctx)?;
+    // Run pre-dispatch hooks (may inject state via ctx.extensions)
+    hooks.run_pre_dispatch(&matches, &mut ctx)?;
 
     // Dispatch based on command
     let result = match path_to_string(&path).as_str() {

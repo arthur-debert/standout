@@ -327,9 +327,12 @@ impl<H> CommandConfig<H> {
     }
 
     /// Adds a pre-dispatch hook for this command.
+    ///
+    /// Pre-dispatch hooks receive mutable access to [`CommandContext`], allowing
+    /// state injection via `ctx.extensions`. Handlers can then retrieve this state.
     pub fn pre_dispatch<F>(mut self, f: F) -> Self
     where
-        F: Fn(&ArgMatches, &CommandContext) -> Result<(), crate::cli::hooks::HookError>
+        F: Fn(&ArgMatches, &mut CommandContext) -> Result<(), crate::cli::hooks::HookError>
             + Send
             + Sync
             + 'static,

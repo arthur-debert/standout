@@ -214,13 +214,16 @@ impl<M: HandlerMode> App<M> {
         let path_str = path.join(".");
 
         if let Some(dispatch) = self.commands.get(&path_str) {
-            let ctx = CommandContext { command_path: path };
+            let mut ctx = CommandContext {
+                command_path: path,
+                ..Default::default()
+            };
 
             let hooks = self.core.get_hooks(&path_str);
 
-            // Run pre-dispatch hooks
+            // Run pre-dispatch hooks (hooks can inject state via ctx.extensions)
             if let Some(hooks) = hooks {
-                if let Err(e) = hooks.run_pre_dispatch(&matches, &ctx) {
+                if let Err(e) = hooks.run_pre_dispatch(&matches, &mut ctx) {
                     return RunResult::Handled(format!("Hook error: {}", e));
                 }
             }
@@ -397,15 +400,16 @@ impl<M: HandlerMode> App<M> {
         F: FnOnce(&ArgMatches, &CommandContext) -> HandlerResult<T>,
         T: Serialize,
     {
-        let ctx = CommandContext {
+        let mut ctx = CommandContext {
             command_path: path.split('.').map(String::from).collect(),
+            ..Default::default()
         };
 
         let hooks = self.core.get_hooks(path);
 
-        // Run pre-dispatch hooks
+        // Run pre-dispatch hooks (hooks can inject state via ctx.extensions)
         if let Some(hooks) = hooks {
-            hooks.run_pre_dispatch(matches, &ctx)?;
+            hooks.run_pre_dispatch(matches, &mut ctx)?;
         }
 
         // Run handler

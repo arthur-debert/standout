@@ -108,8 +108,8 @@ pub use dispatch::{
 
 // Re-export handler types
 pub use handler::{
-    CommandContext, FnHandler, Handler, HandlerResult, LocalFnHandler, LocalHandler, Output,
-    RunResult,
+    CommandContext, Extensions, FnHandler, Handler, HandlerResult, LocalFnHandler, LocalHandler,
+    Output, RunResult,
 };
 
 // Re-export hook types

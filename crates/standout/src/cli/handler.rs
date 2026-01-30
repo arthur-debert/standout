@@ -88,8 +88,8 @@
 // Re-export all handler types from standout-dispatch.
 // These types are render-agnostic and focus on handler execution.
 pub use standout_dispatch::{
-    CommandContext, FnHandler, Handler, HandlerResult, LocalFnHandler, LocalHandler, Output,
-    RunResult,
+    CommandContext, Extensions, FnHandler, Handler, HandlerResult, LocalFnHandler, LocalHandler,
+    Output, RunResult,
 };
 
 // Tests for these types are in the standout-dispatch crate.

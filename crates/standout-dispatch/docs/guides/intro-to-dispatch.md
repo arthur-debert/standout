@@ -258,9 +258,11 @@ let hooks = Hooks::new()
 
 | Phase | Timing | Receives | Can |
 |-------|--------|----------|-----|
-| `pre_dispatch` | Before handler | ArgMatches, Context | Abort execution |
+| `pre_dispatch` | Before handler | ArgMatches, **&mut** Context | Abort execution, inject state |
 | `post_dispatch` | After handler, before render | ArgMatches, Context, Data | Transform data |
 | `post_output` | After render | ArgMatches, Context, Output | Transform output |
+
+> **State Injection:** Pre-dispatch hooks can inject dependencies via `ctx.extensions` that handlers retrieve. This enables dependency injection without changing handler signatures. See [Handler Contract: Extensions](../topics/handler-contract.md#extensions) for details.
 
 ### Hook Chaining
 
