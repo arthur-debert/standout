@@ -10,7 +10,7 @@ use console::Style;
 /// # Example
 ///
 /// ```rust
-/// use standout::{Theme, StyleValue};
+/// use standout_render::{Theme, StyleValue};
 /// use console::Style;
 ///
 /// let theme = Theme::new()

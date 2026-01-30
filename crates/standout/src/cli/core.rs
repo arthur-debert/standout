@@ -17,14 +17,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use clap::{Arg, ArgAction, ArgMatches, Command};
-use minijinja::Environment;
 use serde::Serialize;
 
 use crate::context::{ContextRegistry, RenderContext};
 use crate::setup::SetupError;
 use crate::{detect_color_mode, OutputMode, StylesheetRegistry, TemplateRegistry, Theme};
 use standout_dispatch::Extensions;
-use standout_render::template::filters::register_filters;
 
 use super::app::get_terminal_width;
 use super::hooks::Hooks;
@@ -80,6 +78,11 @@ pub struct AppCore {
     /// This is immutable and wrapped in Arc for efficient sharing.
     /// Handlers access it via `ctx.app_state.get::<T>()`.
     pub(crate) app_state: Arc<Extensions>,
+
+    /// Template engine for rendering commands.
+    ///
+    /// Wraps the engine execution logic (minijinja or custom).
+    pub(crate) template_engine: Arc<Box<dyn standout_render::template::TemplateEngine>>,
 }
 
 impl Default for AppCore {
@@ -114,6 +117,7 @@ impl AppCore {
             stylesheet_registry: None,
             context_registry: ContextRegistry::new(),
             app_state: Arc::new(Extensions::new()),
+            template_engine: Arc::new(Box::new(standout_render::template::MiniJinjaEngine::new())),
         }
     }
 
@@ -340,39 +344,29 @@ impl AppCore {
             .validate()
             .map_err(|e| SetupError::Config(e.to_string()))?;
 
-        // Build MiniJinja environment
-        let mut env = Environment::new();
-        register_filters(&mut env);
-
-        // Load all templates from registry if available (enables {% include %})
-        if let Some(registry) = &self.template_registry {
-            for name in registry.names() {
-                if let Ok(content) = registry.get_content(name) {
-                    env.add_template_owned(name.to_string(), content)
-                        .map_err(|e| SetupError::Template(e.to_string()))?;
-                }
-            }
-        }
-
-        // Add the inline template
-        env.add_template_owned("_inline".to_string(), template.to_string())
-            .map_err(|e| SetupError::Template(e.to_string()))?;
-
-        let tmpl = env
-            .get_template("_inline")
-            .map_err(|e| SetupError::Template(e.to_string()))?;
-
         // Build render context for context providers
         let json_data =
             serde_json::to_value(data).map_err(|e| SetupError::Config(e.to_string()))?;
         let render_ctx = RenderContext::new(mode, get_terminal_width(), &theme, &json_data);
 
         // Build combined context: context providers + data
-        let combined = self.build_combined_context(data, &render_ctx)?;
+        let combined_minijinja_map = self.build_combined_context(data, &render_ctx)?;
 
-        // Pass 1: MiniJinja template rendering
-        let minijinja_output = tmpl
-            .render(&combined)
+        // Convert minijinja::Value map to serde_json::Value map for the template engine
+        let combined_json_map: serde_json::Map<String, serde_json::Value> = combined_minijinja_map
+            .into_iter()
+            .map(|(k, v)| {
+                (
+                    k,
+                    serde_json::to_value(v).unwrap_or(serde_json::Value::Null),
+                )
+            })
+            .collect();
+
+        // Pass 1: Template rendering via engine
+        let minijinja_output = self
+            .template_engine
+            .render_template(template, &serde_json::Value::Object(combined_json_map))
             .map_err(|e| SetupError::Template(e.to_string()))?;
 
         // Pass 2: BBParser style tag processing
@@ -394,28 +388,31 @@ impl AppCore {
         &self,
         data: &T,
         render_ctx: &RenderContext,
-    ) -> Result<HashMap<String, minijinja::Value>, SetupError> {
-        use minijinja::Value;
-
+    ) -> Result<HashMap<String, serde_json::Value>, SetupError> {
         // Resolve all context providers
-        let context_values = self.context_registry.resolve(render_ctx);
+        // Note: ContextRegistry currently returns HashMap<String, minijinja::Value>
+        // We need to convert back to serde_json::Value until ContextRegistry is updated
+        let context_values_minijinja = self.context_registry.resolve(render_ctx);
 
         // Convert data to a map of values
         let data_value =
             serde_json::to_value(data).map_err(|e| SetupError::Config(e.to_string()))?;
 
-        let mut combined: HashMap<String, Value> = HashMap::new();
+        let mut combined: HashMap<String, serde_json::Value> = HashMap::new();
 
         // Add context values first (lower priority)
-        for (key, value) in context_values {
-            combined.insert(key, value);
+        // Convert minijinja::Value to serde_json::Value
+        for (key, val) in context_values_minijinja {
+            let json_val = serde_json::to_value(val).map_err(|e| {
+                SetupError::Config(format!("Failed to convert context value: {}", e))
+            })?;
+            combined.insert(key, json_val);
         }
 
         // Add data values (higher priority - overwrites context)
         if let Some(obj) = data_value.as_object() {
             for (key, value) in obj {
-                let minijinja_value = json_to_minijinja(value);
-                combined.insert(key.clone(), minijinja_value);
+                combined.insert(key.clone(), value.clone());
             }
         }
 
@@ -459,37 +456,6 @@ impl AppCore {
                 "Unexpected output mode: {:?}",
                 mode
             ))),
-        }
-    }
-}
-
-/// Converts a serde_json::Value to a minijinja::Value.
-fn json_to_minijinja(value: &serde_json::Value) -> minijinja::Value {
-    match value {
-        serde_json::Value::Null => minijinja::Value::UNDEFINED,
-        serde_json::Value::Bool(b) => minijinja::Value::from(*b),
-        serde_json::Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                minijinja::Value::from(i)
-            } else if let Some(u) = n.as_u64() {
-                minijinja::Value::from(u)
-            } else if let Some(f) = n.as_f64() {
-                minijinja::Value::from(f)
-            } else {
-                minijinja::Value::UNDEFINED
-            }
-        }
-        serde_json::Value::String(s) => minijinja::Value::from(s.as_str()),
-        serde_json::Value::Array(arr) => {
-            let items: Vec<minijinja::Value> = arr.iter().map(json_to_minijinja).collect();
-            minijinja::Value::from(items)
-        }
-        serde_json::Value::Object(obj) => {
-            let map: std::collections::BTreeMap<String, minijinja::Value> = obj
-                .iter()
-                .map(|(k, v)| (k.clone(), json_to_minijinja(v)))
-                .collect();
-            minijinja::Value::from(map)
         }
     }
 }
@@ -630,6 +596,15 @@ mod tests {
         registry.add_inline("_header.j2", "=== {{ title }} ===");
 
         let mut core = AppCore::new();
+
+        // Populate engine manually for test
+        if let Some(engine_box) = Arc::get_mut(&mut core.template_engine) {
+            for name in registry.names() {
+                let content = registry.get_content(name).unwrap();
+                engine_box.add_template(name, &content).unwrap();
+            }
+        }
+
         core.template_registry = Some(Arc::new(registry));
 
         let data = serde_json::json!({"title": "My Title", "body": "Content here"});
@@ -661,6 +636,15 @@ mod tests {
         );
 
         let mut core = AppCore::new();
+
+        // Populate engine manually for test
+        if let Some(engine_box) = Arc::get_mut(&mut core.template_engine) {
+            for name in registry.names() {
+                let content = registry.get_content(name).unwrap();
+                engine_box.add_template(name, &content).unwrap();
+            }
+        }
+
         core.template_registry = Some(Arc::new(registry));
 
         let data = serde_json::json!({

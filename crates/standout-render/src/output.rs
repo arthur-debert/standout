@@ -118,7 +118,7 @@ pub fn write_binary_output(content: &[u8], dest: &OutputDestination) -> std::io:
 /// # Example
 ///
 /// ```rust
-/// use standout::{render_with_output, Theme, OutputMode};
+/// use standout_render::{render_with_output, Theme, OutputMode};
 /// use console::Style;
 /// use serde::Serialize;
 ///

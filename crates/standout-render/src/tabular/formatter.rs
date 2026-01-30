@@ -21,8 +21,8 @@
 //! # Example with Context Injection
 //!
 //! ```rust,ignore
-//! use standout::tabular::{TabularSpec, Column, Width, TabularFormatter};
-//! use standout::context::ContextRegistry;
+//! use standout_render::tabular::{TabularSpec, Column, Width, TabularFormatter};
+//! use standout_render::context::ContextRegistry;
 //!
 //! let spec = TabularSpec::builder()
 //!     .column(Column::new(Width::Fixed(10)))
@@ -58,7 +58,7 @@ use super::util::{
 /// # Example
 ///
 /// ```rust
-/// use standout::tabular::{FlatDataSpec, Column, Width, TabularFormatter};
+/// use standout_render::tabular::{FlatDataSpec, Column, Width, TabularFormatter};
 ///
 /// let spec = FlatDataSpec::builder()
 ///     .column(Column::new(Width::Fixed(8)))
@@ -154,7 +154,7 @@ impl TabularFormatter {
     /// # Example
     ///
     /// ```rust,ignore
-    /// use standout::tabular::{Tabular, TabularFormatter};
+    /// use standout_render::tabular::{Tabular, TabularFormatter};
     /// use serde::Serialize;
     ///
     /// #[derive(Serialize, Tabular)]
@@ -208,7 +208,7 @@ impl TabularFormatter {
     /// # Example
     ///
     /// ```rust
-    /// use standout::tabular::{FlatDataSpec, Column, Width, TabularFormatter};
+    /// use standout_render::tabular::{FlatDataSpec, Column, Width, TabularFormatter};
     ///
     /// let spec = FlatDataSpec::builder()
     ///     .column(Column::new(Width::Fixed(10)))
@@ -302,7 +302,7 @@ impl TabularFormatter {
     /// # Example
     ///
     /// ```rust
-    /// use standout::tabular::{FlatDataSpec, Column, Width, Overflow, TabularFormatter};
+    /// use standout_render::tabular::{FlatDataSpec, Column, Width, Overflow, TabularFormatter};
     ///
     /// let spec = FlatDataSpec::builder()
     ///     .column(Column::new(Width::Fixed(10)).wrap())
@@ -419,7 +419,7 @@ impl TabularFormatter {
     /// # Example
     ///
     /// ```rust
-    /// use standout::tabular::{FlatDataSpec, Column, Width, TabularFormatter};
+    /// use standout_render::tabular::{FlatDataSpec, Column, Width, TabularFormatter};
     /// use serde::Serialize;
     ///
     /// #[derive(Serialize)]
@@ -472,7 +472,7 @@ impl TabularFormatter {
     /// # Example
     ///
     /// ```rust,ignore
-    /// use standout::tabular::{TabularRow, TabularFormatter};
+    /// use standout_render::tabular::{TabularRow, TabularFormatter};
     ///
     /// #[derive(TabularRow)]
     /// struct Task {

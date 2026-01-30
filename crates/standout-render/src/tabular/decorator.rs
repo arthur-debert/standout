@@ -6,7 +6,7 @@
 //! # Example
 //!
 //! ```rust
-//! use standout::tabular::{Table, TabularSpec, Col, BorderStyle};
+//! use standout_render::tabular::{Table, TabularSpec, Col, BorderStyle};
 //!
 //! let spec = TabularSpec::builder()
 //!     .column(Col::fixed(20))
@@ -217,7 +217,7 @@ impl Table {
     /// # Example
     ///
     /// ```rust,ignore
-    /// use standout::tabular::{Tabular, Table, BorderStyle};
+    /// use standout_render::tabular::{Tabular, Table, BorderStyle};
     /// use serde::Serialize;
     ///
     /// #[derive(Serialize, Tabular)]
@@ -334,7 +334,7 @@ impl Table {
     /// # Example
     ///
     /// ```rust,ignore
-    /// use standout::tabular::{TabularRow, Tabular, Table, BorderStyle};
+    /// use standout_render::tabular::{TabularRow, Tabular, Table, BorderStyle};
     ///
     /// #[derive(Tabular, TabularRow)]
     /// #[tabular(separator = " | ")]

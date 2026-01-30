@@ -50,6 +50,7 @@ use standout_dispatch::Extensions;
 
 use crate::TemplateRegistry;
 use crate::{OutputMode, Theme};
+use standout_render::template::TemplateEngine;
 
 use super::dispatch::{render_handler_output, LocalDispatchFn};
 use super::handler::{CommandContext, HandlerResult, LocalFnHandler, LocalHandler};
@@ -67,7 +68,7 @@ trait LocalCommandRecipe {
         template: &str,
         context_registry: &ContextRegistry,
         theme: &Theme,
-        template_registry: Option<std::sync::Arc<TemplateRegistry>>,
+        template_engine: Arc<Box<dyn TemplateEngine>>,
     ) -> LocalDispatchFn;
 }
 
@@ -104,7 +105,7 @@ where
         template: &str,
         context_registry: &ContextRegistry,
         theme: &Theme,
-        template_registry: Option<std::sync::Arc<TemplateRegistry>>,
+        template_engine: Arc<Box<dyn TemplateEngine>>,
     ) -> LocalDispatchFn {
         let mut handler = LocalFnHandler::new(self.handler);
         let template = template.to_string();
@@ -125,7 +126,7 @@ where
                     &template,
                     &theme,
                     &context_registry,
-                    template_registry.as_deref(),
+                    &**template_engine,
                     output_mode,
                 )
             },
@@ -166,7 +167,7 @@ where
         template: &str,
         context_registry: &ContextRegistry,
         theme: &Theme,
-        template_registry: Option<std::sync::Arc<TemplateRegistry>>,
+        template_engine: Arc<Box<dyn TemplateEngine>>,
     ) -> LocalDispatchFn {
         let template = template.to_string();
         let context_registry = context_registry.clone();
@@ -186,7 +187,7 @@ where
                     &template,
                     &theme,
                     &context_registry,
-                    template_registry.as_deref(),
+                    &**template_engine,
                     output_mode,
                 )
             },
@@ -246,6 +247,7 @@ pub struct LocalAppBuilder {
     pub(crate) default_command: Option<String>,
     /// App-level state shared across all dispatches.
     pub(crate) app_state: Arc<Extensions>,
+    pub(crate) template_engine: Arc<Box<dyn TemplateEngine>>,
 }
 
 impl Default for LocalAppBuilder {
@@ -273,6 +275,7 @@ impl LocalAppBuilder {
             template_ext: ".j2".to_string(),
             default_command: None,
             app_state: Arc::new(Extensions::new()),
+            template_engine: Arc::new(Box::new(standout_render::template::MiniJinjaEngine::new())),
         }
     }
 
@@ -307,6 +310,17 @@ impl LocalAppBuilder {
     // ============================================================================
     // Command Registration
     // ============================================================================
+
+    /// sets a custom template engine to be used for rendering.
+    ///
+    /// If not set, the default MiniJinja engine will be used.
+    pub fn template_engine(
+        mut self,
+        engine: Box<dyn standout_render::template::TemplateEngine>,
+    ) -> Self {
+        self.template_engine = Arc::new(engine);
+        self
+    }
 
     /// Registers a command handler (FnMut closure) with a template.
     ///
@@ -481,7 +495,7 @@ impl LocalAppBuilder {
     fn ensure_commands_finalized(
         &self,
         theme: &Theme,
-        template_registry: Option<std::sync::Arc<TemplateRegistry>>,
+        template_engine: Arc<Box<dyn TemplateEngine>>,
     ) {
         if self.finalized_commands.borrow().is_some() {
             return;
@@ -498,7 +512,7 @@ impl LocalAppBuilder {
                 &pending_cmd.template,
                 context_registry,
                 theme,
-                template_registry.clone(),
+                template_engine.clone(),
             );
             commands.insert(path, dispatch);
         }
@@ -530,14 +544,25 @@ impl LocalAppBuilder {
             None
         };
 
+        // Populate engine with templates from registry
+        if let Some(registry) = &self.template_registry {
+            if let Some(engine_box) = Arc::get_mut(&mut self.template_engine) {
+                for name in registry.names() {
+                    if let Ok(content) = registry.get_content(name) {
+                        let _ = engine_box.add_template(name, &content);
+                    }
+                }
+            }
+        }
+
         // Finalize commands before building
         // Use the resolved theme (failed previously because self.theme was taken)
         let effective_theme = theme.clone().unwrap_or_default();
 
-        // Wrap template registry in Arc for sharing across commands
-        let template_registry = self.template_registry.take().map(Arc::new);
+        self.ensure_commands_finalized(&effective_theme, self.template_engine.clone());
 
-        self.ensure_commands_finalized(&effective_theme, template_registry.clone());
+        // Wrap template registry in Arc (for AppCore)
+        let template_registry = self.template_registry.take().map(Arc::new);
 
         // Build the AppCore with all shared configuration
         let core = AppCore {
@@ -551,6 +576,7 @@ impl LocalAppBuilder {
             stylesheet_registry: self.stylesheet_registry,
             context_registry: self.context_registry,
             app_state: self.app_state,
+            template_engine: self.template_engine,
         };
 
         Ok(App {

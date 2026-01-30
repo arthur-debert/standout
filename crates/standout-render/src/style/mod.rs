@@ -54,8 +54,8 @@
 //! ## Example
 //!
 //! ```rust
-//! use standout::style::{parse_stylesheet, ThemeVariants};
-//! use standout::ColorMode;
+//! use standout_render::style::{parse_stylesheet, ThemeVariants};
+//! use standout_render::ColorMode;
 //!
 //! let yaml = r#"
 //! header:

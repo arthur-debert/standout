@@ -4,7 +4,7 @@
 //! allowing you to import everything you need in one line:
 //!
 //! ```rust,ignore
-//! use standout::rendering::prelude::*;
+//! use standout_render::rendering::prelude::*;
 //!
 //! let theme = Theme::new()
 //!     .add("title", Style::new().bold());

@@ -8,7 +8,7 @@
 //! Templates can be loaded from directories on the filesystem:
 //!
 //! ```rust,ignore
-//! use standout::{Renderer, Theme};
+//! use standout_render::{Renderer, Theme};
 //!
 //! let mut renderer = Renderer::new(Theme::new())?;
 //! renderer.add_template_dir("./templates")?;
@@ -33,12 +33,12 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use minijinja::{Environment, Error};
 use serde::Serialize;
 use standout_bbparser::{BBParser, TagTransform, UnknownTagBehavior};
 
-use super::filters::register_filters;
+use super::engine::{MiniJinjaEngine, TemplateEngine};
 use super::registry::{walk_template_dir, ResolvedTemplate, TemplateRegistry};
+use crate::error::RenderError;
 use crate::output::OutputMode;
 use crate::style::Styles;
 use crate::theme::Theme;
@@ -67,7 +67,7 @@ use crate::EmbeddedTemplates;
 /// # Example: Inline Templates
 ///
 /// ```rust
-/// use standout::{Renderer, Theme};
+/// use standout_render::{Renderer, Theme};
 /// use console::Style;
 /// use serde::Serialize;
 ///
@@ -92,7 +92,7 @@ use crate::EmbeddedTemplates;
 /// # Example: File-Based Templates
 ///
 /// ```rust,ignore
-/// use standout::{Renderer, Theme};
+/// use standout_render::{Renderer, Theme};
 ///
 /// let mut renderer = Renderer::new(Theme::new())?;
 ///
@@ -118,7 +118,7 @@ use crate::EmbeddedTemplates;
 /// cargo run -- todos list
 /// ```
 pub struct Renderer {
-    env: Environment<'static>,
+    engine: Box<dyn TemplateEngine>,
     /// Registry for file-based template resolution
     registry: TemplateRegistry,
     /// Whether the registry has been initialized from directories
@@ -140,7 +140,8 @@ impl Renderer {
     /// # Errors
     ///
     /// Returns an error if any style aliases are invalid (dangling or cyclic).
-    pub fn new(theme: Theme) -> Result<Self, Error> {
+    /// Returns an error if any style aliases are invalid (dangling or cyclic).
+    pub fn new(theme: Theme) -> Result<Self, RenderError> {
         Self::with_output(theme, OutputMode::Auto)
     }
 
@@ -152,20 +153,29 @@ impl Renderer {
     /// # Errors
     ///
     /// Returns an error if any style aliases are invalid (dangling or cyclic).
-    pub fn with_output(theme: Theme, mode: OutputMode) -> Result<Self, Error> {
+    pub fn with_output(theme: Theme, mode: OutputMode) -> Result<Self, RenderError> {
+        Self::with_output_and_engine(theme, mode, Box::new(MiniJinjaEngine::new()))
+    }
+
+    /// Creates a new renderer with explicit output mode and template engine.
+    ///
+    /// This allows injecting a custom template engine implementation.
+    pub fn with_output_and_engine(
+        theme: Theme,
+        mode: OutputMode,
+        engine: Box<dyn TemplateEngine>,
+    ) -> Result<Self, RenderError> {
         // Validate style aliases before creating the renderer
         theme
             .validate()
-            .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string()))?;
+            .map_err(|e| RenderError::StyleError(e.to_string()))?;
 
         // Detect color mode and resolve styles for that mode
         let color_mode = super::super::theme::detect_color_mode();
         let styles = theme.resolve_styles(Some(color_mode));
 
-        let mut env = Environment::new();
-        register_filters(&mut env);
         Ok(Self {
-            env,
+            engine,
             registry: TemplateRegistry::new(),
             registry_initialized: false,
             template_dirs: Vec::new(),
@@ -186,10 +196,9 @@ impl Renderer {
     /// ```rust,ignore
     /// renderer.add_template("header", r#"[title]{{ title }}[/title]"#)?;
     /// ```
-    pub fn add_template(&mut self, name: &str, source: &str) -> Result<(), Error> {
-        // Add to minijinja environment for compilation
-        self.env
-            .add_template_owned(name.to_string(), source.to_string())?;
+    pub fn add_template(&mut self, name: &str, source: &str) -> Result<(), RenderError> {
+        // Add to engine for compilation
+        self.engine.add_template(name, source)?;
         // Also add to registry for consistency
         self.registry.add_inline(name, source);
         Ok(())
@@ -241,21 +250,21 @@ impl Renderer {
     /// // "config" resolves from first directory that has it
     /// let output = renderer.render("config", &data)?;
     /// ```
-    pub fn add_template_dir<P: AsRef<Path>>(&mut self, path: P) -> Result<(), Error> {
+    pub fn add_template_dir<P: AsRef<Path>>(&mut self, path: P) -> Result<(), RenderError> {
         let path = path.as_ref();
 
         // Validate the directory exists
         if !path.exists() {
-            return Err(Error::new(
-                minijinja::ErrorKind::InvalidOperation,
-                format!("Template directory does not exist: {}", path.display()),
-            ));
+            return Err(RenderError::OperationError(format!(
+                "Template directory does not exist: {}",
+                path.display()
+            )));
         }
         if !path.is_dir() {
-            return Err(Error::new(
-                minijinja::ErrorKind::InvalidOperation,
-                format!("Path is not a directory: {}", path.display()),
-            ));
+            return Err(RenderError::OperationError(format!(
+                "Path is not a directory: {}",
+                path.display()
+            )));
         }
 
         self.template_dirs.push(path.to_path_buf());
@@ -278,7 +287,7 @@ impl Renderer {
     ///
     /// ```rust,ignore
     /// // Generated at build time
-    /// let embedded = standout::embed_templates!("./templates");
+    /// let embedded = standout_render::embed_templates!("./templates");
     ///
     /// let mut renderer = Renderer::new(theme)?;
     /// renderer.with_embedded(embedded);
@@ -300,7 +309,7 @@ impl Renderer {
     /// # Example
     ///
     /// ```rust,ignore
-    /// use standout::{embed_templates, Renderer, Theme};
+    /// use standout_render::{embed_templates, Renderer, Theme};
     ///
     /// let mut renderer = Renderer::new(Theme::new())?;
     /// renderer.with_embedded_source(embed_templates!("./templates"));
@@ -312,15 +321,13 @@ impl Renderer {
         // Convert EmbeddedTemplates to TemplateRegistry
         let template_registry = TemplateRegistry::from(source);
 
-        // Add all templates from the registry to both env and registry
+        // Add all templates from the registry to both engine and registry
         // This mirrors the behavior of add_template()
         for name in template_registry.names() {
             if let Ok(content) = template_registry.get_content(name) {
-                // Add to minijinja environment (required for includes to work)
+                // Add to engine (required for includes to work)
                 // Ignore errors for duplicate names (e.g., "foo" and "foo.jinja" have same content)
-                let _ = self
-                    .env
-                    .add_template_owned(name.to_string(), content.clone());
+                let _ = self.engine.add_template(name, &content);
                 // Add to registry for name resolution
                 self.registry.add_inline(name, &content);
             }
@@ -364,29 +371,30 @@ impl Renderer {
     /// # Errors
     ///
     /// Returns an error if directory walking fails or template collisions are detected.
-    pub fn refresh(&mut self) -> Result<(), Error> {
+    pub fn refresh(&mut self) -> Result<(), RenderError> {
         self.initialize_registry()
     }
 
     /// Initializes the registry from registered template directories.
     ///
     /// Called lazily on first render or explicitly via `refresh()`.
-    fn initialize_registry(&mut self) -> Result<(), Error> {
+    fn initialize_registry(&mut self) -> Result<(), RenderError> {
         // Clear existing file-based templates (keep inline)
         let mut new_registry = TemplateRegistry::new();
 
         // Walk each directory and collect templates
         for dir in &self.template_dirs {
             let files = walk_template_dir(dir).map_err(|e| {
-                Error::new(
-                    minijinja::ErrorKind::InvalidOperation,
-                    format!("Failed to walk template directory {}: {}", dir.display(), e),
-                )
+                RenderError::OperationError(format!(
+                    "Failed to walk template directory {}: {}",
+                    dir.display(),
+                    e
+                ))
             })?;
 
             new_registry
                 .add_from_files(files)
-                .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string()))?;
+                .map_err(|e| RenderError::OperationError(e.to_string()))?;
         }
 
         self.registry = new_registry;
@@ -395,7 +403,7 @@ impl Renderer {
     }
 
     /// Ensures the registry is initialized, doing so lazily if needed.
-    fn ensure_registry_initialized(&mut self) -> Result<(), Error> {
+    fn ensure_registry_initialized(&mut self) -> Result<(), RenderError> {
         if !self.registry_initialized && !self.template_dirs.is_empty() {
             self.initialize_registry()?;
         }
@@ -423,45 +431,44 @@ impl Renderer {
     /// ```rust,ignore
     /// let output = renderer.render("todos/list", &data)?;
     /// ```
-    pub fn render<T: Serialize>(&mut self, name: &str, data: &T) -> Result<String, Error> {
-        // First, try the minijinja environment (inline templates)
+    pub fn render<T: Serialize>(&mut self, name: &str, data: &T) -> Result<String, RenderError> {
+        // First, check if it's an inline template
         // We check this first to avoid filesystem lookups for known templates.
         // In debug mode, if it's a file-based template, we want to skip this check
         // to force a reload from disk.
-        //
-        // NOTE: We can't easily distinguish inline vs file in the env, so we rely on
-        // the registry. Inline templates are added to both env and registry.
-        //
-        // If it's inline, we can use the env cache safely even in debug.
-        // If it's potentially file-based (or not yet known), we proceed.
 
         let is_inline = self
             .registry
             .get(name)
             .is_ok_and(|t| matches!(t, ResolvedTemplate::Inline(_)));
 
-        // In release mode: always use env cache if available.
-        // In debug mode: only use env cache if it's an inline template (which doesn't change on disk).
-        let minijinja_output =
-            if (!cfg!(debug_assertions) || is_inline) && self.env.get_template(name).is_ok() {
-                let tmpl = self.env.get_template(name)?;
-                tmpl.render(data)?
-            } else {
-                // Ensure registry is initialized for file-based templates
-                self.ensure_registry_initialized()?;
+        // Convert data to serde_json::Value for the engine
+        let data_value = serde_json::to_value(data)?;
 
-                // Try file-based templates from registry
-                let content = self.get_template_content(name)?;
-
-                // In debug mode, we always re-add to update content (hot reload).
-                // In release mode, we add once and the environment caches it.
-                self.env.add_template_owned(name.to_string(), content)?;
-                let tmpl = self.env.get_template(name)?;
-                tmpl.render(data)?
-            };
+        // In release mode: always use engine cache if available.
+        // In debug mode: only use engine cache if it's an inline template (which doesn't change on disk).
+        let template_output = if !cfg!(debug_assertions) || is_inline {
+            // Try to render with the engine's cached template
+            match self.engine.render_named(name, &data_value) {
+                Ok(output) => output,
+                Err(_) => {
+                    // Template not in cache, load and render
+                    self.ensure_registry_initialized()?;
+                    let content = self.get_template_content(name)?;
+                    self.engine.add_template(name, &content)?;
+                    self.engine.render_named(name, &data_value)?
+                }
+            }
+        } else {
+            // Debug mode with file-based template: always reload
+            self.ensure_registry_initialized()?;
+            let content = self.get_template_content(name)?;
+            self.engine.add_template(name, &content)?;
+            self.engine.render_named(name, &data_value)?
+        };
 
         // Pass 2: BBParser style tag processing
-        let final_output = self.apply_style_tags(&minijinja_output);
+        let final_output = self.apply_style_tags(&template_output);
 
         Ok(final_output)
     }
@@ -491,11 +498,11 @@ impl Renderer {
     }
 
     /// Gets template content, re-reading from disk in debug mode.
-    fn get_template_content(&self, name: &str) -> Result<String, Error> {
+    fn get_template_content(&self, name: &str) -> Result<String, RenderError> {
         let resolved = self
             .registry
             .get(name)
-            .map_err(|e| Error::new(minijinja::ErrorKind::TemplateNotFound, e.to_string()))?;
+            .map_err(|e| RenderError::TemplateNotFound(e.to_string()))?;
 
         match resolved {
             ResolvedTemplate::Inline(content) => Ok(content),
@@ -503,10 +510,11 @@ impl Renderer {
                 // In debug mode, always re-read for hot reloading
                 // In release mode, we still read (could optimize with caching)
                 std::fs::read_to_string(&path).map_err(|e| {
-                    Error::new(
-                        minijinja::ErrorKind::InvalidOperation,
-                        format!("Failed to read template {}: {}", path.display(), e),
-                    )
+                    RenderError::IoError(std::io::Error::other(format!(
+                        "Failed to read template {}: {}",
+                        path.display(),
+                        e
+                    )))
                 })
             }
         }
@@ -855,5 +863,84 @@ mod tests {
         struct Empty {}
         let output3 = renderer.render("with_include", &Empty {}).unwrap();
         assert_eq!(output3, "Before PARTIAL After");
+    }
+    #[test]
+    fn test_renderer_with_custom_engine() {
+        use std::collections::HashMap;
+
+        struct MockEngine {
+            templates: HashMap<String, String>,
+        }
+
+        impl TemplateEngine for MockEngine {
+            fn add_template(&mut self, name: &str, source: &str) -> Result<(), RenderError> {
+                self.templates.insert(name.to_string(), source.to_string());
+                Ok(())
+            }
+
+            fn has_template(&self, name: &str) -> bool {
+                self.templates.contains_key(name)
+            }
+
+            fn render_template(
+                &self,
+                source: &str,
+                data: &serde_json::Value,
+            ) -> Result<String, RenderError> {
+                Ok(format!("Mock Render: {} data={}", source, data))
+            }
+
+            fn render_named(
+                &self,
+                name: &str,
+                data: &serde_json::Value,
+            ) -> Result<String, RenderError> {
+                if let Some(src) = self.templates.get(name) {
+                    Ok(format!("Mock Named: {} data={}", src, data))
+                } else {
+                    Err(RenderError::TemplateNotFound(name.to_string()))
+                }
+            }
+
+            fn render_with_context(
+                &self,
+                template: &str,
+                data: &serde_json::Value,
+                _context: HashMap<String, serde_json::Value>,
+            ) -> Result<String, RenderError> {
+                self.render_template(template, data)
+            }
+
+            fn supports_includes(&self) -> bool {
+                false
+            }
+            fn supports_filters(&self) -> bool {
+                false
+            }
+            fn supports_control_flow(&self) -> bool {
+                false
+            }
+        }
+
+        let engine = Box::new(MockEngine {
+            templates: HashMap::new(),
+        });
+        let mut renderer =
+            Renderer::with_output_and_engine(Theme::new(), OutputMode::Text, engine).unwrap();
+
+        renderer.add_template("test", "content").unwrap();
+
+        #[derive(Serialize)]
+        struct Data {
+            val: i32,
+        }
+
+        let output = renderer.render("test", &Data { val: 42 }).unwrap();
+        // The mock engine formats as "Mock Render: {}" or "Mock Named: {}"
+        // Since we added it as named template, render() calls render_named logic.
+        // Wait, render() logic:
+        // if debug_assertions || is_inline -> render_named
+        // The MockEngine::render_named returns "Mock Named: content data={...}"
+        assert_eq!(output, "Mock Named: content data={\"val\":42}");
     }
 }

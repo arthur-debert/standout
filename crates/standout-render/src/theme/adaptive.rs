@@ -9,7 +9,7 @@
 //! functions. Use [`set_theme_detector`] to override detection for testing.
 //!
 //! ```rust
-//! use standout::{Theme, ColorMode, set_theme_detector};
+//! use standout_render::{Theme, ColorMode, set_theme_detector};
 //! use console::Style;
 //!
 //! // Create an adaptive theme
@@ -49,7 +49,7 @@ static THEME_DETECTOR: Lazy<Mutex<ThemeDetector>> = Lazy::new(|| Mutex::new(os_t
 /// # Example
 ///
 /// ```rust
-/// use standout::{ColorMode, set_theme_detector};
+/// use standout_render::{ColorMode, set_theme_detector};
 ///
 /// // Force dark mode for testing
 /// set_theme_detector(|| ColorMode::Dark);

@@ -16,7 +16,7 @@ use crate::cli::handler::CommandContext;
 use crate::cli::handler::Output as HandlerOutput;
 use crate::cli::hooks::Hooks;
 use crate::context::{ContextRegistry, RenderContext};
-use crate::{render_auto_with_context, TemplateRegistry, Theme};
+use crate::Theme;
 use serde::Serialize;
 
 // Re-export pure dispatch utilities from standout-dispatch
@@ -70,7 +70,7 @@ pub(crate) fn render_handler_output<T: Serialize>(
     template: &str,
     theme: &Theme,
     context_registry: &ContextRegistry,
-    template_registry: Option<&TemplateRegistry>,
+    template_engine: &dyn standout_render::template::TemplateEngine,
     output_mode: crate::OutputMode,
 ) -> Result<DispatchOutput, String> {
     match result {
@@ -92,14 +92,14 @@ pub(crate) fn render_handler_output<T: Serialize>(
                     &json_data,
                 );
 
-                let output = render_auto_with_context(
+                let output = standout_render::template::render_auto_with_engine(
+                    template_engine,
                     template,
                     &json_data,
                     theme,
                     output_mode,
                     context_registry,
                     &render_ctx,
-                    template_registry,
                 )
                 .map_err(|e| e.to_string())?;
                 Ok(DispatchOutput::Text(output))

@@ -139,6 +139,7 @@
 // Internal modules
 pub mod context;
 mod embedded;
+mod error;
 pub mod file_loader;
 pub mod output;
 pub mod prelude;
@@ -148,8 +149,8 @@ pub mod template;
 pub mod theme;
 mod util;
 
-// Re-export minijinja::Error for convenience
-pub use minijinja::Error;
+// Error type
+pub use error::RenderError;
 
 // Style module exports (including former stylesheet exports)
 pub use style::{
@@ -169,6 +170,7 @@ pub use template::{
     render,
     render_auto,
     render_auto_with_context,
+    render_auto_with_engine,
     render_auto_with_spec,
     render_with_context,
     render_with_mode,
@@ -177,9 +179,12 @@ pub use template::{
     validate_template,
     // Template registry
     walk_template_dir,
+    // Template engine abstraction
+    MiniJinjaEngine,
     RegistryError,
     Renderer,
     ResolvedTemplate,
+    TemplateEngine,
     TemplateFile,
     TemplateRegistry,
     TEMPLATE_EXTENSIONS,

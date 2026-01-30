@@ -11,7 +11,7 @@
 //! # Example
 //!
 //! ```rust
-//! use standout::style::ColorDef;
+//! use standout_render::style::ColorDef;
 //!
 //! // Parse from YAML values
 //! let red = ColorDef::parse_value(&serde_yaml::Value::String("red".into())).unwrap();

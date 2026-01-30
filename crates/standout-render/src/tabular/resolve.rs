@@ -63,7 +63,7 @@ impl FlatDataSpec {
     /// # Example
     ///
     /// ```rust
-    /// use standout::tabular::{FlatDataSpec, Column, Width};
+    /// use standout_render::tabular::{FlatDataSpec, Column, Width};
     ///
     /// let spec = FlatDataSpec::builder()
     ///     .column(Column::new(Width::Bounded { min: Some(5), max: Some(20) }))

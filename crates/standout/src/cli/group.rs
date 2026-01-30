@@ -4,8 +4,9 @@
 //! with a fluent API, and [`CommandConfig`] for inline command configuration.
 
 use crate::context::ContextRegistry;
-use crate::TemplateRegistry;
+
 use crate::Theme;
+
 use clap::ArgMatches;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -46,7 +47,7 @@ pub(crate) trait CommandRecipe: Send + Sync {
         template: &str,
         context_registry: &ContextRegistry,
         theme: &Theme,
-        template_registry: Option<Arc<TemplateRegistry>>,
+        template_engine: Arc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn;
 }
 
@@ -109,7 +110,7 @@ where
         template: &str,
         context_registry: &ContextRegistry,
         theme: &Theme,
-        template_registry: Option<Arc<TemplateRegistry>>,
+        template_engine: Arc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn {
         let handler = self.handler.clone();
         let template = template.to_string();
@@ -130,7 +131,7 @@ where
                     &template,
                     &theme,
                     &context_registry,
-                    template_registry.as_deref(),
+                    &**template_engine,
                     output_mode,
                 )
             },
@@ -200,7 +201,7 @@ where
         template: &str,
         context_registry: &ContextRegistry,
         theme: &Theme,
-        template_registry: Option<Arc<TemplateRegistry>>,
+        template_engine: Arc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn {
         let handler = self.handler.clone();
         let template = template.to_string();
@@ -221,7 +222,7 @@ where
                     &template,
                     &theme,
                     &context_registry,
-                    template_registry.as_deref(),
+                    &**template_engine,
                     output_mode,
                 )
             },
@@ -273,7 +274,7 @@ impl CommandRecipe for ErasedConfigRecipe {
         template: &str,
         context_registry: &ContextRegistry,
         theme: &Theme,
-        template_registry: Option<Arc<TemplateRegistry>>,
+        template_engine: Arc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn {
         let config = self
             .config
@@ -286,7 +287,7 @@ impl CommandRecipe for ErasedConfigRecipe {
             template.to_string(),
             context_registry.clone(),
             theme.clone(),
-            template_registry,
+            template_engine,
         )
     }
 }
@@ -400,7 +401,7 @@ pub(crate) trait ErasedCommandConfig {
         template: String,
         context_registry: ContextRegistry,
         theme: Theme,
-        template_registry: Option<Arc<TemplateRegistry>>,
+        template_engine: Arc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn;
 }
 
@@ -619,7 +620,7 @@ where
         template: String,
         context_registry: ContextRegistry,
         theme: Theme,
-        template_registry: Option<Arc<TemplateRegistry>>,
+        template_engine: Arc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn {
         let handler = Arc::new(self.handler);
 
@@ -637,7 +638,7 @@ where
                     &template,
                     &theme,
                     &context_registry,
-                    template_registry.as_deref(),
+                    &**template_engine,
                     output_mode,
                 )
             },
@@ -679,7 +680,7 @@ where
         template: String,
         context_registry: ContextRegistry,
         theme: Theme,
-        template_registry: Option<Arc<TemplateRegistry>>,
+        template_engine: Arc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn {
         let handler = Arc::new(self.handler);
 
@@ -697,7 +698,7 @@ where
                     &template,
                     &theme,
                     &context_registry,
-                    template_registry.as_deref(),
+                    &**template_engine,
                     output_mode,
                 )
             },

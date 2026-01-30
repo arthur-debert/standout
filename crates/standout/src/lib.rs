@@ -235,8 +235,8 @@ pub use standout_render::file_loader;
 pub use standout_render::style;
 pub use standout_render::tabular;
 
-// Re-export minijinja::Error for convenience
-pub use minijinja::Error;
+// Error type (from standout-render)
+pub use standout_render::RenderError;
 
 // Style module exports (from standout-render)
 pub use standout_render::{
@@ -264,9 +264,12 @@ pub use standout_render::{
     validate_template,
     // Template registry
     walk_template_dir,
+    // Template engine abstraction
+    MiniJinjaEngine,
     RegistryError,
     Renderer,
     ResolvedTemplate,
+    TemplateEngine,
     TemplateFile,
     TemplateRegistry,
     TEMPLATE_EXTENSIONS,

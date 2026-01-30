@@ -66,18 +66,18 @@
 //! For includes, use either:
 //! - [`Renderer`] with [`add_template`](Renderer::add_template) or
 //!   [`with_embedded_source`](Renderer::with_embedded_source)
-//! - `standout::cli::App` with embedded templates via the builder (requires `standout` crate)
+//! - `standout_render::cli::App` with embedded templates via the builder (requires `standout` crate)
 //!
 //! [`Renderer`]: super::renderer::Renderer
 //! [`Renderer::set_output_mode`]: super::renderer::Renderer::set_output_mode
 
-use minijinja::{Environment, Error, Value};
 use serde::Serialize;
 use standout_bbparser::{BBParser, TagTransform, UnknownTagBehavior};
 use std::collections::HashMap;
 
-use super::filters::register_filters;
+use super::engine::{MiniJinjaEngine, TemplateEngine};
 use crate::context::{ContextRegistry, RenderContext};
+use crate::error::RenderError;
 use crate::output::OutputMode;
 use crate::style::Styles;
 use crate::tabular::FlatDataSpec;
@@ -134,7 +134,7 @@ pub(crate) fn apply_style_tags(output: &str, styles: &Styles, mode: OutputMode) 
 /// # Example
 ///
 /// ```rust
-/// use standout::{validate_template, Theme};
+/// use standout_render::{validate_template, Theme};
 /// use console::Style;
 /// use serde::Serialize;
 ///
@@ -167,14 +167,10 @@ pub fn validate_template<T: Serialize>(
     let color_mode = detect_color_mode();
     let styles = theme.resolve_styles(Some(color_mode));
 
-    // First render with MiniJinja to get the final output
-    let mut env = Environment::new();
-    register_filters(&mut env);
-
-    env.add_template_owned("_inline".to_string(), template.to_string())?;
-
-    let tmpl = env.get_template("_inline")?;
-    let minijinja_output = tmpl.render(data)?;
+    // First render with the engine to get the final output
+    let engine = MiniJinjaEngine::new();
+    let data_value = serde_json::to_value(data)?;
+    let minijinja_output = engine.render_template(template, &data_value)?;
 
     // Now validate the style tags
     let resolved_styles = styles.to_resolved_map();
@@ -199,7 +195,7 @@ pub fn validate_template<T: Serialize>(
 /// # Example
 ///
 /// ```rust
-/// use standout::{render, Theme};
+/// use standout_render::{render, Theme};
 /// use console::Style;
 /// use serde::Serialize;
 ///
@@ -213,7 +209,11 @@ pub fn validate_template<T: Serialize>(
 ///     &theme,
 /// ).unwrap();
 /// ```
-pub fn render<T: Serialize>(template: &str, data: &T, theme: &Theme) -> Result<String, Error> {
+pub fn render<T: Serialize>(
+    template: &str,
+    data: &T,
+    theme: &Theme,
+) -> Result<String, RenderError> {
     render_with_output(template, data, theme, OutputMode::Auto)
 }
 
@@ -233,7 +233,7 @@ pub fn render<T: Serialize>(template: &str, data: &T, theme: &Theme) -> Result<S
 /// # Example
 ///
 /// ```rust
-/// use standout::{render_with_output, Theme, OutputMode};
+/// use standout_render::{render_with_output, Theme, OutputMode};
 /// use console::Style;
 /// use serde::Serialize;
 ///
@@ -265,7 +265,7 @@ pub fn render_with_output<T: Serialize>(
     data: &T,
     theme: &Theme,
     mode: OutputMode,
-) -> Result<String, Error> {
+) -> Result<String, RenderError> {
     // Detect color mode and render with explicit mode
     let color_mode = detect_color_mode();
     render_with_mode(template, data, theme, mode, color_mode)
@@ -287,7 +287,7 @@ pub fn render_with_output<T: Serialize>(
 /// # Example
 ///
 /// ```rust
-/// use standout::{render_with_mode, Theme, OutputMode, ColorMode};
+/// use standout_render::{render_with_mode, Theme, OutputMode, ColorMode};
 /// use console::Style;
 /// use serde::Serialize;
 ///
@@ -326,26 +326,22 @@ pub fn render_with_mode<T: Serialize>(
     theme: &Theme,
     output_mode: OutputMode,
     color_mode: ColorMode,
-) -> Result<String, Error> {
+) -> Result<String, RenderError> {
     // Validate style aliases before rendering
     theme
         .validate()
-        .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string()))?;
+        .map_err(|e| RenderError::StyleError(e.to_string()))?;
 
     // Resolve styles for the specified color mode
     let styles = theme.resolve_styles(Some(color_mode));
 
-    let mut env = Environment::new();
-    register_filters(&mut env);
-
-    env.add_template_owned("_inline".to_string(), template.to_string())?;
-    let tmpl = env.get_template("_inline")?;
-
-    // Pass 1: MiniJinja template rendering
-    let minijinja_output = tmpl.render(data)?;
+    // Pass 1: Template rendering
+    let engine = MiniJinjaEngine::new();
+    let data_value = serde_json::to_value(data)?;
+    let template_output = engine.render_template(template, &data_value)?;
 
     // Pass 2: BBParser style tag processing
-    let final_output = apply_style_tags(&minijinja_output, &styles, output_mode);
+    let final_output = apply_style_tags(&template_output, &styles, output_mode);
 
     Ok(final_output)
 }
@@ -366,7 +362,7 @@ pub fn render_with_mode<T: Serialize>(
 /// # Example
 ///
 /// ```rust
-/// use standout::{render_with_vars, Theme, OutputMode};
+/// use standout_render::{render_with_vars, Theme, OutputMode};
 /// use serde::Serialize;
 /// use std::collections::HashMap;
 ///
@@ -396,11 +392,11 @@ pub fn render_with_vars<T, K, V, I>(
     theme: &Theme,
     mode: OutputMode,
     vars: I,
-) -> Result<String, Error>
+) -> Result<String, RenderError>
 where
     T: Serialize,
     K: AsRef<str>,
-    V: Into<Value>,
+    V: Into<serde_json::Value>,
     I: IntoIterator<Item = (K, V)>,
 {
     let color_mode = detect_color_mode();
@@ -409,38 +405,21 @@ where
     // Validate style aliases before rendering
     styles
         .validate()
-        .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string()))?;
+        .map_err(|e| RenderError::StyleError(e.to_string()))?;
 
-    let mut env = Environment::new();
-    register_filters(&mut env);
-
-    env.add_template_owned("_inline".to_string(), template.to_string())?;
-    let tmpl = env.get_template("_inline")?;
-
-    // Convert data to JSON value for merging
-    let data_json = serde_json::to_value(data)
-        .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string()))?;
-
-    // Build combined context: vars first, then data (data wins on conflict)
-    let mut context: HashMap<String, Value> = HashMap::new();
-
-    // Add injected vars
+    // Build context from vars
+    let mut context: HashMap<String, serde_json::Value> = HashMap::new();
     for (key, value) in vars {
         context.insert(key.as_ref().to_string(), value.into());
     }
 
-    // Add data fields (overwriting any conflicting vars)
-    if let serde_json::Value::Object(map) = data_json {
-        for (key, value) in map {
-            context.insert(key, Value::from_serialize(&value));
-        }
-    }
-
-    // Pass 1: MiniJinja template rendering
-    let minijinja_output = tmpl.render(&context)?;
+    // Pass 1: Template rendering with context
+    let engine = MiniJinjaEngine::new();
+    let data_value = serde_json::to_value(data)?;
+    let template_output = engine.render_with_context(template, &data_value, context)?;
 
     // Pass 2: BBParser style tag processing
-    let final_output = apply_style_tags(&minijinja_output, &styles, mode);
+    let final_output = apply_style_tags(&template_output, &styles, mode);
 
     Ok(final_output)
 }
@@ -462,7 +441,7 @@ where
 /// # Example
 ///
 /// ```rust
-/// use standout::{render_auto, Theme, OutputMode};
+/// use standout_render::{render_auto, Theme, OutputMode};
 /// use console::Style;
 /// use serde::Serialize;
 ///
@@ -496,35 +475,23 @@ pub fn render_auto<T: Serialize>(
     data: &T,
     theme: &Theme,
     mode: OutputMode,
-) -> Result<String, Error> {
+) -> Result<String, RenderError> {
     if mode.is_structured() {
         match mode {
-            OutputMode::Json => serde_json::to_string_pretty(data)
-                .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())),
-            OutputMode::Yaml => serde_yaml::to_string(data)
-                .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())),
-            OutputMode::Xml => quick_xml::se::to_string(data)
-                .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())),
+            OutputMode::Json => Ok(serde_json::to_string_pretty(data)?),
+            OutputMode::Yaml => Ok(serde_yaml::to_string(data)?),
+            OutputMode::Xml => Ok(quick_xml::se::to_string(data)?),
             OutputMode::Csv => {
-                let value = serde_json::to_value(data).map_err(|e| {
-                    Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
-                })?;
+                let value = serde_json::to_value(data)?;
                 let (headers, rows) = crate::util::flatten_json_for_csv(&value);
 
                 let mut wtr = csv::Writer::from_writer(Vec::new());
-                wtr.write_record(&headers).map_err(|e| {
-                    Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
-                })?;
+                wtr.write_record(&headers)?;
                 for row in rows {
-                    wtr.write_record(&row).map_err(|e| {
-                        Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
-                    })?;
+                    wtr.write_record(&row)?;
                 }
-                let bytes = wtr.into_inner().map_err(|e| {
-                    Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
-                })?;
-                String::from_utf8(bytes)
-                    .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string()))
+                let bytes = wtr.into_inner()?;
+                Ok(String::from_utf8(bytes)?)
             }
             _ => unreachable!("is_structured() returned true for non-structured mode"),
         }
@@ -552,19 +519,14 @@ pub fn render_auto_with_spec<T: Serialize>(
     theme: &Theme,
     mode: OutputMode,
     spec: Option<&FlatDataSpec>,
-) -> Result<String, Error> {
+) -> Result<String, RenderError> {
     if mode.is_structured() {
         match mode {
-            OutputMode::Json => serde_json::to_string_pretty(data)
-                .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())),
-            OutputMode::Yaml => serde_yaml::to_string(data)
-                .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())),
-            OutputMode::Xml => quick_xml::se::to_string(data)
-                .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())),
+            OutputMode::Json => Ok(serde_json::to_string_pretty(data)?),
+            OutputMode::Yaml => Ok(serde_yaml::to_string(data)?),
+            OutputMode::Xml => Ok(quick_xml::se::to_string(data)?),
             OutputMode::Csv => {
-                let value = serde_json::to_value(data).map_err(|e| {
-                    Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
-                })?;
+                let value = serde_json::to_value(data)?;
 
                 let (headers, rows) = if let Some(s) = spec {
                     // Use the spec for explicit extraction
@@ -582,19 +544,12 @@ pub fn render_auto_with_spec<T: Serialize>(
                 };
 
                 let mut wtr = csv::Writer::from_writer(Vec::new());
-                wtr.write_record(&headers).map_err(|e| {
-                    Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
-                })?;
+                wtr.write_record(&headers)?;
                 for row in rows {
-                    wtr.write_record(&row).map_err(|e| {
-                        Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
-                    })?;
+                    wtr.write_record(&row)?;
                 }
-                let bytes = wtr.into_inner().map_err(|e| {
-                    Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
-                })?;
-                String::from_utf8(bytes)
-                    .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string()))
+                let bytes = wtr.into_inner()?;
+                Ok(String::from_utf8(bytes)?)
             }
             _ => unreachable!("is_structured() returned true for non-structured mode"),
         }
@@ -631,8 +586,8 @@ pub fn render_auto_with_spec<T: Serialize>(
 /// # Example
 ///
 /// ```rust
-/// use standout::{render_with_context, Theme, OutputMode};
-/// use standout::context::{RenderContext, ContextRegistry};
+/// use standout_render::{render_with_context, Theme, OutputMode};
+/// use standout_render::context::{RenderContext, ContextRegistry};
 /// use minijinja::Value;
 /// use serde::Serialize;
 ///
@@ -675,17 +630,16 @@ pub fn render_with_context<T: Serialize>(
     context_registry: &ContextRegistry,
     render_context: &RenderContext,
     template_registry: Option<&super::TemplateRegistry>,
-) -> Result<String, Error> {
+) -> Result<String, RenderError> {
     let color_mode = detect_color_mode();
     let styles = theme.resolve_styles(Some(color_mode));
 
     // Validate style aliases before rendering
     styles
         .validate()
-        .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string()))?;
+        .map_err(|e| RenderError::StyleError(e.to_string()))?;
 
-    let mut env = Environment::new();
-    register_filters(&mut env);
+    let mut engine = MiniJinjaEngine::new();
 
     // Check if template is a registry key (name) or inline content.
     // If the registry contains a template with this name, use its content.
@@ -700,31 +654,25 @@ pub fn render_with_context<T: Serialize>(
         template.to_string()
     };
 
-    env.add_template_owned("_inline".to_string(), template_content)?;
-
     // Load all templates from registry if available (enables {% include %})
     if let Some(registry) = template_registry {
         for name in registry.names() {
             if let Ok(content) = registry.get_content(name) {
-                // Ensure we don't overwrite the main template if named same as a registry template
-                if name != "_inline" {
-                    env.add_template_owned(name.to_string(), content)?;
-                }
+                engine.add_template(name, &content)?;
             }
         }
     }
 
-    let tmpl = env.get_template("_inline")?;
-
     // Build the combined context: data + injected context
     // Data fields take precedence over context fields
-    let combined = build_combined_context(data, context_registry, render_context)?;
+    let context = build_combined_context(data, context_registry, render_context)?;
 
-    // Pass 1: MiniJinja template rendering
-    let minijinja_output = tmpl.render(&combined)?;
+    // Pass 1: Template rendering with context
+    let data_value = serde_json::to_value(data)?;
+    let template_output = engine.render_with_context(&template_content, &data_value, context)?;
 
     // Pass 2: BBParser style tag processing
-    let final_output = apply_style_tags(&minijinja_output, &styles, mode);
+    let final_output = apply_style_tags(&template_output, &styles, mode);
 
     Ok(final_output)
 }
@@ -747,8 +695,8 @@ pub fn render_with_context<T: Serialize>(
 /// # Example
 ///
 /// ```rust
-/// use standout::{render_auto_with_context, Theme, OutputMode};
-/// use standout::context::{RenderContext, ContextRegistry};
+/// use standout_render::{render_auto_with_context, Theme, OutputMode};
+/// use standout_render::context::{RenderContext, ContextRegistry};
 /// use minijinja::Value;
 /// use serde::Serialize;
 ///
@@ -803,35 +751,23 @@ pub fn render_auto_with_context<T: Serialize>(
     context_registry: &ContextRegistry,
     render_context: &RenderContext,
     template_registry: Option<&super::TemplateRegistry>,
-) -> Result<String, Error> {
+) -> Result<String, RenderError> {
     if mode.is_structured() {
         match mode {
-            OutputMode::Json => serde_json::to_string_pretty(data)
-                .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())),
-            OutputMode::Yaml => serde_yaml::to_string(data)
-                .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())),
-            OutputMode::Xml => quick_xml::se::to_string(data)
-                .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())),
+            OutputMode::Json => Ok(serde_json::to_string_pretty(data)?),
+            OutputMode::Yaml => Ok(serde_yaml::to_string(data)?),
+            OutputMode::Xml => Ok(quick_xml::se::to_string(data)?),
             OutputMode::Csv => {
-                let value = serde_json::to_value(data).map_err(|e| {
-                    Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
-                })?;
+                let value = serde_json::to_value(data)?;
                 let (headers, rows) = crate::util::flatten_json_for_csv(&value);
 
                 let mut wtr = csv::Writer::from_writer(Vec::new());
-                wtr.write_record(&headers).map_err(|e| {
-                    Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
-                })?;
+                wtr.write_record(&headers)?;
                 for row in rows {
-                    wtr.write_record(&row).map_err(|e| {
-                        Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
-                    })?;
+                    wtr.write_record(&row)?;
                 }
-                let bytes = wtr.into_inner().map_err(|e| {
-                    Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
-                })?;
-                String::from_utf8(bytes)
-                    .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string()))
+                let bytes = wtr.into_inner()?;
+                Ok(String::from_utf8(bytes)?)
             }
             _ => unreachable!("is_structured() returned true for non-structured mode"),
         }
@@ -855,58 +791,94 @@ fn build_combined_context<T: Serialize>(
     data: &T,
     context_registry: &ContextRegistry,
     render_context: &RenderContext,
-) -> Result<HashMap<String, Value>, Error> {
+) -> Result<HashMap<String, serde_json::Value>, RenderError> {
     // First, resolve all context providers
     let context_values = context_registry.resolve(render_context);
 
     // Convert data to a map of values
-    let data_value = serde_json::to_value(data)
-        .map_err(|e| Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string()))?;
+    let data_value = serde_json::to_value(data)?;
 
-    let mut combined: HashMap<String, Value> = HashMap::new();
+    let mut combined: HashMap<String, serde_json::Value> = HashMap::new();
 
     // Add context values first (lower priority)
     for (key, value) in context_values {
-        combined.insert(key, value);
+        // Convert minijinja::Value to serde_json::Value
+        // This is a bit inefficient but necessary for the abstraction
+        // In the future, ContextRegistry should probably return serde_json::Value
+        let json_val =
+            serde_json::to_value(value).map_err(|e| RenderError::ContextError(e.to_string()))?;
+        combined.insert(key, json_val);
     }
 
     // Add data values (higher priority - overwrites context)
     if let Some(obj) = data_value.as_object() {
         for (key, value) in obj {
-            let minijinja_value = json_to_minijinja(value);
-            combined.insert(key.clone(), minijinja_value);
+            combined.insert(key.clone(), value.clone());
         }
     }
 
     Ok(combined)
 }
 
-/// Converts a serde_json::Value to a minijinja::Value.
-fn json_to_minijinja(json: &serde_json::Value) -> Value {
-    match json {
-        serde_json::Value::Null => Value::from(()),
-        serde_json::Value::Bool(b) => Value::from(*b),
-        serde_json::Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                Value::from(i)
-            } else if let Some(f) = n.as_f64() {
-                Value::from(f)
-            } else {
-                Value::from(n.to_string())
+/// Auto-dispatches rendering using a provided TemplateEngine.
+///
+/// This is similar to `render_auto_with_context` but allows using a pre-configured
+/// `TemplateEngine` trait object instead of creating a new dictionary-based engine.
+pub fn render_auto_with_engine(
+    engine: &dyn super::TemplateEngine,
+    template: &str,
+    data: &serde_json::Value,
+    theme: &Theme,
+    mode: OutputMode,
+    context_registry: &ContextRegistry,
+    render_context: &RenderContext,
+) -> Result<String, RenderError> {
+    if mode.is_structured() {
+        match mode {
+            OutputMode::Json => Ok(serde_json::to_string_pretty(data)?),
+            OutputMode::Yaml => Ok(serde_yaml::to_string(data)?),
+            OutputMode::Xml => Ok(quick_xml::se::to_string(data)?),
+            OutputMode::Csv => {
+                let (headers, rows) = crate::util::flatten_json_for_csv(data);
+
+                let mut wtr = csv::Writer::from_writer(Vec::new());
+                wtr.write_record(&headers)?;
+                for row in rows {
+                    wtr.write_record(&row)?;
+                }
+                let bytes = wtr.into_inner()?;
+                Ok(String::from_utf8(bytes)?)
             }
+            _ => unreachable!("is_structured() returned true for non-structured mode"),
         }
-        serde_json::Value::String(s) => Value::from(s.clone()),
-        serde_json::Value::Array(arr) => {
-            let items: Vec<Value> = arr.iter().map(json_to_minijinja).collect();
-            Value::from(items)
-        }
-        serde_json::Value::Object(obj) => {
-            let map: HashMap<String, Value> = obj
-                .iter()
-                .map(|(k, v)| (k.clone(), json_to_minijinja(v)))
-                .collect();
-            Value::from_iter(map)
-        }
+    } else {
+        let color_mode = detect_color_mode();
+        let styles = theme.resolve_styles(Some(color_mode));
+
+        // Validate style aliases before rendering
+        styles
+            .validate()
+            .map_err(|e| RenderError::StyleError(e.to_string()))?;
+
+        // Build the combined context: data + injected context
+        // Note: data is already Value, but build_combined_context expects T: Serialize
+        // We can pass &data directly since Value implements Serialize
+        let context_map = build_combined_context(data, context_registry, render_context)?;
+
+        // Merge into a single Value for the engine
+        let combined_value = serde_json::Value::Object(context_map.into_iter().collect());
+
+        // Render template
+        let template_output = if engine.has_template(template) {
+            engine.render_named(template, &combined_value)?
+        } else {
+            engine.render_template(template, &combined_value)?
+        };
+
+        // Apply styles
+        let final_output = apply_style_tags(&template_output, &styles, mode);
+
+        Ok(final_output)
     }
 }
 
@@ -916,6 +888,7 @@ mod tests {
     use crate::tabular::{Column, FlatDataSpec, Width};
     use crate::Theme;
     use console::Style;
+    use minijinja::Value;
     use serde::Serialize;
     use serde_json::json;
 
