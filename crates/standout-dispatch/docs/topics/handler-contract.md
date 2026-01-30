@@ -256,64 +256,104 @@ Binary output bypasses the render function entirely.
 
 ## CommandContext
 
-`CommandContext` provides execution environment information:
+`CommandContext` provides execution environment information and state access:
 
 ```rust
 pub struct CommandContext {
     pub command_path: Vec<String>,
+    pub app_state: Arc<Extensions>,
     pub extensions: Extensions,
 }
 ```
 
 **command_path**: The subcommand chain as a vector, e.g., `["db", "migrate"]`. Useful for logging or conditional logic.
 
-**extensions**: A type-safe container for injected state. Pre-dispatch hooks can insert values that handlers retrieve.
+**app_state**: Shared, immutable state configured at app build time via `AppBuilder::app_state()`. Wrapped in `Arc` for cheap cloning. Use for database connections, configuration, API clients.
+
+**extensions**: Per-request, mutable state injected by pre-dispatch hooks. Use for user sessions, request IDs, computed values.
+
+> For comprehensive coverage of state management, see [App State and Extensions](app-state.md).
 
 ---
 
-## Extensions
+## State Access: App State vs Extensions
 
-`Extensions` is a type-safe map for dependency injection. Pre-dispatch hooks inject state that handlers retrieve without modifying the handler signature.
+Handlers access state through two distinct mechanisms with different semantics:
 
-### Injecting State (in pre-dispatch hooks)
+| Aspect | `ctx.app_state` | `ctx.extensions` |
+|--------|-----------------|------------------|
+| **Mutability** | Immutable (`&`) | Mutable (`&mut`) |
+| **Lifetime** | App lifetime | Per-request |
+| **Set by** | `AppBuilder::app_state()` | Pre-dispatch hooks |
+| **Use for** | Database, Config, API clients | User sessions, request IDs |
+
+### App State (Shared Resources)
+
+Configure long-lived resources at build time:
 
 ```rust
-use standout_dispatch::{Hooks, HookError};
-
-struct Database { connection_string: String }
-struct Config { max_results: usize }
-
-let hooks = Hooks::new()
-    .pre_dispatch(|_matches, ctx| {
-        ctx.extensions.insert(Database {
-            connection_string: std::env::var("DATABASE_URL")
-                .map_err(|_| HookError::pre_dispatch("DATABASE_URL required"))?
-        });
-        ctx.extensions.insert(Config { max_results: 100 });
-        Ok(())
-    });
+App::builder()
+    .app_state(Database::connect()?)
+    .app_state(Config::load()?)
+    .command("list", list_handler, template)
+    .build()?
 ```
 
-### Retrieving State (in handlers)
+Access in handlers via `ctx.app_state`:
 
 ```rust
 fn list_handler(matches: &ArgMatches, ctx: &CommandContext) -> HandlerResult<Vec<Item>> {
-    let db = ctx.extensions.get::<Database>()
-        .ok_or_else(|| anyhow::anyhow!("Database not configured"))?;
-    let config = ctx.extensions.get::<Config>()
-        .ok_or_else(|| anyhow::anyhow!("Config not configured"))?;
+    let db = ctx.app_state.get_required::<Database>()?;
+    let config = ctx.app_state.get_required::<Config>()?;
 
     let items = db.query_items(config.max_results)?;
     Ok(Output::Render(items))
 }
 ```
 
+### Extensions (Per-Request State)
+
+Pre-dispatch hooks inject request-scoped state:
+
+```rust
+use standout_dispatch::{Hooks, HookError};
+
+struct UserScope { user_id: String, permissions: Vec<String> }
+
+let hooks = Hooks::new()
+    .pre_dispatch(|matches, ctx| {
+        // Can read app_state to set up per-request state
+        let db = ctx.app_state.get_required::<Database>()?;
+
+        let user_id = matches.get_one::<String>("user").unwrap().clone();
+        let permissions = db.get_permissions(&user_id)?;
+
+        ctx.extensions.insert(UserScope { user_id, permissions });
+        Ok(())
+    });
+```
+
+Handlers retrieve from extensions:
+
+```rust
+fn list_handler(matches: &ArgMatches, ctx: &CommandContext) -> HandlerResult<Vec<Item>> {
+    let db = ctx.app_state.get_required::<Database>()?;       // shared
+    let scope = ctx.extensions.get_required::<UserScope>()?;  // per-request
+
+    let items = db.list_for_user(&scope.user_id)?;
+    Ok(Output::Render(items))
+}
+```
+
 ### Extensions API
+
+Both `app_state` and `extensions` use the same `Extensions` type with these methods:
 
 | Method | Description |
 |--------|-------------|
 | `insert<T>(value)` | Insert a value, returns previous if any |
 | `get<T>()` | Get immutable reference, returns `Option<&T>` |
+| `get_required<T>()` | Get reference or return error if missing |
 | `get_mut<T>()` | Get mutable reference, returns `Option<&mut T>` |
 | `remove<T>()` | Remove and return value |
 | `contains<T>()` | Check if type exists |
@@ -321,59 +361,43 @@ fn list_handler(matches: &ArgMatches, ctx: &CommandContext) -> HandlerResult<Vec
 | `is_empty()` | True if no values stored |
 | `clear()` | Remove all values |
 
-### Why Use Extensions?
+Use `get_required` for mandatory dependencies (fails fast with clear error), `get` for optional ones.
 
-Extensions solve the problem of passing dependencies to handlers when using the `#[derive(Dispatch)]` macro. Without extensions, macro-generated dispatch code calls handler functions with a fixed signature—there's no way to inject database connections, API clients, or configuration.
+### When to Use Which
 
-**Without extensions** (the closure capture pattern):
+**Use App State for:**
+- Database connections — expensive to create, should be pooled
+- Configuration — loaded once at startup
+- API clients — shared HTTP clients with connection pooling
+
+**Use Extensions for:**
+- User context — current user, session, permissions
+- Request metadata — request ID, timing, correlation ID
+- Transient state — data computed by one hook, used by handler
+
+### The Two-State Pattern
+
+The separation exists because:
+
+1. **Closure capture doesn't work with `#[derive(Dispatch)]`** — macro-generated dispatch calls handlers with a fixed signature
+2. **App-level resources shouldn't be created per-request** — database pools and config are expensive
+3. **Per-request state needs mutable injection** — hooks compute values at runtime
 
 ```rust
-// Works with explicit closures, but NOT with derive macro
-let db = Arc::new(database);
+// App state: configured once at build time
 App::builder()
-    .command("list", move |m, ctx| {
-        let items = db.query()?;  // captured
-        Ok(Output::Render(items))
-    }, template)
+    .app_state(Database::connect()?)  // Shared via Arc
+    .hooks("users.list", Hooks::new()
+        .pre_dispatch(|matches, ctx| {
+            // Extensions: computed per-request, can use app_state
+            let db = ctx.app_state.get_required::<Database>()?;
+            let user = authenticate(matches, db)?;
+            ctx.extensions.insert(user);
+            Ok(())
+        }))
 ```
 
-**With extensions** (works with derive macro):
-
-```rust
-// Pre-dispatch hook injects dependencies
-let hooks = Hooks::new().pre_dispatch(|_m, ctx| {
-    ctx.extensions.insert(database);
-    Ok(())
-});
-
-// Handler retrieves them - works with both closures AND derive macro
-fn list_handler(m: &ArgMatches, ctx: &CommandContext) -> HandlerResult<Items> {
-    let db = ctx.extensions.get::<Database>().unwrap();
-    Ok(Output::Render(db.query()?))
-}
-```
-
-### Alternative: Struct Handlers
-
-For simpler cases without the derive macro, struct handlers remain a valid approach:
-
-```rust
-struct MyHandler {
-    db: DatabasePool,
-    config: AppConfig,
-}
-
-impl Handler for MyHandler {
-    type Output = Data;
-
-    fn handle(&self, matches: &ArgMatches, ctx: &CommandContext) -> HandlerResult<Data> {
-        let result = self.db.query(...)?;
-        Ok(Output::Render(result))
-    }
-}
-```
-
-Choose extensions when using `#[derive(Dispatch)]` or when you want hook-based dependency injection. Choose struct handlers when building handlers programmatically with explicit state.
+> For comprehensive coverage of state management patterns, see [App State and Extensions](app-state.md).
 
 ---
 
@@ -431,6 +455,38 @@ fn test_list_handler() {
 ```
 
 No mocking frameworks needed—construct `ArgMatches` with clap, create a `CommandContext`, call your handler, assert on the result.
+
+### Testing with App State
+
+When handlers depend on app_state, inject test fixtures:
+
+```rust
+#[test]
+fn test_handler_with_app_state() {
+    use std::sync::Arc;
+
+    // Create test fixtures
+    let mock_db = MockDatabase::with_items(vec![
+        Item { id: "1", name: "Test" }
+    ]);
+
+    // Build app_state with test data
+    let mut app_state = Extensions::new();
+    app_state.insert(mock_db);
+
+    let ctx = CommandContext {
+        command_path: vec!["list".into()],
+        app_state: Arc::new(app_state),
+        extensions: Extensions::new(),
+    };
+
+    let cmd = Command::new("test");
+    let matches = cmd.try_get_matches_from(["test"]).unwrap();
+
+    let result = list_handler(&matches, &ctx);
+    assert!(result.is_ok());
+}
+```
 
 ### Testing LocalHandlers
 

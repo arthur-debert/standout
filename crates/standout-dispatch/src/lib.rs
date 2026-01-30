@@ -54,11 +54,36 @@
 //! This pattern means dispatch calls `render_handler(view, data)` without knowing
 //! what format, theme, or template engine is being used.
 //!
+//! # State Management
+//!
+//! [`CommandContext`] provides two mechanisms for dependency injection:
+//!
+//! - **`app_state`**: Immutable, app-lifetime state (database, config, API clients).
+//!   Configured at app build time, shared across all dispatches via `Arc<Extensions>`.
+//!
+//! - **`extensions`**: Mutable, per-request state. Injected by pre-dispatch hooks
+//!   for request-scoped data like user sessions or request IDs.
+//!
+//! ```rust,ignore
+//! // App-level state (build time)
+//! App::builder()
+//!     .app_state(Database::connect()?)
+//!     .app_state(Config::load()?)
+//!
+//! // In handler
+//! fn handler(matches: &ArgMatches, ctx: &CommandContext) -> HandlerResult<T> {
+//!     let db = ctx.app_state.get_required::<Database>()?;   // shared
+//!     let scope = ctx.extensions.get_required::<UserScope>()?; // per-request
+//!     // ...
+//! }
+//! ```
+//!
 //! # Features
 //!
 //! - Command routing: Extract command paths from clap `ArgMatches`
 //! - Handler traits: Thread-safe ([`Handler`]) and local ([`LocalHandler`]) variants
 //! - Hook system: Pre/post dispatch and post-output hooks for cross-cutting concerns
+//! - State injection: App-level state via `app_state`, per-request state via `extensions`
 //! - Render abstraction: Pluggable render handlers via [`RenderFn`] / [`LocalRenderFn`]
 //!
 //! # Usage

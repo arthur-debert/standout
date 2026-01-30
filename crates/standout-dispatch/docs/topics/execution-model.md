@@ -67,54 +67,79 @@ let deep = get_deepest_matches(&matches);  // ArgMatches for "migrate"
 
 ---
 
+## State Injection
+
+Handlers access state through `CommandContext`, which provides two mechanisms:
+
+- **`app_state`**: Shared, immutable state configured at build time (database, config)
+- **`extensions`**: Per-request, mutable state injected by hooks
+
+```rust
+fn handler(matches: &ArgMatches, ctx: &CommandContext) -> HandlerResult<T> {
+    // App state: shared resources
+    let db = ctx.app_state.get_required::<Database>()?;
+
+    // Extensions: per-request state
+    let scope = ctx.extensions.get_required::<UserScope>()?;
+    // ...
+}
+```
+
+> For full details on state management, see [App State and Extensions](app-state.md).
+
+---
+
 ## The Hooks System
 
 Hooks are functions that run at specific points in the pipeline. They let you intercept, validate, or transform without touching handler logic—keeping concerns separated.
 
 ### Three Phases
 
-**Pre-dispatch**: Runs before the handler. Can abort execution or inject state.
+**Pre-dispatch**: Runs before the handler. Can abort execution or inject per-request state.
 
-Use for: authentication checks, input validation, logging start time, **dependency injection**.
+Use for: authentication checks, input validation, logging start time, **injecting per-request state** via `extensions`.
 
-Pre-dispatch hooks receive `&mut CommandContext`, allowing them to inject state via `ctx.extensions` that handlers can retrieve:
+Pre-dispatch hooks receive `&mut CommandContext`, allowing them to inject state via `ctx.extensions` that handlers can retrieve. They also have read access to `ctx.app_state` for shared resources:
 
 ```rust
 use standout_dispatch::{Hooks, HookError};
 
-// Define your state types
-struct ApiClient { base_url: String }
+// Per-request state types (injected by hooks)
 struct UserSession { user_id: u64 }
 
 Hooks::new()
     .pre_dispatch(|matches, ctx| {
-        // Validate auth and inject client
+        // Read from app_state (shared)
+        let db = ctx.app_state.get_required::<Database>()?;
+
+        // Validate and set up per-request state
         let token = std::env::var("API_TOKEN")
             .map_err(|_| HookError::pre_dispatch("API_TOKEN required"))?;
 
-        ctx.extensions.insert(ApiClient {
-            base_url: "https://api.example.com".into()
-        });
-        ctx.extensions.insert(UserSession { user_id: 42 });
+        let user_id = db.validate_token(&token)?;
+
+        // Inject into extensions (per-request)
+        ctx.extensions.insert(UserSession { user_id });
         Ok(())
     })
 ```
 
-Handlers then retrieve the injected state:
+Handlers then use both app_state and extensions:
 
 ```rust
 fn list_handler(matches: &ArgMatches, ctx: &CommandContext) -> HandlerResult<Vec<Item>> {
-    let api = ctx.extensions.get::<ApiClient>()
-        .ok_or_else(|| anyhow::anyhow!("ApiClient not initialized"))?;
-    let session = ctx.extensions.get::<UserSession>()
-        .ok_or_else(|| anyhow::anyhow!("UserSession not initialized"))?;
+    // App state: shared across all requests
+    let db = ctx.app_state.get_required::<Database>()?;
 
-    let items = api.fetch_items(session.user_id)?;
+    // Extensions: per-request state from hooks
+    let session = ctx.extensions.get_required::<UserSession>()?;
+
+    let items = db.fetch_items(session.user_id)?;
     Ok(Output::Render(items))
 }
 ```
 
-See the [Handler Contract](handler-contract.md#extensions) for full `Extensions` API documentation.
+See the [Handler Contract](handler-contract.md#extensions) for full `Extensions` API documentation, and [App State](app-state.md) for details on the two-state model.
 
 **Post-dispatch**: Runs after the handler, before rendering. Can transform data.
 

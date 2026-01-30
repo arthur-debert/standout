@@ -40,11 +40,13 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use clap::ArgMatches;
 use serde::Serialize;
 
 use crate::context::ContextRegistry;
+use standout_dispatch::Extensions;
 
 use crate::TemplateRegistry;
 use crate::{OutputMode, Theme};
@@ -242,6 +244,8 @@ pub struct LocalAppBuilder {
     pub(crate) template_dir: Option<std::path::PathBuf>,
     pub(crate) template_ext: String,
     pub(crate) default_command: Option<String>,
+    /// App-level state shared across all dispatches.
+    pub(crate) app_state: Arc<Extensions>,
 }
 
 impl Default for LocalAppBuilder {
@@ -268,7 +272,36 @@ impl LocalAppBuilder {
             template_dir: None,
             template_ext: ".j2".to_string(),
             default_command: None,
+            app_state: Arc::new(Extensions::new()),
         }
+    }
+
+    /// Adds app-level state that will be available to all handlers.
+    ///
+    /// App state is immutable and shared across all dispatches via `Arc<Extensions>`.
+    /// Use for long-lived resources like database connections, configuration, and
+    /// API clients.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use standout::cli::LocalApp;
+    ///
+    /// struct Config { debug: bool }
+    ///
+    /// let app = LocalApp::builder()
+    ///     .app_state(Config { debug: true })
+    ///     .command("list", |matches, ctx| {
+    ///         let config = ctx.app_state.get_required::<Config>()?;
+    ///         Ok(Output::Render(vec!["item"]))
+    ///     }, "{{ items }}")
+    ///     .build()?;
+    /// ```
+    pub fn app_state<T: Send + Sync + 'static>(mut self, value: T) -> Self {
+        Arc::get_mut(&mut self.app_state)
+            .expect("app_state Arc should be exclusively owned during builder phase")
+            .insert(value);
+        self
     }
 
     // ============================================================================
@@ -476,7 +509,6 @@ impl LocalAppBuilder {
     /// Builds the LocalApp instance.
     pub fn build(mut self) -> Result<App<Local>, SetupError> {
         use super::core::AppCore;
-        use std::sync::Arc;
 
         // Resolve theme
         let theme = if let Some(theme) = self.theme.take() {
@@ -518,6 +550,7 @@ impl LocalAppBuilder {
             template_registry,
             stylesheet_registry: self.stylesheet_registry,
             context_registry: self.context_registry,
+            app_state: self.app_state,
         };
 
         Ok(App {

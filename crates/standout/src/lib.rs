@@ -207,10 +207,14 @@
 //! // Simple parsing with styled help
 //! let matches = App::parse(Command::new("my-app"));
 //!
-//! // Full application with command dispatch
+//! // Full application with command dispatch and app state
+//! struct Database { /* ... */ }
+//!
 //! App::builder()
-//!     .command("list", |_m, _ctx| {
-//!         Ok(Output::Render(json!({"items": ["a", "b"]})))
+//!     .app_state(Database::connect()?)  // Shared state for all handlers
+//!     .command("list", |_m, ctx| {
+//!         let db = ctx.app_state.get_required::<Database>()?;
+//!         Ok(Output::Render(json!({"items": db.list()?})))
 //!     }, "{% for item in items %}{{ item }}\n{% endfor %}")
 //!     .build()?
 //!     .run(cmd, std::env::args());

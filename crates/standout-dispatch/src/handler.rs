@@ -19,6 +19,42 @@
 //! This separation keeps handlers focused and testable - you can unit test
 //! a handler by checking the data it returns, without worrying about rendering.
 //!
+//! # State Management: App State vs Extensions
+//!
+//! [`CommandContext`] provides two mechanisms for state injection:
+//!
+//! | Field | Mutability | Lifetime | Purpose |
+//! |-------|------------|----------|---------|
+//! | `app_state` | Immutable (`&`) | App lifetime (shared via Arc) | Database, Config, API clients |
+//! | `extensions` | Mutable (`&mut`) | Request lifetime | Per-request state, user scope |
+//!
+//! **App State** is configured at app build time via `AppBuilder::app_state()` and shared
+//! immutably across all command invocations. Use for long-lived resources:
+//!
+//! ```rust,ignore
+//! // At app build time
+//! App::builder()
+//!     .app_state(Database::connect()?)
+//!     .app_state(Config::load()?)
+//!     .build()?
+//!
+//! // In handlers
+//! fn list_handler(matches: &ArgMatches, ctx: &CommandContext) -> HandlerResult<Vec<User>> {
+//!     let db = ctx.app_state.get_required::<Database>()?;
+//!     Ok(Output::Render(db.list_users()?))
+//! }
+//! ```
+//!
+//! **Extensions** are injected per-request by pre-dispatch hooks. Use for request-scoped data:
+//!
+//! ```rust,ignore
+//! Hooks::new().pre_dispatch(|matches, ctx| {
+//!     let user_id = matches.get_one::<String>("user").unwrap();
+//!     ctx.extensions.insert(UserScope { user_id: user_id.clone() });
+//!     Ok(())
+//! })
+//! ```
+//!
 //! # Core Types
 //!
 //! - [`CommandContext`]: Environment information passed to handlers
@@ -34,6 +70,7 @@ use serde::Serialize;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::Arc;
 
 /// Type-safe container for injecting custom state into handlers.
 ///
@@ -176,43 +213,93 @@ impl Clone for Extensions {
 
 /// Context passed to command handlers.
 ///
-/// Provides information about the execution environment plus an extensions
-/// container for injecting custom state via pre-dispatch hooks.
+/// Provides information about the execution environment plus two mechanisms
+/// for state injection:
+///
+/// - **`app_state`**: Immutable, app-lifetime state (Database, Config, API clients)
+/// - **`extensions`**: Mutable, per-request state (UserScope, RequestId)
 ///
 /// Note that output format is deliberately not included here - format decisions
 /// are made by the render handler, not by logic handlers.
 ///
-/// # Extensions
+/// # App State (Immutable, Shared)
 ///
-/// Pre-dispatch hooks can inject state into `extensions` that handlers retrieve:
+/// App state is configured at build time and shared across all dispatches:
+///
+/// ```rust,ignore
+/// use standout::cli::App;
+///
+/// struct Database { /* ... */ }
+/// struct Config { api_url: String }
+///
+/// App::builder()
+///     .app_state(Database::connect()?)
+///     .app_state(Config { api_url: "https://api.example.com".into() })
+///     .command("list", list_handler, "{{ items }}")
+///     .build()?
+/// ```
+///
+/// Handlers retrieve app state immutably:
+///
+/// ```rust,ignore
+/// fn list_handler(matches: &ArgMatches, ctx: &CommandContext) -> HandlerResult<Vec<Item>> {
+///     let db = ctx.app_state.get_required::<Database>()?;
+///     let config = ctx.app_state.get_required::<Config>()?;
+///     Ok(Output::Render(db.list_items(&config.api_url)?))
+/// }
+/// ```
+///
+/// # Extensions (Mutable, Per-Request)
+///
+/// Pre-dispatch hooks inject per-request state into `extensions`:
 ///
 /// ```rust
 /// use standout_dispatch::{Hooks, HookError, CommandContext};
 ///
-/// struct Database { /* ... */ }
+/// struct UserScope { user_id: String }
 ///
 /// let hooks = Hooks::new()
-///     .pre_dispatch(|_matches, ctx| {
-///         ctx.extensions.insert(Database { /* ... */ });
+///     .pre_dispatch(|matches, ctx| {
+///         let user_id = matches.get_one::<String>("user").unwrap();
+///         ctx.extensions.insert(UserScope { user_id: user_id.clone() });
 ///         Ok(())
 ///     });
 ///
 /// // In handler:
 /// fn my_handler(matches: &clap::ArgMatches, ctx: &CommandContext) -> anyhow::Result<()> {
-///     let db = ctx.extensions.get_required::<Database>()?;
-///     // use db...
+///     let scope = ctx.extensions.get_required::<UserScope>()?;
+///     // use scope.user_id...
 ///     Ok(())
 /// }
 /// ```
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct CommandContext {
     /// The command path being executed (e.g., ["config", "get"])
     pub command_path: Vec<String>,
 
-    /// Type-safe container for custom state injection.
+    /// Immutable app-level state shared across all dispatches.
+    ///
+    /// Configured via `AppBuilder::app_state()`. Contains long-lived resources
+    /// like database connections, configuration, and API clients.
+    ///
+    /// Use `get::<T>()` or `get_required::<T>()` to retrieve values.
+    pub app_state: Arc<Extensions>,
+
+    /// Mutable per-request state container.
     ///
     /// Pre-dispatch hooks can insert values that handlers retrieve.
+    /// Each dispatch gets a fresh Extensions instance.
     pub extensions: Extensions,
+}
+
+impl Default for CommandContext {
+    fn default() -> Self {
+        Self {
+            command_path: Vec::new(),
+            app_state: Arc::new(Extensions::new()),
+            extensions: Extensions::new(),
+        }
+    }
 }
 
 /// What a handler produces.
@@ -419,6 +506,7 @@ mod tests {
     fn test_command_context_creation() {
         let ctx = CommandContext {
             command_path: vec!["config".into(), "get".into()],
+            app_state: Arc::new(Extensions::new()),
             extensions: Extensions::new(),
         };
         assert_eq!(ctx.command_path, vec!["config", "get"]);
@@ -429,6 +517,66 @@ mod tests {
         let ctx = CommandContext::default();
         assert!(ctx.command_path.is_empty());
         assert!(ctx.extensions.is_empty());
+        assert!(ctx.app_state.is_empty());
+    }
+
+    #[test]
+    fn test_command_context_with_app_state() {
+        struct Database {
+            url: String,
+        }
+        struct Config {
+            debug: bool,
+        }
+
+        // Build app state
+        let mut app_state = Extensions::new();
+        app_state.insert(Database {
+            url: "postgres://localhost".into(),
+        });
+        app_state.insert(Config { debug: true });
+        let app_state = Arc::new(app_state);
+
+        // Create context with app state
+        let ctx = CommandContext {
+            command_path: vec!["list".into()],
+            app_state: app_state.clone(),
+            extensions: Extensions::new(),
+        };
+
+        // Retrieve app state
+        let db = ctx.app_state.get::<Database>().unwrap();
+        assert_eq!(db.url, "postgres://localhost");
+
+        let config = ctx.app_state.get::<Config>().unwrap();
+        assert!(config.debug);
+
+        // App state is shared via Arc
+        assert_eq!(Arc::strong_count(&ctx.app_state), 2);
+    }
+
+    #[test]
+    fn test_command_context_app_state_get_required() {
+        struct Present;
+
+        let mut app_state = Extensions::new();
+        app_state.insert(Present);
+
+        let ctx = CommandContext {
+            command_path: vec![],
+            app_state: Arc::new(app_state),
+            extensions: Extensions::new(),
+        };
+
+        // Success case
+        assert!(ctx.app_state.get_required::<Present>().is_ok());
+
+        // Failure case
+        #[derive(Debug)]
+        struct Missing;
+        let err = ctx.app_state.get_required::<Missing>();
+        assert!(err.is_err());
+        assert!(err.unwrap_err().to_string().contains("Extension missing"));
     }
 
     // Extensions tests

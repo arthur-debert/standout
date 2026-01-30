@@ -1,7 +1,24 @@
 //! AppBuilder for constructing App instances.
 //!
 //! This module provides the [`AppBuilder`] type for configuring and
-//! constructing [`App`] instances with commands, hooks, templates, and themes.
+//! constructing [`App`] instances with commands, hooks, templates, themes,
+//! and app-level state.
+//!
+//! # App State
+//!
+//! App-level state (database connections, configuration, API clients) can be
+//! injected via `.app_state()` and accessed in handlers via `ctx.app_state`:
+//!
+//! ```rust,ignore
+//! App::builder()
+//!     .app_state(Database::connect()?)
+//!     .app_state(Config::load()?)
+//!     .command("list", |matches, ctx| {
+//!         let db = ctx.app_state.get_required::<Database>()?;
+//!         Ok(Output::Render(db.list()?))
+//!     }, "{{ items }}")
+//!     .build()?
+//! ```
 //!
 //! The builder is split into submodules by concern:
 //! - [`config`]: Configuration methods (themes, templates, context, flags)
@@ -25,6 +42,7 @@ use std::sync::Arc;
 use super::app::App;
 use super::dispatch::DispatchFn;
 use super::group::CommandRecipe;
+use super::handler::Extensions;
 use super::hooks::Hooks;
 use super::mode::ThreadSafe;
 
@@ -96,6 +114,11 @@ pub struct AppBuilder {
     pub(crate) include_framework_templates: bool,
     /// Whether to include framework-supplied styles (default: true)
     pub(crate) include_framework_styles: bool,
+    /// App-level state shared across all dispatches.
+    ///
+    /// Stored as `Arc<Extensions>` so it can be cloned cheaply into CommandContext.
+    /// During builder phase, `Arc::get_mut` is used since only the builder holds the Arc.
+    pub(crate) app_state: Arc<Extensions>,
 }
 
 impl Default for AppBuilder {
@@ -127,7 +150,52 @@ impl AppBuilder {
             default_command: None,
             include_framework_templates: true,
             include_framework_styles: true,
+            app_state: Arc::new(Extensions::new()),
         }
+    }
+
+    /// Adds app-level state that will be available to all handlers.
+    ///
+    /// App state is immutable and shared across all dispatches via `Arc<Extensions>`.
+    /// Use for long-lived resources like database connections, configuration, and
+    /// API clients.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use standout::cli::App;
+    ///
+    /// struct Database { url: String }
+    /// struct Config { debug: bool }
+    ///
+    /// let app = App::builder()
+    ///     .app_state(Database { url: "postgres://localhost".into() })
+    ///     .app_state(Config { debug: true })
+    ///     .command("list", |matches, ctx| {
+    ///         let db = ctx.app_state.get_required::<Database>()?;
+    ///         let config = ctx.app_state.get_required::<Config>()?;
+    ///         // Use db and config...
+    ///         Ok(Output::Render(vec!["item1", "item2"]))
+    ///     }, "{{ items }}")
+    ///     .build()?;
+    /// ```
+    ///
+    /// # Type Safety
+    ///
+    /// Each type can only be stored once. Inserting a second value of the same
+    /// type replaces the first:
+    ///
+    /// ```rust,ignore
+    /// App::builder()
+    ///     .app_state(Config { debug: false })
+    ///     .app_state(Config { debug: true })  // Replaces previous Config
+    /// ```
+    pub fn app_state<T: Send + Sync + 'static>(mut self, value: T) -> Self {
+        // During builder phase, only the builder holds the Arc, so get_mut succeeds.
+        Arc::get_mut(&mut self.app_state)
+            .expect("app_state Arc should be exclusively owned during builder phase")
+            .insert(value);
+        self
     }
 
     /// Ensures all pending commands have been finalized into dispatch functions.
@@ -261,6 +329,7 @@ impl AppBuilder {
             template_registry,
             stylesheet_registry: self.stylesheet_registry,
             context_registry: self.context_registry,
+            app_state: self.app_state,
         };
 
         Ok(App {
@@ -349,5 +418,76 @@ mod tests {
             .unwrap();
 
         assert_eq!(app.core.theme.as_ref().unwrap().name(), Some("default"));
+    }
+
+    // ============================================================================
+    // App State Tests
+    // ============================================================================
+
+    #[test]
+    fn test_app_state_single_type() {
+        struct Database {
+            url: String,
+        }
+
+        let app = AppBuilder::new()
+            .app_state(Database {
+                url: "postgres://localhost".into(),
+            })
+            .build()
+            .unwrap();
+
+        let db = app.core.app_state.get::<Database>().unwrap();
+        assert_eq!(db.url, "postgres://localhost");
+    }
+
+    #[test]
+    fn test_app_state_multiple_types() {
+        struct Database {
+            url: String,
+        }
+        struct Config {
+            debug: bool,
+        }
+
+        let app = AppBuilder::new()
+            .app_state(Database {
+                url: "postgres://localhost".into(),
+            })
+            .app_state(Config { debug: true })
+            .build()
+            .unwrap();
+
+        let db = app.core.app_state.get::<Database>().unwrap();
+        assert_eq!(db.url, "postgres://localhost");
+
+        let config = app.core.app_state.get::<Config>().unwrap();
+        assert!(config.debug);
+    }
+
+    #[test]
+    fn test_app_state_replacement() {
+        struct Config {
+            value: i32,
+        }
+
+        let app = AppBuilder::new()
+            .app_state(Config { value: 1 })
+            .app_state(Config { value: 2 }) // Replaces first
+            .build()
+            .unwrap();
+
+        let config = app.core.app_state.get::<Config>().unwrap();
+        assert_eq!(config.value, 2);
+    }
+
+    #[test]
+    fn test_app_state_empty_by_default() {
+        struct NotSet;
+
+        let app = AppBuilder::new().build().unwrap();
+
+        assert!(app.core.app_state.is_empty());
+        assert!(app.core.app_state.get::<NotSet>().is_none());
     }
 }

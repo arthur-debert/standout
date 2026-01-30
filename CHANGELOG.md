@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **App State for shared, immutable dependencies** - New `app_state` field in `CommandContext` for injecting app-level resources (database connections, configuration, API clients) that are shared across all command dispatches.
+
+  ```rust
+  // Configure at build time
+  App::builder()
+      .app_state(Database::connect()?)  // Shared via Arc
+      .app_state(Config::load()?)
+      .command("list", list_handler, template)
+      .build()?
+
+  // Access in handlers
+  fn list_handler(matches: &ArgMatches, ctx: &CommandContext) -> HandlerResult<Vec<Item>> {
+      let db = ctx.app_state.get_required::<Database>()?;
+      let config = ctx.app_state.get_required::<Config>()?;
+      Ok(Output::Render(db.list(&config.api_url)?))
+  }
+  ```
+
+  **Two-state model:**
+  | Aspect | `ctx.app_state` | `ctx.extensions` |
+  |--------|-----------------|------------------|
+  | Mutability | Immutable (`&`) | Mutable (`&mut`) |
+  | Lifetime | App lifetime | Per-request |
+  | Set by | `AppBuilder::app_state()` | Pre-dispatch hooks |
+  | Use for | Database, Config, API clients | User sessions, request IDs |
+
+  Pre-dispatch hooks can read `app_state` to set up per-request `extensions`:
+
+  ```rust
+  Hooks::new().pre_dispatch(|matches, ctx| {
+      let db = ctx.app_state.get_required::<Database>()?;
+      let user = db.authenticate(matches)?;
+      ctx.extensions.insert(UserScope { user });
+      Ok(())
+  })
+  ```
+
+### Changed
+
+- **BREAKING: `CommandContext` now includes `app_state` field** - The struct now has three fields: `command_path`, `app_state`, and `extensions`. Code that constructs `CommandContext` manually needs to include `app_state: Arc::new(Extensions::new())` or use `..Default::default()`.
+
 ## [3.3.0] - 2026-01-30
 
 ### Added

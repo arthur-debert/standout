@@ -6,6 +6,12 @@
 //!
 //! By extracting shared logic here, we avoid code duplication and ensure
 //! feature parity between both app types.
+//!
+//! # App State
+//!
+//! `AppCore` holds app-level state via `app_state: Arc<Extensions>`. This state
+//! is injected into every `CommandContext` during dispatch, allowing handlers
+//! to access shared resources like database connections and configuration.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -17,6 +23,7 @@ use serde::Serialize;
 use crate::context::{ContextRegistry, RenderContext};
 use crate::setup::SetupError;
 use crate::{detect_color_mode, OutputMode, StylesheetRegistry, TemplateRegistry, Theme};
+use standout_dispatch::Extensions;
 use standout_render::template::filters::register_filters;
 
 use super::app::get_terminal_width;
@@ -36,6 +43,7 @@ use super::hooks::Hooks;
 /// - Hooks: `command_hooks`
 /// - Default command: `default_command`
 /// - Context: `context_registry`
+/// - App state: `app_state` (shared across all dispatches)
 pub struct AppCore {
     /// Name of the output mode flag (e.g., "output" for `--output`).
     /// Set to None to disable the flag.
@@ -66,6 +74,12 @@ pub struct AppCore {
 
     /// Context registry for template variable injection.
     pub(crate) context_registry: ContextRegistry,
+
+    /// App-level state shared across all dispatches.
+    ///
+    /// This is immutable and wrapped in Arc for efficient sharing.
+    /// Handlers access it via `ctx.app_state.get::<T>()`.
+    pub(crate) app_state: Arc<Extensions>,
 }
 
 impl Default for AppCore {
@@ -87,6 +101,7 @@ impl AppCore {
     /// - No template registry
     /// - No stylesheet registry
     /// - Empty context registry
+    /// - Empty app state
     pub fn new() -> Self {
         Self {
             output_flag: Some("output".to_string()),
@@ -98,7 +113,17 @@ impl AppCore {
             template_registry: None,
             stylesheet_registry: None,
             context_registry: ContextRegistry::new(),
+            app_state: Arc::new(Extensions::new()),
         }
+    }
+
+    /// Returns a reference to the app state.
+    ///
+    /// App state contains long-lived resources like database connections
+    /// and configuration that are shared across all dispatches.
+    #[allow(dead_code)] // Public API for external use
+    pub fn app_state(&self) -> &Arc<Extensions> {
+        &self.app_state
     }
 
     // =========================================================================
@@ -482,6 +507,14 @@ mod tests {
         assert!(core.theme.is_none());
         assert!(core.command_hooks.is_empty());
         assert!(core.default_command.is_none());
+        assert!(core.app_state.is_empty());
+    }
+
+    #[test]
+    fn test_app_core_app_state_accessor() {
+        let core = AppCore::new();
+        let state = core.app_state();
+        assert!(state.is_empty());
     }
 
     #[test]

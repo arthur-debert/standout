@@ -9,6 +9,7 @@ For explanation's sake, we will show a hypothetical list command for tdoo, a tod
 **See Also:**
 
 - [Handler Contract](../crates/dispatch/topics/handler-contract.md) - detailed handler API
+- [App State and Extensions](../crates/dispatch/topics/app-state.md) - dependency injection patterns
 - [Styling System](../crates/render/topics/styling-system.md) - themes and styles in depth
 - [Output Modes](../topics/output-modes.md) - all output format options
 - [Partial Adoption](../crates/dispatch/topics/partial-adoption.md) - migrating incrementally
@@ -383,6 +384,31 @@ let app = App::builder()
 
 > **Verify:** Run `cargo build` - it should compile without errors.
 
+### 7.3.1 Injecting Shared State (Optional)
+
+If your handlers need access to shared resources like database connections or configuration, use `app_state`:
+
+```rust
+let app = App::builder()
+    .app_state(Database::connect()?)    // Shared across all handlers
+    .app_state(Config::load()?)
+    .templates(embed_templates!("src/templates"))
+    .commands(Commands::dispatch_config())
+    .build()?;
+```
+
+Handlers retrieve app state via `ctx.app_state`:
+
+```rust
+pub fn list(_matches: &ArgMatches, ctx: &CommandContext) -> HandlerResult<TodoResult> {
+    let db = ctx.app_state.get_required::<Database>()?;
+    let todos = db.list()?;
+    Ok(Output::Render(TodoResult { message: None, todos }))
+}
+```
+
+> **Note:** For per-request state (user sessions, request IDs), use pre-dispatch hooks with `ctx.extensions`. See [App State and Extensions](../crates/dispatch/topics/app-state.md) for the full story.
+
 ### 7.4 Wire up main()
 
 The final bit: handling the dispatching off to Standout:
@@ -607,6 +633,7 @@ fn main() -> anyhow::Result<()> {
     let mut store = PadStore::load()?;
 
     LocalApp::builder()
+        .app_state(Config::load()?)  // app_state works with LocalApp too
         .templates(embed_templates!("src/templates"))
         .command("complete", |m, ctx| {
             let id = m.get_one::<Uuid>("id").unwrap();

@@ -216,6 +216,7 @@ impl<M: HandlerMode> App<M> {
         if let Some(dispatch) = self.commands.get(&path_str) {
             let mut ctx = CommandContext {
                 command_path: path,
+                app_state: self.core.app_state.clone(),
                 ..Default::default()
             };
 
@@ -402,6 +403,7 @@ impl<M: HandlerMode> App<M> {
     {
         let mut ctx = CommandContext {
             command_path: path.split('.').map(String::from).collect(),
+            app_state: self.core.app_state.clone(),
             ..Default::default()
         };
 
