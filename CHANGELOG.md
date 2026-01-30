@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Pluggable template engine architecture** - The template rendering system now uses a `TemplateEngine` trait, decoupling the public API from the MiniJinja implementation. This enables future alternative backends (e.g., a lighter "simple-templates" engine for users who don't need full template features).
+
+  **New types:**
+  - `TemplateEngine` trait - Abstraction for template backends with methods for rendering, named templates, and context injection
+  - `MiniJinjaEngine` - Default implementation wrapping MiniJinja (existing behavior)
+  - `RenderError` - New error type that doesn't expose MiniJinja internals
+
+  **New APIs:**
+  - `Renderer::with_output_and_engine()` - Create a renderer with a custom template engine
+  - `render_auto_with_engine()` - Render with a custom engine and auto-dispatch
+
+  **Migration:** Replace `minijinja::Error` with `RenderError` in error handling. The default behavior is unchanged - `MiniJinjaEngine` is used automatically.
+
+  ```rust
+  // Custom engine injection (optional)
+  let engine = Box::new(MyCustomEngine::new());
+  let renderer = Renderer::with_output_and_engine(theme, mode, engine)?;
+
+  // Default usage unchanged
+  let renderer = Renderer::new(theme)?;
+  ```
+
 ## [3.4.0] - 2026-01-30
 
 ### Added
