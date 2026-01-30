@@ -66,12 +66,15 @@ Configure the app:
 
 ```rust
     let app = App::builder()
-        .templates(embed_templates!("src/templates"))    //  Sets the root template path, hot reload for dev, embedded in release
-        .styles(embed_styles!("src/styles"))                       //  Likewise the styles root
-        .default_theme("default")                                       // Use styles/default.css or default.yaml
-        .commands(Commands::dispatch_config())          // Register handlers from derive macro
+        .app_state(Database::connect()?)                 // Optional: shared state for handlers
+        .templates(embed_templates!("src/templates"))    // Sets the root template path
+        .styles(embed_styles!("src/styles"))             // Likewise the styles root
+        .default_theme("default")                        // Use styles/default.css or default.yaml
+        .commands(Commands::dispatch_config())           // Register handlers from derive macro
     .build()?;
 ```
+
+> Handlers access shared state via `ctx.app_state.get_required::<Database>()?`. See [App State and Extensions](../crates/dispatch/topics/app-state.md) for details.
 
 Connect your logic to a command name and template :
 

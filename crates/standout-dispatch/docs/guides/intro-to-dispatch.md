@@ -222,6 +222,53 @@ fn export_handler(_m: &ArgMatches, _ctx: &CommandContext) -> HandlerResult<()> {
 
 ---
 
+## State Management
+
+Handlers access state through `CommandContext`, which provides two injection mechanisms:
+
+### App State (Shared)
+
+Configure long-lived resources at build time:
+
+```rust
+use standout::cli::App;
+
+struct Database { /* connection pool */ }
+struct Config { api_url: String }
+
+App::builder()
+    .app_state(Database::connect()?)  // Shared across all dispatches
+    .app_state(Config::load()?)
+    .command("list", list_handler, "{{ items }}")
+    .build()?
+```
+
+Access in handlers via `ctx.app_state`:
+
+```rust
+fn list_handler(matches: &ArgMatches, ctx: &CommandContext) -> HandlerResult<Vec<Item>> {
+    let db = ctx.app_state.get_required::<Database>()?;
+    let config = ctx.app_state.get_required::<Config>()?;
+    Ok(Output::Render(db.list(&config.api_url)?))
+}
+```
+
+### Extensions (Per-Request)
+
+Pre-dispatch hooks inject request-scoped state via `ctx.extensions`:
+
+```rust
+Hooks::new().pre_dispatch(|matches, ctx| {
+    let user_id = matches.get_one::<String>("user").unwrap();
+    ctx.extensions.insert(UserScope { user_id: user_id.clone() });
+    Ok(())
+})
+```
+
+> For full details, see [App State and Extensions](../topics/app-state.md).
+
+---
+
 ## Hooks: Cross-Cutting Concerns
 
 Hooks let you intercept execution without modifying handler logic:
@@ -230,7 +277,7 @@ Hooks let you intercept execution without modifying handler logic:
 use standout_dispatch::{Hooks, HookError, RenderedOutput};
 
 let hooks = Hooks::new()
-    // Before handler: validation, auth
+    // Before handler: validation, auth, inject per-request state
     .pre_dispatch(|matches, ctx| {
         if !is_authenticated() {
             return Err(HookError::pre_dispatch("auth required"));
