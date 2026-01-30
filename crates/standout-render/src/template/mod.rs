@@ -2,14 +2,41 @@
 //!
 //! This module provides the core rendering pipeline that transforms templates
 //! and data into styled terminal output. Templates are processed in two passes:
-//! MiniJinja for logic, then BBParser for style tags.
+//! template engine for logic, then BBParser for style tags.
+//!
+//! ## Template Engines
+//!
+//! Two template engines are available:
+//!
+//! | Engine | Syntax | Features | Use When |
+//! |--------|--------|----------|----------|
+//! | [`MiniJinjaEngine`] | `{{ var }}` | Loops, conditionals, filters, includes | Full template logic needed |
+//! | [`SimpleEngine`] | `{var}` | Variable substitution only | Simple output, smaller binary |
+//!
+//! ### MiniJinja (Default)
+//!
+//! Full-featured Jinja2-compatible engine. File extensions: `.jinja`, `.jinja2`, `.j2`
+//!
+//! ```text
+//! [title]{{ name | upper }}[/title] has {{ count }} items
+//! {% for item in items %}{{ item.name }}{% endfor %}
+//! ```
+//!
+//! ### Simple Engine
+//!
+//! Lightweight format-string style substitution. File extension: `.stpl`
+//!
+//! ```text
+//! [title]{name}[/title] has {count} items
+//! {user.profile.email}
+//! ```
 //!
 //! ## Two-Pass Rendering
 //!
 //! Templates are processed in two distinct passes, which is why style tags use
-//! bracket notation (`[name]...[/name]`) instead of Jinja syntax:
+//! bracket notation (`[name]...[/name]`) instead of template syntax:
 //!
-//! Pass 1 - MiniJinja: Variable substitution, control flow, filters.
+//! Pass 1 - Template Engine: Variable substitution (and control flow for MiniJinja).
 //! ```text
 //! Template: [title]{{ name | upper }}[/title] has {{ count }} items
 //! After:    [title]WIDGET[/title] has 42 items
@@ -40,9 +67,10 @@
 //!
 //! ## Style Tags in Templates
 //!
-//! Use bracket notation for styling:
-//! ```jinja
-//! [title]{{ name }}[/title] - [muted]{{ description }}[/muted]
+//! Use bracket notation for styling (works with both engines):
+//! ```text
+//! [title]{{ name }}[/title] - [muted]{{ description }}[/muted]  // MiniJinja
+//! [title]{name}[/title] - [muted]{description}[/muted]          // Simple
 //! ```
 //!
 //! Tags can nest, span multiple lines, and contain template logic. Unknown tags
@@ -60,12 +88,15 @@
 //! ```
 //!
 //! Resolution priority: inline templates → embedded (compile-time) → file-based.
-//! Supported extensions: `.jinja`, `.jinja2`, `.j2`, `.txt` (in priority order).
+//! Supported extensions: `.jinja`, `.jinja2`, `.j2`, `.stpl`, `.txt` (in priority order).
 //!
 //! ## Key Types
 //!
 //! - [`Renderer`]: Pre-compiled template renderer for repeated rendering
 //! - [`TemplateRegistry`]: Template resolution from multiple sources
+//! - [`TemplateEngine`]: Trait for pluggable template backends
+//! - [`MiniJinjaEngine`]: Full-featured Jinja2 engine (default)
+//! - [`SimpleEngine`]: Lightweight format-string engine
 //! - [`validate_template`]: Check templates for unknown style tags
 //!
 //! ## See Also
@@ -79,6 +110,7 @@ pub mod filters;
 mod functions;
 pub mod registry;
 mod renderer;
+mod simple;
 
 pub use engine::{register_filters, MiniJinjaEngine, TemplateEngine};
 pub use functions::{
@@ -90,3 +122,4 @@ pub use registry::{
     TEMPLATE_EXTENSIONS,
 };
 pub use renderer::Renderer;
+pub use simple::SimpleEngine;

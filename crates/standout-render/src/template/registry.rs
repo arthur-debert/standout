@@ -32,10 +32,11 @@
 //!
 //! | Priority | Extension | Description |
 //! |----------|-----------|-------------|
-//! | 1 (highest) | `.jinja` | Standard Jinja extension |
-//! | 2 | `.jinja2` | Full Jinja2 extension |
-//! | 3 | `.j2` | Short Jinja2 extension |
-//! | 4 (lowest) | `.txt` | Plain text templates |
+//! | 1 (highest) | `.jinja` | Standard Jinja extension (MiniJinja engine) |
+//! | 2 | `.jinja2` | Full Jinja2 extension (MiniJinja engine) |
+//! | 3 | `.j2` | Short Jinja2 extension (MiniJinja engine) |
+//! | 4 | `.stpl` | Simple template (SimpleEngine - format strings) |
+//! | 5 (lowest) | `.txt` | Plain text templates |
 //!
 //! If multiple files exist with the same base name but different extensions
 //! (e.g., `config.jinja` and `config.j2`), the higher-priority extension wins.
@@ -78,11 +79,12 @@ use crate::file_loader::{
 ///
 /// # Priority Order
 ///
-/// 1. `.jinja` - Standard Jinja extension
-/// 2. `.jinja2` - Full Jinja2 extension
-/// 3. `.j2` - Short Jinja2 extension
-/// 4. `.txt` - Plain text templates
-pub const TEMPLATE_EXTENSIONS: &[&str] = &[".jinja", ".jinja2", ".j2", ".txt"];
+/// 1. `.jinja` - Standard Jinja extension (MiniJinja engine)
+/// 2. `.jinja2` - Full Jinja2 extension (MiniJinja engine)
+/// 3. `.j2` - Short Jinja2 extension (MiniJinja engine)
+/// 4. `.stpl` - Simple template (SimpleEngine - `{var}` format strings)
+/// 5. `.txt` - Plain text templates
+pub const TEMPLATE_EXTENSIONS: &[&str] = &[".jinja", ".jinja2", ".j2", ".stpl", ".txt"];
 
 /// A template file discovered during directory walking.
 ///
@@ -779,13 +781,15 @@ mod tests {
         let jinja = TemplateFile::new("config", "config.jinja", "/a/config.jinja", "/a");
         let jinja2 = TemplateFile::new("config", "config.jinja2", "/a/config.jinja2", "/a");
         let j2 = TemplateFile::new("config", "config.j2", "/a/config.j2", "/a");
+        let stpl = TemplateFile::new("config", "config.stpl", "/a/config.stpl", "/a");
         let txt = TemplateFile::new("config", "config.txt", "/a/config.txt", "/a");
         let unknown = TemplateFile::new("config", "config.xyz", "/a/config.xyz", "/a");
 
         assert_eq!(jinja.extension_priority(), 0);
         assert_eq!(jinja2.extension_priority(), 1);
         assert_eq!(j2.extension_priority(), 2);
-        assert_eq!(txt.extension_priority(), 3);
+        assert_eq!(stpl.extension_priority(), 3);
+        assert_eq!(txt.extension_priority(), 4);
         assert_eq!(unknown.extension_priority(), usize::MAX);
     }
 
