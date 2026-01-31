@@ -9,7 +9,7 @@
 //! use standout_macros::Crud;
 //!
 //! #[derive(Clone, Crud)]
-//! #[crud(object = "task", store = TaskStore)]
+//! #[crud(object = "task", store = TaskStore, excludes = [created_at])]
 //! pub struct Task {
 //!     #[crud(id)]
 //!     pub id: String,
@@ -17,11 +17,10 @@
 //!     #[crud(arg(short, long), form(required))]
 //!     pub title: String,
 //!
-//!     #[crud(arg(short, long), choices = ["pending", "done"])]
-//!     pub status: String,
+//!     #[crud(arg(short, long))]
+//!     pub status: Status,  // Use an enum for finite choices
 //!
-//!     #[crud(readonly)]
-//!     pub created_at: DateTime<Utc>,
+//!     pub created_at: DateTime<Utc>,  // Excluded via container-level excludes
 //! }
 //! ```
 //!
@@ -50,6 +49,8 @@ struct CrudContainerAttrs {
     plural: Option<String>,
     /// Optional: subset of operations to generate
     operations: Option<Vec<CrudOperation>>,
+    /// Optional: field names to exclude from create/update operations
+    excludes: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -89,14 +90,10 @@ impl CrudOperation {
 struct CrudFieldAttrs {
     /// This field is the primary identifier
     id: bool,
-    /// Exclude from create/update operations
-    readonly: bool,
     /// Exclude from all CRUD operations
     skip: bool,
     /// Default value expression for create
     default_expr: Option<String>,
-    /// Constrained values for this field
-    choices: Option<Vec<String>>,
 }
 
 /// Information about a field for CRUD operations
@@ -160,10 +157,16 @@ impl Parse for CrudContainerAttrs {
                     }
                     attrs.operations = Some(ops);
                 }
+                Meta::List(list) if list.path.is_ident("excludes") => {
+                    // Parse the inner tokens as comma-separated identifiers
+                    let inner: Punctuated<Ident, Token![,]> =
+                        list.parse_args_with(Punctuated::parse_terminated)?;
+                    attrs.excludes = inner.iter().map(|i| i.to_string()).collect();
+                }
                 _ => {
                     return Err(Error::new(
                         meta.span(),
-                        "unknown attribute, expected one of: object, store, plural, operations",
+                        "unknown attribute, expected one of: object, store, plural, operations, excludes",
                     ));
                 }
             }
@@ -187,9 +190,6 @@ fn parse_field_attrs(attrs: &[syn::Attribute]) -> Result<CrudFieldAttrs> {
                     Meta::Path(p) if p.is_ident("id") => {
                         field_attrs.id = true;
                     }
-                    Meta::Path(p) if p.is_ident("readonly") => {
-                        field_attrs.readonly = true;
-                    }
                     Meta::Path(p) if p.is_ident("skip") => {
                         field_attrs.skip = true;
                     }
@@ -199,12 +199,6 @@ fn parse_field_attrs(attrs: &[syn::Attribute]) -> Result<CrudFieldAttrs> {
                                 field_attrs.default_expr = Some(lit_str.value());
                             }
                         }
-                    }
-                    Meta::List(list) if list.path.is_ident("choices") => {
-                        let inner: Punctuated<syn::LitStr, Token![,]> =
-                            list.parse_args_with(Punctuated::parse_terminated)?;
-                        let choices: Vec<String> = inner.iter().map(|l| l.value()).collect();
-                        field_attrs.choices = Some(choices);
                     }
                     // Ignore arg, form, validate - they're for future expansion
                     Meta::List(list) if list.path.is_ident("arg") => {}
@@ -318,10 +312,13 @@ pub fn crud_derive_impl(input: DeriveInput) -> Result<TokenStream> {
             + chars.as_str()
     };
 
-    // Fields for create/update (excluding id, readonly, and skip)
+    // Get the excludes list from container attributes
+    let excludes = &container_attrs.excludes;
+
+    // Fields for create/update (excluding id, skip, and container-level excludes)
     let mutable_fields: Vec<&CrudFieldInfo> = fields
         .iter()
-        .filter(|f| !f.attrs.id && !f.attrs.readonly && !f.attrs.skip)
+        .filter(|f| !f.attrs.id && !f.attrs.skip && !excludes.contains(&f.ident.to_string()))
         .collect();
 
     // Generate clap args for create command
@@ -333,17 +330,9 @@ pub fn crud_derive_impl(input: DeriveInput) -> Result<TokenStream> {
             let name_str = name.to_string();
             let long_name = name_str.replace('_', "-");
 
-            if let Some(choices) = &f.attrs.choices {
-                let choice_values: Vec<&String> = choices.iter().collect();
-                quote! {
-                    #[arg(long = #long_name, value_parser = clap::builder::PossibleValuesParser::new([#(#choice_values),*]))]
-                    pub #name: Option<String>,
-                }
-            } else {
-                quote! {
-                    #[arg(long = #long_name)]
-                    pub #name: Option<#ty>,
-                }
+            quote! {
+                #[arg(long = #long_name)]
+                pub #name: Option<#ty>,
             }
         })
         .collect();
@@ -357,17 +346,9 @@ pub fn crud_derive_impl(input: DeriveInput) -> Result<TokenStream> {
             let name_str = name.to_string();
             let long_name = name_str.replace('_', "-");
 
-            if let Some(choices) = &f.attrs.choices {
-                let choice_values: Vec<&String> = choices.iter().collect();
-                quote! {
-                    #[arg(long = #long_name, value_parser = clap::builder::PossibleValuesParser::new([#(#choice_values),*]))]
-                    pub #name: Option<String>,
-                }
-            } else {
-                quote! {
-                    #[arg(long = #long_name)]
-                    pub #name: Option<#ty>,
-                }
+            quote! {
+                #[arg(long = #long_name)]
+                pub #name: Option<#ty>,
             }
         })
         .collect();
