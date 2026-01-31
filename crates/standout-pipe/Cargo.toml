@@ -2,6 +2,11 @@
 name = "standout-pipe"
 version = "3.6.1"
 edition = "2021"
+description = "Output piping to external commands for CLI applications"
+license = "MIT"
+keywords = ["cli", "pipe", "shell", "clipboard"]
+categories = ["command-line-interface"]
+repository = "https://github.com/arthur-debert/standout"
 
 [dependencies]
 thiserror = "2"
