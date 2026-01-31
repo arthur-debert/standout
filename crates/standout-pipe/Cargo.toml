@@ -1,11 +1,10 @@
 [package]
 name = "standout-pipe"
-version = "0.1.0"
+version = "3.6.0"
 edition = "2021"
 
 [dependencies]
 thiserror = "2"
-xshell = "0.2"
 wait-timeout = "0.2"
 
 [dev-dependencies]

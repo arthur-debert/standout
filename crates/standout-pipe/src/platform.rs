@@ -1,12 +1,19 @@
 use crate::pipe::SimplePipe;
 
+/// Returns a clipboard pipe for macOS (pbcopy).
+#[cfg(target_os = "macos")]
 pub fn clipboard() -> Option<SimplePipe> {
-    if cfg!(target_os = "macos") {
-        Some(SimplePipe::new("pbcopy").consume())
-    } else if cfg!(target_os = "linux") {
-        // Try xclip, then xsel? Or just xclip as per proposal.
-        Some(SimplePipe::new("xclip -selection clipboard").consume())
-    } else {
-        None
-    }
+    Some(SimplePipe::new("pbcopy").consume())
+}
+
+/// Returns a clipboard pipe for Linux (xclip).
+#[cfg(target_os = "linux")]
+pub fn clipboard() -> Option<SimplePipe> {
+    Some(SimplePipe::new("xclip -selection clipboard").consume())
+}
+
+/// Returns None on unsupported platforms.
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub fn clipboard() -> Option<SimplePipe> {
+    None
 }

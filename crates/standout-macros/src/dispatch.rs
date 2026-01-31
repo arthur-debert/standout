@@ -215,7 +215,7 @@ impl Parse for VariantAttrs {
                 _ => {
                     return Err(Error::new(
                         meta.span(),
-                        "unknown attribute, expected one of: handler, template, pre_dispatch, post_dispatch, post_output, nested, skip, default",
+                        "unknown attribute, expected one of: handler, template, pre_dispatch, post_dispatch, post_output, nested, skip, default, list_view, item_type, pipe_to, pipe_through, pipe_to_clipboard",
                     ));
                 }
             }
@@ -455,7 +455,6 @@ pub fn dispatch_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                         let __builder = __builder.command_with(#cmd_name, #handler_expr, |mut __cfg| {
                             #template_call
                             #pre_dispatch_call
-                            #post_dispatch_call
                             #post_dispatch_call
                             #post_output_call
                             #pipe_to_call
