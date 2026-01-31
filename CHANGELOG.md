@@ -7,6 +7,99 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Auto-wrap `Result<T>` in `Output::Render`** - Handlers can now return `Result<T, E>` directly instead of wrapping in `Ok(Output::Render(...))`. The framework automatically wraps successful results.
+
+  ```rust
+  // Before: explicit wrapping required
+  fn list(m: &ArgMatches, ctx: &CommandContext) -> HandlerResult<Vec<Item>> {
+      let items = storage::list()?;
+      Ok(Output::Render(items))  // Framework ceremony
+  }
+
+  // After: auto-wrap Result<T>
+  fn list(m: &ArgMatches, ctx: &CommandContext) -> Result<Vec<Item>, Error> {
+      storage::list()  // Clean and natural
+  }
+  ```
+
+  **New types:**
+  - `IntoHandlerResult<T>` trait - Converts `Result<T, E>` or `HandlerResult<T>` into handler results
+
+  **Behavior:**
+  - `Result<T, E>` → automatically wrapped in `Output::Render`
+  - `HandlerResult<T>` → passed through unchanged (for `Output::Silent` or `Output::Binary`)
+
+- **Optional `CommandContext` in handler signatures** - Handlers that don't need context can now omit the parameter entirely.
+
+  ```rust
+  // Before: context required even when unused
+  fn list(_m: &ArgMatches, _ctx: &CommandContext) -> Result<Vec<Item>, Error> {
+      storage::list()
+  }
+
+  // After: context can be omitted
+  fn list(m: &ArgMatches) -> Result<Vec<Item>, Error> {
+      storage::list()
+  }
+  ```
+
+  **New types:**
+  - `SimpleFnHandler<F, T>` - Thread-safe handler wrapper for functions without context
+  - `LocalSimpleFnHandler<F, T>` - Local (non-Send) variant
+
+  **Dispatch derive support:**
+  ```rust
+  #[derive(Subcommand, Dispatch)]
+  #[dispatch(handlers = handlers)]
+  enum Commands {
+      #[dispatch(simple)]  // Handler only takes &ArgMatches
+      List,
+  }
+  ```
+
+- **`#[handler]` proc macro for pure function handlers** - Transform pure Rust functions into Standout-compatible handlers with automatic CLI argument extraction.
+
+  ```rust
+  // Before: Standout-specific boilerplate
+  fn list(m: &ArgMatches, _ctx: &CommandContext) -> HandlerResult<Vec<Item>> {
+      let all = m.get_flag("all");
+      let limit = m.get_one::<usize>("limit").copied();
+      let items = storage::list(all, limit)?;
+      Ok(Output::Render(items))
+  }
+
+  // After: pure function, easy to test
+  #[handler]
+  fn list(#[flag] all: bool, #[arg] limit: Option<usize>) -> Result<Vec<Item>, Error> {
+      storage::list(all, limit)
+  }
+  // Generates: fn list__handler(m: &ArgMatches) -> Result<Vec<Item>, Error>
+  ```
+
+  **Supported annotations:**
+  | Annotation | Type | Description |
+  |------------|------|-------------|
+  | `#[flag]` | `bool` | Boolean CLI flag |
+  | `#[flag(name = "x")]` | `bool` | Flag with custom CLI name |
+  | `#[arg]` | `T` | Required CLI argument |
+  | `#[arg]` | `Option<T>` | Optional CLI argument |
+  | `#[arg]` | `Vec<T>` | Multiple CLI arguments |
+  | `#[arg(name = "x")]` | `T` | Argument with custom CLI name |
+  | `#[ctx]` | `&CommandContext` | Access to command context |
+  | `#[matches]` | `&ArgMatches` | Raw matches (escape hatch) |
+
+  **Return type handling:**
+  - `Result<T, E>` → passed through (dispatch auto-wraps via `IntoHandlerResult`)
+  - `Result<(), E>` → wrapped in `HandlerResult<()>` with `Output::Silent`
+
+  **Benefits:**
+  - Pure functions with no Standout dependencies
+  - Direct testing: call `list(true, None)` in tests
+  - Self-documenting: annotations show what comes from CLI
+  - Familiar pattern: similar to Axum/Actix extractors
+
 ## [3.6.0] - 2026-01-30
 
 ### Added
