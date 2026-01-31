@@ -499,6 +499,7 @@ For the next commands you'd wish to migrate, this is even simpler. Say you have 
   - **text**: plain text, no styling
   - **auto**: the default, rich term that degrades gracefully
   - **json, csv, yaml**: automatic serialization of your data
+- Pipe output to external commands (jq, clipboard, tee) via `pipe_through`, `pipe_to`, or `pipe_to_clipboard`
 
 **What's next:** Adding rich styling to make the output beautiful.
 
@@ -644,9 +645,53 @@ For brevity's sake, we've ignored a bunch of finer and relevant points:
 
 - The derive macros can set name mapping explicitly: `#[dispatch(handler = custom_fn, template = "custom.jinja")]`
 - There are pre-dispatch, post-dispatch and post-render hooks (see [Execution Model](../crates/dispatch/topics/execution-model.md))
+- Output piping to external commands like `jq`, `tee`, or clipboard (see below and [Output Piping](../crates/standout-pipe/docs/topics/piping.md))
 - Standout exposes its primitives as standalone crates (see [standout-render](../crates/render/guides/intro-to-rendering.md), [standout-dispatch](../crates/dispatch/guides/intro-to-dispatch.md))
 - Powerful tabular layouts via the `col` filter (see [Tabular Layout](../crates/render/guides/intro-to-tabular.md))
 - A help topics system for rich documentation (see [Topics System](../topics/topics-system.md))
+
+## Bonus: Pipe Output to External Commands
+
+Need to filter output through `jq`, log to a file with `tee`, or copy to clipboard? Standout supports piping rendered output to external commands:
+
+```rust
+#[derive(Subcommand, Dispatch)]
+#[dispatch(handlers = handlers)]
+pub enum Commands {
+    /// List todos, extracting just titles with jq
+    #[dispatch(pipe_through = "jq '.todos[].title'")]
+    List,
+
+    /// Export todos to clipboard
+    #[dispatch(pipe_to_clipboard)]
+    Export,
+}
+```
+
+Or via the builder API:
+
+```rust
+let app = App::builder()
+    .commands(|g| {
+        g.command_with("list", handlers::list, |cfg| {
+            cfg.template("list.jinja")
+               .pipe_through("jq '.todos'")  // Filter JSON output
+        })
+        .command_with("export", handlers::export, |cfg| {
+            cfg.template("export.jinja")
+               .pipe_to("tee /tmp/export.log")  // Log while displaying
+               .pipe_to_clipboard()  // Then copy to clipboard
+        })
+    })
+    .build()?;
+```
+
+Three piping modes:
+- `pipe_through("cmd")`: Use command's stdout as new output (filters like jq, sort)
+- `pipe_to("cmd")`: Run command but keep original output (side effects like tee)
+- `pipe_to_clipboard()`: Send to system clipboard (pbcopy on macOS, xclip on Linux)
+
+See [Output Piping](../crates/standout-pipe/docs/topics/piping.md) for the full API.
 
 Aside from exposing the library primitives, Standout leverages best-in-breed crates like MiniJinja and console::Style under the hood. The lock-in is really negligible: you can use Standout's BB parser or swap it, manually dispatch handlers, and use the renderers directly in your clap dispatch.
 

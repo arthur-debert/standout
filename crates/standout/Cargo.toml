@@ -12,6 +12,7 @@ readme = "README.md"
 [dependencies]
 # Core rendering (re-exported from standout-render)
 standout-render = { version = "3.6.1", path = "../standout-render" }
+standout-pipe = { path = "../standout-pipe", version = "3.6.1" }
 standout-bbparser = { version = "3.6.1", path = "../standout-bbparser" }
 standout-macros = { version = "3.6.1", path = "../standout-macros" }
 standout-dispatch = { version = "3.6.1", path = "../standout-dispatch" }

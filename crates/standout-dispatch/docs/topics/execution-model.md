@@ -7,7 +7,7 @@
 ## The Pipeline
 
 ```text
-Clap Parsing → Pre-dispatch Hook → Handler → Post-dispatch Hook → Renderer → Post-output Hook → Output
+Clap Parsing → Pre-dispatch → Handler → Post-dispatch → Renderer → Post-output → Piping → Output
 ```
 
 Each stage has a clear responsibility:
@@ -22,7 +22,9 @@ Each stage has a clear responsibility:
 
 **Renderer**: Your render function receives the data and produces output (string or binary).
 
-**Post-output Hook**: Runs after rendering. Can transform the final output.
+**Post-output Hook**: Runs after rendering. Can transform the final output string.
+
+**Piping**: Optionally sends output to external commands (jq, tee, clipboard). Implemented as specialized post-output hooks. See [Output Piping](../../standout-pipe/docs/topics/piping.md).
 
 **Output**: The result is returned or written to stdout.
 
@@ -182,6 +184,42 @@ Hooks::new()
 ```
 
 Order matters: `filter_sensitive` sees the metadata that `add_metadata` inserted.
+
+### Output Piping
+
+Piping sends rendered output to external shell commands. It's implemented as specialized post-output hooks with three modes:
+
+```rust
+use standout::cli::App;
+
+let app = App::builder()
+    .commands(|g| {
+        g.command_with("export", handlers::export, |cfg| {
+            cfg.template("export.jinja")
+               // Filter through jq (capture mode)
+               .pipe_through("jq '.items'")
+        })
+        .command_with("copy", handlers::copy, |cfg| {
+            cfg.template("copy.jinja")
+               // Send to clipboard (consume mode)
+               .pipe_to_clipboard()
+        })
+        .command_with("debug", handlers::debug, |cfg| {
+            cfg.template("debug.jinja")
+               // Log to file while displaying (passthrough mode)
+               .pipe_to("tee /tmp/debug.log")
+        })
+    })
+    .build()?;
+```
+
+| Mode | Method | Behavior |
+|------|--------|----------|
+| Passthrough | `pipe_to()` | Run command, return original output |
+| Capture | `pipe_through()` | Return command's stdout as new output |
+| Consume | `pipe_to_clipboard()` | Send to clipboard, return empty |
+
+Pipes can be chained and combined with other post-output hooks. See [Output Piping](../../standout-pipe/docs/topics/piping.md) for full documentation.
 
 ### Error Handling
 

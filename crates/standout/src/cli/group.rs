@@ -15,6 +15,7 @@ use std::sync::Arc;
 use super::dispatch::{render_handler_output, DispatchFn};
 use crate::cli::handler::{CommandContext, FnHandler, Handler, HandlerResult};
 use crate::cli::hooks::Hooks;
+use standout_pipe::PipeTarget;
 
 // ============================================================================
 // CommandRecipe - Deferred dispatch closure creation
@@ -376,6 +377,152 @@ impl<H> CommandConfig<H> {
         let hooks = self.hooks.take().unwrap_or_default();
         self.hooks = Some(hooks.post_output(f));
         self
+    }
+
+    /// Pipes the output to a shell command in passthrough mode.
+    ///
+    /// The output is sent to the command's stdin, but the original output
+    /// is preserved and returned. Useful for side effects like `tee` or `pbcopy`
+    /// where you still want to see the output.
+    ///
+    /// Uses a default timeout of 30 seconds. For custom timeouts, use
+    /// [`pipe_to_with_timeout`](Self::pipe_to_with_timeout).
+    ///
+    /// # Note
+    ///
+    /// Only [`RenderedOutput::Text`] is piped. Binary and silent outputs pass through unchanged.
+    pub fn pipe_to(self, command: impl Into<String>) -> Self {
+        self.pipe_to_with_timeout(command, std::time::Duration::from_secs(30))
+    }
+
+    /// Pipes the output to a shell command in passthrough mode with a custom timeout.
+    ///
+    /// See [`pipe_to`](Self::pipe_to) for details on passthrough mode.
+    ///
+    /// # Note
+    ///
+    /// Only [`RenderedOutput::Text`] is piped. Binary and silent outputs pass through unchanged.
+    pub fn pipe_to_with_timeout(
+        self,
+        command: impl Into<String>,
+        timeout: std::time::Duration,
+    ) -> Self {
+        let command = command.into();
+        self.post_output(move |_matches, _ctx, output| {
+            if let crate::cli::hooks::RenderedOutput::Text(ref text) = output {
+                let pipe = standout_pipe::SimplePipe::new(command.clone()).with_timeout(timeout);
+                let result = pipe
+                    .pipe(text)
+                    .map_err(|e| crate::cli::hooks::HookError::post_output(e.to_string()))?;
+                Ok(crate::cli::hooks::RenderedOutput::Text(result))
+            } else {
+                Ok(output)
+            }
+        })
+    }
+
+    /// Pipes the output to a shell command in capture mode.
+    ///
+    /// The output is sent to the command's stdin, and the command's stdout
+    /// becomes the new output. Useful for filters like `jq` or `sort`.
+    ///
+    /// Uses a default timeout of 30 seconds. For custom timeouts, use
+    /// [`pipe_through_with_timeout`](Self::pipe_through_with_timeout).
+    ///
+    /// # Note
+    ///
+    /// Only [`RenderedOutput::Text`] is piped. Binary and silent outputs pass through unchanged.
+    pub fn pipe_through(self, command: impl Into<String>) -> Self {
+        self.pipe_through_with_timeout(command, std::time::Duration::from_secs(30))
+    }
+
+    /// Pipes the output to a shell command in capture mode with a custom timeout.
+    ///
+    /// See [`pipe_through`](Self::pipe_through) for details on capture mode.
+    ///
+    /// # Note
+    ///
+    /// Only [`RenderedOutput::Text`] is piped. Binary and silent outputs pass through unchanged.
+    pub fn pipe_through_with_timeout(
+        self,
+        command: impl Into<String>,
+        timeout: std::time::Duration,
+    ) -> Self {
+        let command = command.into();
+        self.post_output(move |_matches, _ctx, output| {
+            if let crate::cli::hooks::RenderedOutput::Text(ref text) = output {
+                let pipe = standout_pipe::SimplePipe::new(command.clone())
+                    .capture()
+                    .with_timeout(timeout);
+                let result = pipe
+                    .pipe(text)
+                    .map_err(|e| crate::cli::hooks::HookError::post_output(e.to_string()))?;
+                Ok(crate::cli::hooks::RenderedOutput::Text(result))
+            } else {
+                Ok(output)
+            }
+        })
+    }
+
+    /// Pipes the output to the system clipboard.
+    ///
+    /// This uses a platform-specific clipboard command:
+    /// - macOS: `pbcopy`
+    /// - Linux: `xclip -selection clipboard`
+    ///
+    /// This consumes the output (nothing is printed to terminal).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the platform is not supported (neither macOS nor Linux).
+    /// Use [`pipe_to`](Self::pipe_to) with a custom clipboard command for other platforms.
+    ///
+    /// # Note
+    ///
+    /// Only [`RenderedOutput::Text`] is piped. Binary and silent outputs pass through unchanged.
+    pub fn pipe_to_clipboard(self) -> Self {
+        self.post_output(move |_matches, _ctx, output| {
+            if let crate::cli::hooks::RenderedOutput::Text(ref text) = output {
+                if let Some(pipe) = standout_pipe::clipboard() {
+                    let result = pipe
+                        .pipe(text)
+                        .map_err(|e| crate::cli::hooks::HookError::post_output(e.to_string()))?;
+                    Ok(crate::cli::hooks::RenderedOutput::Text(result))
+                } else {
+                    Err(crate::cli::hooks::HookError::post_output(
+                        "Clipboard not supported on this platform. \
+                         Use pipe_to() with a platform-specific clipboard command.",
+                    ))
+                }
+            } else {
+                Ok(output)
+            }
+        })
+    }
+
+    /// Pipes the output using a custom [`PipeTarget`](standout_pipe::PipeTarget).
+    ///
+    /// This is the most flexible piping option, allowing custom implementations
+    /// beyond shell commands.
+    ///
+    /// # Note
+    ///
+    /// Only [`RenderedOutput::Text`] is piped. Binary and silent outputs pass through unchanged.
+    pub fn pipe_with<P>(self, target: P) -> Self
+    where
+        P: standout_pipe::PipeTarget + Send + Sync + 'static,
+    {
+        let target = std::sync::Arc::new(target);
+        self.post_output(move |_matches, _ctx, output| {
+            if let crate::cli::hooks::RenderedOutput::Text(ref text) = output {
+                let result = target
+                    .pipe(text)
+                    .map_err(|e| crate::cli::hooks::HookError::post_output(e.to_string()))?;
+                Ok(crate::cli::hooks::RenderedOutput::Text(result))
+            } else {
+                Ok(output)
+            }
+        })
     }
 }
 
