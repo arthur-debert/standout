@@ -102,6 +102,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Self-documenting: annotations show what comes from CLI
   - Familiar pattern: similar to Axum/Actix extractors
 
+- **Output piping to external commands** - New `standout-pipe` crate enables sending rendered output to shell commands for filtering, logging, or clipboard operations.
+
+  ```rust
+  // Via derive macro
+  #[derive(Subcommand, Dispatch)]
+  #[dispatch(handlers = handlers)]
+  enum Commands {
+      #[dispatch(pipe_through = "jq '.items'")]  // Filter with jq
+      List,
+
+      #[dispatch(pipe_to_clipboard)]  // Copy to clipboard
+      Export,
+
+      #[dispatch(pipe_to = "tee /tmp/log.txt")]  // Log while displaying
+      Debug,
+  }
+
+  // Via builder API
+  App::builder()
+      .commands(|g| {
+          g.command_with("list", handlers::list, |cfg| {
+              cfg.template("list.jinja")
+                 .pipe_through("jq '.data'")
+          })
+      })
+  ```
+
+  **Three piping modes:**
+  | Mode | Method | Behavior |
+  |------|--------|----------|
+  | Passthrough | `pipe_to()` | Run command, return original output |
+  | Capture | `pipe_through()` | Use command's stdout as new output |
+  | Consume | `pipe_to_clipboard()` | Send to clipboard, return empty |
+
+  **Features:**
+  - Platform-aware clipboard (pbcopy on macOS, xclip on Linux)
+  - Configurable timeouts via `pipe_to_with_timeout()`, `pipe_through_with_timeout()`
+  - Chainable: multiple pipes execute in sequence
+  - Custom implementations via `PipeTarget` trait
+  - Error messages include command name for debugging
+
+  See [Output Piping](crates/standout-pipe/docs/topics/piping.md) for full documentation.
+
 ## [3.6.0] - 2026-01-30
 
 ### Added

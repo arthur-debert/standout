@@ -59,10 +59,7 @@ pub fn run_piped(
         Some(duration) => match child.wait_timeout(duration)? {
             Some(status) => {
                 if !status.success() {
-                    return Err(ShellError::CommandFailed(
-                        command_str.to_string(),
-                        status,
-                    ));
+                    return Err(ShellError::CommandFailed(command_str.to_string(), status));
                 }
             }
             None => {
@@ -73,10 +70,7 @@ pub fn run_piped(
         None => {
             let status = child.wait()?;
             if !status.success() {
-                return Err(ShellError::CommandFailed(
-                    command_str.to_string(),
-                    status,
-                ));
+                return Err(ShellError::CommandFailed(command_str.to_string(), status));
             }
         }
     }
@@ -132,11 +126,7 @@ mod tests {
 
     #[test]
     fn test_command_failed_includes_command_name() {
-        let cmd = if cfg!(windows) {
-            "exit 1"
-        } else {
-            "exit 1"
-        };
+        let cmd = if cfg!(windows) { "exit 1" } else { "exit 1" };
         let res = run_piped(cmd, "", None);
         match res {
             Err(ShellError::CommandFailed(cmd_str, _)) => {

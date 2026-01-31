@@ -410,8 +410,7 @@ impl<H> CommandConfig<H> {
         let command = command.into();
         self.post_output(move |_matches, _ctx, output| {
             if let crate::cli::hooks::RenderedOutput::Text(ref text) = output {
-                let pipe =
-                    standout_pipe::SimplePipe::new(command.clone()).with_timeout(timeout);
+                let pipe = standout_pipe::SimplePipe::new(command.clone()).with_timeout(timeout);
                 let result = pipe
                     .pipe(text)
                     .map_err(|e| crate::cli::hooks::HookError::post_output(e.to_string()))?;

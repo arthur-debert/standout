@@ -113,11 +113,10 @@ fn test_pipe_with_custom_timeout() {
                 "slow",
                 |_m, _ctx| Ok(Output::Render(json!({"msg": "done"}))),
                 |cfg| {
-                    cfg.template("{{ msg }}")
-                        .pipe_to_with_timeout(
-                            if cfg!(windows) { "more" } else { "cat" },
-                            Duration::from_secs(60),
-                        )
+                    cfg.template("{{ msg }}").pipe_to_with_timeout(
+                        if cfg!(windows) { "more" } else { "cat" },
+                        Duration::from_secs(60),
+                    )
                 },
             )
         })
@@ -144,15 +143,14 @@ fn test_pipe_through_with_custom_timeout() {
                 "process",
                 |_m, _ctx| Ok(Output::Render(json!({"text": "abc\ndef"}))),
                 |cfg| {
-                    cfg.template("{{ text }}")
-                        .pipe_through_with_timeout(
-                            if cfg!(windows) {
-                                "findstr abc"
-                            } else {
-                                "grep abc"
-                            },
-                            Duration::from_secs(60),
-                        )
+                    cfg.template("{{ text }}").pipe_through_with_timeout(
+                        if cfg!(windows) {
+                            "findstr abc"
+                        } else {
+                            "grep abc"
+                        },
+                        Duration::from_secs(60),
+                    )
                 },
             )
         })
@@ -214,8 +212,7 @@ fn test_pipe_command_failure() {
                 "fail",
                 |_m, _ctx| Ok(Output::Render(json!({"text": "test"}))),
                 |cfg| {
-                    cfg.template("{{ text }}")
-                        .pipe_through("exit 1") // This command will fail
+                    cfg.template("{{ text }}").pipe_through("exit 1") // This command will fail
                 },
             )
         })
