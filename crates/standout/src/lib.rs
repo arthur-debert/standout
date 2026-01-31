@@ -309,5 +309,8 @@ pub use standout_seeker as seeker;
 // Seeker derive macro (requires `features = ["macros"]`)
 pub use standout_macros::Seekable;
 
+// Crud derive macro
+pub use standout_macros::Crud;
+
 // CLI integration
 pub mod cli;
