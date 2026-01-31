@@ -1,4 +1,4 @@
-//! Integration tests for CRUD view result types.
+//! Integration tests for Resource view result types.
 
 use serde::Serialize;
 use standout::views::{

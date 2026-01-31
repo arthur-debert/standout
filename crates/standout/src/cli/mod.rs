@@ -210,8 +210,8 @@ pub use dispatch::{
     extract_command_path, get_deepest_matches, has_subcommand, insert_default_command,
 };
 
-// Re-export CRUD types from standout-dispatch
-pub use standout_dispatch::{CrudQuery, CrudStore};
+// Re-export Resource types from standout-dispatch
+pub use standout_dispatch::{ResourceQuery, ResourceStore};
 
 /// Parses a clap command with styled help output.
 ///

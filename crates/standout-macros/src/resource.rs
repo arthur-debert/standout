@@ -1,32 +1,33 @@
-//! Derive macro for CRUD operations.
+//! Derive macro for Resource operations.
 //!
-//! This module provides the [`Crud`] derive macro that generates CLI commands
+//! This module provides the [`Resource`] derive macro that generates CLI commands
 //! and handlers for Create, Read, Update, Delete operations on structs.
 //!
 //! # Example
 //!
 //! ```rust,ignore
-//! use standout_macros::Crud;
+//! use standout_macros::Resource;
 //!
-//! #[derive(Clone, Crud)]
-//! #[crud(object = "task", store = TaskStore, excludes = [created_at])]
+//! #[derive(Clone, Resource)]
+//! #[resource(object = "task", store = TaskStore)]
 //! pub struct Task {
-//!     #[crud(id)]
+//!     #[resource(id)]
 //!     pub id: String,
 //!
-//!     #[crud(arg(short, long), form(required))]
+//!     #[resource(arg(short, long), form(required))]
 //!     pub title: String,
 //!
-//!     #[crud(arg(short, long))]
-//!     pub status: Status,  // Use an enum for finite choices
+//!     #[resource(arg(short, long), choices = ["pending", "done"])]
+//!     pub status: String,
 //!
-//!     pub created_at: DateTime<Utc>,  // Excluded via container-level excludes
+//!     #[resource(readonly)]
+//!     pub created_at: DateTime<Utc>,
 //! }
 //! ```
 //!
 //! This generates:
 //! - `TaskCommands` enum with List, View, Create, Update, Delete variants
-//! - Handler module `__task_crud_handlers` with implementations
+//! - Handler module `__task_resource_handlers` with implementations
 //! - Dispatch configuration via `TaskCommands::dispatch_config()`
 
 use proc_macro2::TokenStream;
@@ -38,23 +39,21 @@ use syn::{
     Data, DeriveInput, Error, Expr, Fields, Ident, Meta, Result, Token, Type,
 };
 
-/// Container-level attributes for #[crud(...)]
+/// Container-level attributes for #[resource(...)]
 #[derive(Default)]
-struct CrudContainerAttrs {
+struct ResourceContainerAttrs {
     /// Required: singular object name (e.g., "task")
     object: Option<String>,
-    /// Required: store type implementing CrudStore
+    /// Required: store type implementing ResourceStore
     store: Option<syn::Path>,
     /// Optional: plural name (defaults to "{object}s")
     plural: Option<String>,
     /// Optional: subset of operations to generate
-    operations: Option<Vec<CrudOperation>>,
-    /// Optional: field names to exclude from create/update operations
-    excludes: Vec<String>,
+    operations: Option<Vec<ResourceOperation>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CrudOperation {
+enum ResourceOperation {
     List,
     View,
     Create,
@@ -62,7 +61,7 @@ enum CrudOperation {
     Delete,
 }
 
-impl CrudOperation {
+impl ResourceOperation {
     fn all() -> Vec<Self> {
         vec![
             Self::List,
@@ -85,27 +84,31 @@ impl CrudOperation {
     }
 }
 
-/// Field-level attributes for #[crud(...)]
+/// Field-level attributes for #[resource(...)]
 #[derive(Default)]
-struct CrudFieldAttrs {
+struct ResourceFieldAttrs {
     /// This field is the primary identifier
     id: bool,
-    /// Exclude from all CRUD operations
+    /// Exclude from create/update operations
+    readonly: bool,
+    /// Exclude from all Resource operations
     skip: bool,
     /// Default value expression for create
     default_expr: Option<String>,
+    /// Constrained values for this field
+    choices: Option<Vec<String>>,
 }
 
-/// Information about a field for CRUD operations
-struct CrudFieldInfo {
+/// Information about a field for Resource operations
+struct ResourceFieldInfo {
     ident: Ident,
     ty: Type,
-    attrs: CrudFieldAttrs,
+    attrs: ResourceFieldAttrs,
 }
 
-impl Parse for CrudContainerAttrs {
+impl Parse for ResourceContainerAttrs {
     fn parse(input: ParseStream) -> Result<Self> {
-        let mut attrs = CrudContainerAttrs::default();
+        let mut attrs = ResourceContainerAttrs::default();
 
         let content: Punctuated<Meta, Token![,]> = Punctuated::parse_terminated(input)?;
 
@@ -146,7 +149,7 @@ impl Parse for CrudContainerAttrs {
                     let inner: Punctuated<Ident, Token![,]> =
                         list.parse_args_with(Punctuated::parse_terminated)?;
                     for ident in inner {
-                        if let Some(op) = CrudOperation::from_str(&ident.to_string()) {
+                        if let Some(op) = ResourceOperation::from_str(&ident.to_string()) {
                             ops.push(op);
                         } else {
                             return Err(Error::new(
@@ -157,16 +160,10 @@ impl Parse for CrudContainerAttrs {
                     }
                     attrs.operations = Some(ops);
                 }
-                Meta::List(list) if list.path.is_ident("excludes") => {
-                    // Parse the inner tokens as comma-separated identifiers
-                    let inner: Punctuated<Ident, Token![,]> =
-                        list.parse_args_with(Punctuated::parse_terminated)?;
-                    attrs.excludes = inner.iter().map(|i| i.to_string()).collect();
-                }
                 _ => {
                     return Err(Error::new(
                         meta.span(),
-                        "unknown attribute, expected one of: object, store, plural, operations, excludes",
+                        "unknown attribute, expected one of: object, store, plural, operations",
                     ));
                 }
             }
@@ -176,12 +173,12 @@ impl Parse for CrudContainerAttrs {
     }
 }
 
-/// Parse field-level #[crud(...)] attributes
-fn parse_field_attrs(attrs: &[syn::Attribute]) -> Result<CrudFieldAttrs> {
-    let mut field_attrs = CrudFieldAttrs::default();
+/// Parse field-level #[resource(...)] attributes
+fn parse_field_attrs(attrs: &[syn::Attribute]) -> Result<ResourceFieldAttrs> {
+    let mut field_attrs = ResourceFieldAttrs::default();
 
     for attr in attrs {
-        if attr.path().is_ident("crud") {
+        if attr.path().is_ident("resource") {
             let nested: Punctuated<Meta, Token![,]> =
                 attr.parse_args_with(Punctuated::parse_terminated)?;
 
@@ -189,6 +186,9 @@ fn parse_field_attrs(attrs: &[syn::Attribute]) -> Result<CrudFieldAttrs> {
                 match &meta {
                     Meta::Path(p) if p.is_ident("id") => {
                         field_attrs.id = true;
+                    }
+                    Meta::Path(p) if p.is_ident("readonly") => {
+                        field_attrs.readonly = true;
                     }
                     Meta::Path(p) if p.is_ident("skip") => {
                         field_attrs.skip = true;
@@ -199,6 +199,12 @@ fn parse_field_attrs(attrs: &[syn::Attribute]) -> Result<CrudFieldAttrs> {
                                 field_attrs.default_expr = Some(lit_str.value());
                             }
                         }
+                    }
+                    Meta::List(list) if list.path.is_ident("choices") => {
+                        let inner: Punctuated<syn::LitStr, Token![,]> =
+                            list.parse_args_with(Punctuated::parse_terminated)?;
+                        let choices: Vec<String> = inner.iter().map(|l| l.value()).collect();
+                        field_attrs.choices = Some(choices);
                     }
                     // Ignore arg, form, validate - they're for future expansion
                     Meta::List(list) if list.path.is_ident("arg") => {}
@@ -215,28 +221,28 @@ fn parse_field_attrs(attrs: &[syn::Attribute]) -> Result<CrudFieldAttrs> {
     Ok(field_attrs)
 }
 
-/// Parse container-level #[crud(...)] attributes
-fn parse_container_attrs(input: &DeriveInput) -> Result<CrudContainerAttrs> {
+/// Parse container-level #[resource(...)] attributes
+fn parse_container_attrs(input: &DeriveInput) -> Result<ResourceContainerAttrs> {
     for attr in &input.attrs {
-        if attr.path().is_ident("crud") {
-            return attr.parse_args::<CrudContainerAttrs>();
+        if attr.path().is_ident("resource") {
+            return attr.parse_args::<ResourceContainerAttrs>();
         }
     }
 
     Err(Error::new(
         input.span(),
-        "missing `#[crud(object = \"...\", store = ...)]` attribute",
+        "missing `#[resource(object = \"...\", store = ...)]` attribute",
     ))
 }
 
 /// Extract field information from struct
-fn extract_fields(fields: &Fields) -> Result<Vec<CrudFieldInfo>> {
+fn extract_fields(fields: &Fields) -> Result<Vec<ResourceFieldInfo>> {
     let named_fields = match fields {
         Fields::Named(named) => &named.named,
         _ => {
             return Err(Error::new(
                 fields.span(),
-                "Crud can only be derived for structs with named fields",
+                "Resource can only be derived for structs with named fields",
             ));
         }
     };
@@ -249,7 +255,7 @@ fn extract_fields(fields: &Fields) -> Result<Vec<CrudFieldInfo>> {
             .ok_or_else(|| Error::new(field.span(), "expected named field"))?;
         let attrs = parse_field_attrs(&field.attrs)?;
 
-        result.push(CrudFieldInfo {
+        result.push(ResourceFieldInfo {
             ident,
             ty: field.ty.clone(),
             attrs,
@@ -259,17 +265,17 @@ fn extract_fields(fields: &Fields) -> Result<Vec<CrudFieldInfo>> {
     Ok(result)
 }
 
-/// Main implementation of the Crud derive macro
-pub fn crud_derive_impl(input: DeriveInput) -> Result<TokenStream> {
+/// Main implementation of the Resource derive macro
+pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
     let container_attrs = parse_container_attrs(&input)?;
 
     let object_name = container_attrs
         .object
-        .ok_or_else(|| Error::new(input.span(), "missing `object` in #[crud(...)]"))?;
+        .ok_or_else(|| Error::new(input.span(), "missing `object` in #[resource(...)]"))?;
 
     let store_type = container_attrs
         .store
-        .ok_or_else(|| Error::new(input.span(), "missing `store` in #[crud(...)]"))?;
+        .ok_or_else(|| Error::new(input.span(), "missing `store` in #[resource(...)]"))?;
 
     let _plural_name = container_attrs
         .plural
@@ -277,7 +283,7 @@ pub fn crud_derive_impl(input: DeriveInput) -> Result<TokenStream> {
 
     let operations = container_attrs
         .operations
-        .unwrap_or_else(CrudOperation::all);
+        .unwrap_or_else(ResourceOperation::all);
 
     let struct_name = &input.ident;
 
@@ -287,7 +293,7 @@ pub fn crud_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         _ => {
             return Err(Error::new(
                 input.span(),
-                "Crud can only be derived for structs",
+                "Resource can only be derived for structs",
             ));
         }
     };
@@ -296,13 +302,13 @@ pub fn crud_derive_impl(input: DeriveInput) -> Result<TokenStream> {
     let _id_field = fields.iter().find(|f| f.attrs.id).ok_or_else(|| {
         Error::new(
             input.span(),
-            "no field marked with #[crud(id)] - one field must be the identifier",
+            "no field marked with #[resource(id)] - one field must be the identifier",
         )
     })?;
 
     // Generate names
     let commands_enum_name = format_ident!("{}Commands", struct_name);
-    let handlers_module_name = format_ident!("__{}_crud_handlers", object_name);
+    let handlers_module_name = format_ident!("__{}_resource_handlers", object_name);
     let object_name_upper = {
         let mut chars = object_name.chars();
         chars
@@ -312,13 +318,10 @@ pub fn crud_derive_impl(input: DeriveInput) -> Result<TokenStream> {
             + chars.as_str()
     };
 
-    // Get the excludes list from container attributes
-    let excludes = &container_attrs.excludes;
-
-    // Fields for create/update (excluding id, skip, and container-level excludes)
-    let mutable_fields: Vec<&CrudFieldInfo> = fields
+    // Fields for create/update (excluding id, readonly, and skip)
+    let mutable_fields: Vec<&ResourceFieldInfo> = fields
         .iter()
-        .filter(|f| !f.attrs.id && !f.attrs.skip && !excludes.contains(&f.ident.to_string()))
+        .filter(|f| !f.attrs.id && !f.attrs.readonly && !f.attrs.skip)
         .collect();
 
     // Generate clap args for create command
@@ -330,9 +333,17 @@ pub fn crud_derive_impl(input: DeriveInput) -> Result<TokenStream> {
             let name_str = name.to_string();
             let long_name = name_str.replace('_', "-");
 
-            quote! {
-                #[arg(long = #long_name)]
-                pub #name: Option<#ty>,
+            if let Some(choices) = &f.attrs.choices {
+                let choice_values: Vec<&String> = choices.iter().collect();
+                quote! {
+                    #[arg(long = #long_name, value_parser = clap::builder::PossibleValuesParser::new([#(#choice_values),*]))]
+                    pub #name: Option<String>,
+                }
+            } else {
+                quote! {
+                    #[arg(long = #long_name)]
+                    pub #name: Option<#ty>,
+                }
             }
         })
         .collect();
@@ -346,9 +357,17 @@ pub fn crud_derive_impl(input: DeriveInput) -> Result<TokenStream> {
             let name_str = name.to_string();
             let long_name = name_str.replace('_', "-");
 
-            quote! {
-                #[arg(long = #long_name)]
-                pub #name: Option<#ty>,
+            if let Some(choices) = &f.attrs.choices {
+                let choice_values: Vec<&String> = choices.iter().collect();
+                quote! {
+                    #[arg(long = #long_name, value_parser = clap::builder::PossibleValuesParser::new([#(#choice_values),*]))]
+                    pub #name: Option<String>,
+                }
+            } else {
+                quote! {
+                    #[arg(long = #long_name)]
+                    pub #name: Option<#ty>,
+                }
             }
         })
         .collect();
@@ -388,7 +407,7 @@ pub fn crud_derive_impl(input: DeriveInput) -> Result<TokenStream> {
     let mut command_variants = Vec::new();
     let mut dispatch_commands = Vec::new();
 
-    if operations.contains(&CrudOperation::List) {
+    if operations.contains(&ResourceOperation::List) {
         command_variants.push(quote! {
             /// List all items
             List {
@@ -409,7 +428,7 @@ pub fn crud_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         });
     }
 
-    if operations.contains(&CrudOperation::View) {
+    if operations.contains(&ResourceOperation::View) {
         command_variants.push(quote! {
             /// View a single item
             View {
@@ -426,7 +445,7 @@ pub fn crud_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         });
     }
 
-    if operations.contains(&CrudOperation::Create) {
+    if operations.contains(&ResourceOperation::Create) {
         command_variants.push(quote! {
             /// Create a new item
             Create {
@@ -444,7 +463,7 @@ pub fn crud_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         });
     }
 
-    if operations.contains(&CrudOperation::Update) {
+    if operations.contains(&ResourceOperation::Update) {
         command_variants.push(quote! {
             /// Update an existing item
             Update {
@@ -464,7 +483,7 @@ pub fn crud_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         });
     }
 
-    if operations.contains(&CrudOperation::Delete) {
+    if operations.contains(&ResourceOperation::Delete) {
         command_variants.push(quote! {
             /// Delete an item
             Delete {
@@ -486,7 +505,7 @@ pub fn crud_derive_impl(input: DeriveInput) -> Result<TokenStream> {
     }
 
     // Generate handler implementations
-    let list_handler = if operations.contains(&CrudOperation::List) {
+    let list_handler = if operations.contains(&ResourceOperation::List) {
         quote! {
             pub fn list(
                 matches: &::clap::ArgMatches,
@@ -500,7 +519,7 @@ pub fn crud_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                     let limit = matches.get_one::<usize>("limit").cloned();
 
                     if filter.is_some() || sort.is_some() || limit.is_some() {
-                        let mut q = ::standout::cli::CrudQuery::new();
+                        let mut q = ::standout::cli::ResourceQuery::new();
                         if let Some(f) = filter { q = q.filter(f); }
                         if let Some(s) = sort { q = q.sort(s); }
                         if let Some(l) = limit { q = q.limit(l); }
@@ -525,7 +544,7 @@ pub fn crud_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         quote! {}
     };
 
-    let view_handler = if operations.contains(&CrudOperation::View) {
+    let view_handler = if operations.contains(&ResourceOperation::View) {
         quote! {
             pub fn view(
                 matches: &::clap::ArgMatches,
@@ -550,7 +569,7 @@ pub fn crud_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         quote! {}
     };
 
-    let create_handler = if operations.contains(&CrudOperation::Create) {
+    let create_handler = if operations.contains(&ResourceOperation::Create) {
         quote! {
             pub fn create(
                 matches: &::clap::ArgMatches,
@@ -592,7 +611,7 @@ pub fn crud_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         quote! {}
     };
 
-    let update_handler = if operations.contains(&CrudOperation::Update) {
+    let update_handler = if operations.contains(&ResourceOperation::Update) {
         quote! {
             pub fn update(
                 matches: &::clap::ArgMatches,
@@ -642,7 +661,7 @@ pub fn crud_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         quote! {}
     };
 
-    let delete_handler = if operations.contains(&CrudOperation::Delete) {
+    let delete_handler = if operations.contains(&ResourceOperation::Delete) {
         quote! {
             pub fn delete(
                 matches: &::clap::ArgMatches,
@@ -681,14 +700,14 @@ pub fn crud_derive_impl(input: DeriveInput) -> Result<TokenStream> {
 
     // Generate the full output
     let expanded = quote! {
-        /// Commands enum for CRUD operations on #struct_name
+        /// Commands enum for Resource operations on #struct_name
         #[derive(::clap::Subcommand, Clone, Debug)]
         pub enum #commands_enum_name {
             #(#command_variants)*
         }
 
         impl #commands_enum_name {
-            /// Returns the dispatch configuration for these CRUD commands
+            /// Returns the dispatch configuration for these Resource commands
             pub fn dispatch_config() -> impl FnOnce(::standout::cli::GroupBuilder) -> ::standout::cli::GroupBuilder {
                 |__builder| {
                     #(#dispatch_commands)*

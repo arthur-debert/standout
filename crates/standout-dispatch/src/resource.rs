@@ -1,19 +1,19 @@
-//! CRUD store trait for object-centric CLI operations.
+//! Resource store trait for object-centric CLI operations.
 //!
-//! This module provides the [`CrudStore`] trait that users implement to connect
-//! their data stores to the CRUD framework. The trait is sync-only; for async
+//! This module provides the [`ResourceStore`] trait that users implement to connect
+//! their data stores to the Resource framework. The trait is sync-only; for async
 //! stores, users should use `block_on()` internally.
 //!
 //! # Example
 //!
 //! ```rust,ignore
-//! use standout_dispatch::CrudStore;
+//! use standout_dispatch::ResourceStore;
 //!
 //! struct TaskStore {
 //!     db: Database,
 //! }
 //!
-//! impl CrudStore for TaskStore {
+//! impl ResourceStore for TaskStore {
 //!     type Item = Task;
 //!     type Id = String;
 //!     type Error = DatabaseError;
@@ -30,7 +30,7 @@
 //!         DatabaseError::NotFound(format!("Task '{}' not found", id))
 //!     }
 //!
-//!     fn list(&self, query: Option<&CrudQuery>) -> Result<Vec<Self::Item>, Self::Error> {
+//!     fn list(&self, query: Option<&ResourceQuery>) -> Result<Vec<Self::Item>, Self::Error> {
 //!         self.db.list_tasks(query)
 //!     }
 //!
@@ -56,9 +56,9 @@ use std::str::FromStr;
 /// Query parameters for list operations.
 ///
 /// This struct captures common filtering, sorting, and pagination options
-/// that can be passed to [`CrudStore::list`].
+/// that can be passed to [`ResourceStore::list`].
 #[derive(Debug, Clone, Default)]
-pub struct CrudQuery {
+pub struct ResourceQuery {
     /// Filter expression (e.g., "status=pending")
     pub filter: Option<String>,
     /// Sort field (e.g., "created_at")
@@ -71,7 +71,7 @@ pub struct CrudQuery {
     pub offset: Option<usize>,
 }
 
-impl CrudQuery {
+impl ResourceQuery {
     /// Creates a new empty query.
     pub fn new() -> Self {
         Self::default()
@@ -122,10 +122,10 @@ impl CrudQuery {
     }
 }
 
-/// Trait for CRUD storage backends.
+/// Trait for Resource storage backends.
 ///
 /// Implement this trait to connect your data store (database, file, API, etc.)
-/// to the CRUD framework. The framework handles CLI argument parsing, validation,
+/// to the Resource framework. The framework handles CLI argument parsing, validation,
 /// and view rendering while delegating all data operations to this trait.
 ///
 /// # Design Notes
@@ -144,7 +144,7 @@ impl CrudQuery {
 /// - `Item`: The domain object type (must be serializable/deserializable)
 /// - `Id`: The identifier type (must be displayable and parseable from strings)
 /// - `Error`: The error type (must be a standard error)
-pub trait CrudStore: Send + Sync {
+pub trait ResourceStore: Send + Sync {
     /// The domain object type.
     type Item: Serialize + DeserializeOwned;
 
@@ -180,7 +180,7 @@ pub trait CrudStore: Send + Sync {
     }
 
     /// Lists items, optionally filtered by the given query.
-    fn list(&self, query: Option<&CrudQuery>) -> Result<Vec<Self::Item>, Self::Error>;
+    fn list(&self, query: Option<&ResourceQuery>) -> Result<Vec<Self::Item>, Self::Error>;
 
     /// Creates a new item from the given data.
     ///
@@ -243,7 +243,7 @@ mod tests {
         }
     }
 
-    impl CrudStore for InMemoryStore {
+    impl ResourceStore for InMemoryStore {
         type Item = Task;
         type Id = String;
         type Error = TestError;
@@ -264,7 +264,7 @@ mod tests {
             TestError(format!("Task '{}' not found", id))
         }
 
-        fn list(&self, query: Option<&CrudQuery>) -> Result<Vec<Self::Item>, Self::Error> {
+        fn list(&self, query: Option<&ResourceQuery>) -> Result<Vec<Self::Item>, Self::Error> {
             let tasks = self.tasks.read().unwrap();
             let mut result: Vec<_> = tasks.values().cloned().collect();
 
@@ -312,8 +312,8 @@ mod tests {
     }
 
     #[test]
-    fn test_crud_query_builder() {
-        let query = CrudQuery::new()
+    fn test_resource_query_builder() {
+        let query = ResourceQuery::new()
             .filter("status=pending")
             .sort("created_at")
             .descending()
@@ -329,8 +329,8 @@ mod tests {
     }
 
     #[test]
-    fn test_crud_query_empty() {
-        let query = CrudQuery::new();
+    fn test_resource_query_empty() {
+        let query = ResourceQuery::new();
         assert!(!query.has_constraints());
     }
 
@@ -420,7 +420,7 @@ mod tests {
             },
         ]);
 
-        let query = CrudQuery::new().limit(1);
+        let query = ResourceQuery::new().limit(1);
         let tasks = store.list(Some(&query)).unwrap();
         assert_eq!(tasks.len(), 1);
     }

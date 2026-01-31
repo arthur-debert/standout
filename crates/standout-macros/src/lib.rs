@@ -42,7 +42,7 @@
 //! [`EmbeddedSource`]: standout::EmbeddedSource
 //! [`RenderSetup`]: standout::RenderSetup
 
-mod crud;
+mod resource;
 mod dispatch;
 mod embed;
 mod handler;
@@ -478,9 +478,9 @@ pub fn handler(attr: TokenStream, item: TokenStream) -> TokenStream {
         .into()
 }
 
-/// Derives CRUD commands and handlers for a struct.
+/// Derives Resource commands and handlers for a struct.
 ///
-/// This macro generates a complete CRUD CLI interface for the annotated struct,
+/// This macro generates a complete Resource CLI interface for the annotated struct,
 /// including list, view, create, update, and delete commands with corresponding
 /// handlers.
 ///
@@ -489,7 +489,7 @@ pub fn handler(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// | Attribute | Description |
 /// |-----------|-------------|
 /// | `object = "name"` | Singular name for the object (e.g., "task") |
-/// | `store = Type` | Type implementing `CrudStore` trait |
+/// | `store = Type` | Type implementing `ResourceStore` trait |
 ///
 /// # Optional Attributes
 ///
@@ -504,36 +504,36 @@ pub fn handler(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// |-----------|-------------|
 /// | `id` | Marks field as primary identifier (required) |
 /// | `readonly` | Excludes field from create/update |
-/// | `skip` | Excludes field from all CRUD operations |
+/// | `skip` | Excludes field from all Resource operations |
 /// | `default = "expr"` | Default value for create |
 /// | `choices = ["a", "b"]` | Constrained values |
 ///
 /// # Generated Code
 ///
-/// For `#[crud(object = "task", store = TaskStore)]` on `Task`:
+/// For `#[resource(object = "task", store = TaskStore)]` on `Task`:
 ///
 /// - `TaskCommands` enum with List, View, Create, Update, Delete variants
 /// - `TaskCommands::dispatch_config()` for use with `App::builder().group()`
-/// - Handler functions in `__task_crud_handlers` module
+/// - Handler functions in `__task_resource_handlers` module
 ///
 /// # Example
 ///
 /// ```rust,ignore
-/// use standout_macros::Crud;
+/// use standout_macros::Resource;
 ///
-/// #[derive(Clone, Crud)]
-/// #[crud(object = "task", store = TaskStore)]
+/// #[derive(Clone, Resource)]
+/// #[resource(object = "task", store = TaskStore)]
 /// pub struct Task {
-///     #[crud(id)]
+///     #[resource(id)]
 ///     pub id: String,
 ///
-///     #[crud(arg(short, long))]
+///     #[resource(arg(short, long))]
 ///     pub title: String,
 ///
-///     #[crud(choices = ["pending", "done"])]
+///     #[resource(choices = ["pending", "done"])]
 ///     pub status: String,
 ///
-///     #[crud(readonly)]
+///     #[resource(readonly)]
 ///     pub created_at: String,
 /// }
 ///
@@ -544,10 +544,10 @@ pub fn handler(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///     .build()?
 ///     .run(Cli::command(), std::env::args_os());
 /// ```
-#[proc_macro_derive(Crud, attributes(crud))]
-pub fn crud_derive(input: TokenStream) -> TokenStream {
+#[proc_macro_derive(Resource, attributes(resource))]
+pub fn resource_derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    crud::crud_derive_impl(input)
+    resource::resource_derive_impl(input)
         .unwrap_or_else(|e| e.to_compile_error())
         .into()
 }

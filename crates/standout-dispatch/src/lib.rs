@@ -120,11 +120,11 @@
 //! the template registry, theme, and output format from CLI args.
 
 // Core modules
-mod crud;
 mod dispatch;
 mod handler;
 mod hooks;
 mod render;
+mod resource;
 
 // Re-export command routing utilities
 pub use dispatch::{
@@ -146,5 +146,5 @@ pub use hooks::{
 // Re-export render abstraction
 pub use render::{from_fn, from_fn_mut, LocalRenderFn, RenderError, RenderFn};
 
-// Re-export CRUD types
-pub use crud::{CrudQuery, CrudStore};
+// Re-export Resource types
+pub use resource::{ResourceQuery, ResourceStore};

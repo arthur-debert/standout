@@ -1,7 +1,7 @@
-//! Integration tests for CrudStore trait.
+//! Integration tests for ResourceStore trait.
 
 use serde::{Deserialize, Serialize};
-use standout::cli::{CrudQuery, CrudStore};
+use standout::cli::{ResourceQuery, ResourceStore};
 use std::collections::HashMap;
 use std::sync::RwLock;
 
@@ -48,7 +48,7 @@ impl InMemoryTaskStore {
     }
 }
 
-impl CrudStore for InMemoryTaskStore {
+impl ResourceStore for InMemoryTaskStore {
     type Item = Task;
     type Id = String;
     type Error = TestError;
@@ -69,7 +69,7 @@ impl CrudStore for InMemoryTaskStore {
         TestError(format!("Task '{}' not found", id))
     }
 
-    fn list(&self, query: Option<&CrudQuery>) -> Result<Vec<Self::Item>, Self::Error> {
+    fn list(&self, query: Option<&ResourceQuery>) -> Result<Vec<Self::Item>, Self::Error> {
         let tasks = self.tasks.read().unwrap();
         let mut result: Vec<_> = tasks.values().cloned().collect();
 
@@ -116,12 +116,12 @@ impl CrudStore for InMemoryTaskStore {
 }
 
 // ============================================================================
-// CrudQuery tests
+// ResourceQuery tests
 // ============================================================================
 
 #[test]
-fn test_crud_query_builder() {
-    let query = CrudQuery::new()
+fn test_resource_query_builder() {
+    let query = ResourceQuery::new()
         .filter("status=pending")
         .sort("created_at")
         .descending()
@@ -137,8 +137,8 @@ fn test_crud_query_builder() {
 }
 
 #[test]
-fn test_crud_query_empty() {
-    let query = CrudQuery::new();
+fn test_resource_query_empty() {
+    let query = ResourceQuery::new();
     assert!(query.filter.is_none());
     assert!(query.sort.is_none());
     assert!(!query.sort_desc);
@@ -148,13 +148,13 @@ fn test_crud_query_empty() {
 }
 
 #[test]
-fn test_crud_query_ascending() {
-    let query = CrudQuery::new().sort("name").ascending();
+fn test_resource_query_ascending() {
+    let query = ResourceQuery::new().sort("name").ascending();
     assert!(!query.sort_desc);
 }
 
 // ============================================================================
-// CrudStore implementation tests
+// ResourceStore implementation tests
 // ============================================================================
 
 #[test]
@@ -248,7 +248,7 @@ fn test_list_with_limit() {
         },
     ]);
 
-    let query = CrudQuery::new().limit(2);
+    let query = ResourceQuery::new().limit(2);
     let tasks = store.list(Some(&query)).unwrap();
     assert_eq!(tasks.len(), 2);
 }
@@ -352,11 +352,11 @@ fn test_delete_missing() {
 }
 
 // ============================================================================
-// Full CRUD workflow test
+// Full Resource workflow test
 // ============================================================================
 
 #[test]
-fn test_crud_workflow() {
+fn test_resource_workflow() {
     let store = InMemoryTaskStore::new();
 
     // Create

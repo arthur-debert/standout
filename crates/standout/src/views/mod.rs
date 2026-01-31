@@ -1,7 +1,7 @@
 //! View abstractions for standardized CLI output patterns.
 //!
 //! This module provides high-level view types that encode common CLI output patterns:
-//! list views, detail views, and full CRUD operations.
+//! list views, detail views, and full Resource operations.
 //!
 //! # ListView
 //!
@@ -22,9 +22,9 @@
 //! When combined with the `#[derive(Tabular)]` macro on your item type,
 //! the framework renders items as a formatted table with zero template code.
 //!
-//! # CRUD Views
+//! # Resource Views
 //!
-//! For object-centric CLI patterns, use the CRUD view types:
+//! For object-centric CLI patterns, use the Resource view types:
 //!
 //! - [`DetailViewResult`] - Display a single item with related data and actions
 //! - [`CreateViewResult`] - Display the result of a create operation
