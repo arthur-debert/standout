@@ -373,6 +373,60 @@ impl<T: Serialize> Output<T> {
 /// Enables use of the `?` operator for error propagation.
 pub type HandlerResult<T> = Result<Output<T>, anyhow::Error>;
 
+/// Trait for types that can be converted into a [`HandlerResult`].
+///
+/// This enables handlers to return either `Result<T, E>` directly (auto-wrapped
+/// in [`Output::Render`]) or the explicit [`HandlerResult<T>`] when fine-grained
+/// control is needed (for [`Output::Silent`] or [`Output::Binary`]).
+///
+/// # Example
+///
+/// ```rust
+/// use standout_dispatch::{HandlerResult, Output, IntoHandlerResult};
+///
+/// // Direct Result<T, E> is auto-wrapped in Output::Render
+/// fn simple() -> Result<String, anyhow::Error> {
+///     Ok("hello".to_string())
+/// }
+/// let result: HandlerResult<String> = simple().into_handler_result();
+/// assert!(matches!(result, Ok(Output::Render(_))));
+///
+/// // HandlerResult<T> passes through unchanged
+/// fn explicit() -> HandlerResult<String> {
+///     Ok(Output::Silent)
+/// }
+/// let result: HandlerResult<String> = explicit().into_handler_result();
+/// assert!(matches!(result, Ok(Output::Silent)));
+/// ```
+pub trait IntoHandlerResult<T: Serialize> {
+    /// Convert this type into a [`HandlerResult<T>`].
+    fn into_handler_result(self) -> HandlerResult<T>;
+}
+
+/// Implementation for `Result<T, E>` - auto-wraps successful values in [`Output::Render`].
+///
+/// This is the ergonomic path: handlers can return `Result<T, E>` directly
+/// and the framework wraps it appropriately.
+impl<T, E> IntoHandlerResult<T> for Result<T, E>
+where
+    T: Serialize,
+    E: Into<anyhow::Error>,
+{
+    fn into_handler_result(self) -> HandlerResult<T> {
+        self.map(Output::Render).map_err(Into::into)
+    }
+}
+
+/// Implementation for `HandlerResult<T>` - passes through unchanged.
+///
+/// This is the explicit path: handlers that need [`Output::Silent`] or
+/// [`Output::Binary`] can return `HandlerResult<T>` directly.
+impl<T: Serialize> IntoHandlerResult<T> for HandlerResult<T> {
+    fn into_handler_result(self) -> HandlerResult<T> {
+        self
+    }
+}
+
 /// Result of running the CLI dispatcher.
 ///
 /// After processing arguments, the dispatcher either handles a command
@@ -442,18 +496,39 @@ pub trait Handler: Send + Sync {
 }
 
 /// A wrapper that implements Handler for closures.
-pub struct FnHandler<F, T>
+///
+/// The closure can return either:
+/// - `Result<T, E>` - automatically wrapped in [`Output::Render`]
+/// - `HandlerResult<T>` - passed through unchanged (for [`Output::Silent`] or [`Output::Binary`])
+///
+/// # Example
+///
+/// ```rust
+/// use standout_dispatch::{FnHandler, Handler, CommandContext, Output};
+/// use clap::ArgMatches;
+///
+/// // Returning Result<T, E> directly (auto-wrapped)
+/// let handler = FnHandler::new(|_m: &ArgMatches, _ctx: &CommandContext| {
+///     Ok::<_, anyhow::Error>("hello".to_string())
+/// });
+///
+/// // Returning HandlerResult<T> explicitly (for Silent/Binary)
+/// let silent_handler = FnHandler::new(|_m: &ArgMatches, _ctx: &CommandContext| {
+///     Ok(Output::<()>::Silent)
+/// });
+/// ```
+pub struct FnHandler<F, T, R = HandlerResult<T>>
 where
-    F: Fn(&ArgMatches, &CommandContext) -> HandlerResult<T> + Send + Sync,
     T: Serialize + Send + Sync,
 {
     f: F,
-    _phantom: std::marker::PhantomData<fn() -> T>,
+    _phantom: std::marker::PhantomData<fn() -> (T, R)>,
 }
 
-impl<F, T> FnHandler<F, T>
+impl<F, T, R> FnHandler<F, T, R>
 where
-    F: Fn(&ArgMatches, &CommandContext) -> HandlerResult<T> + Send + Sync,
+    F: Fn(&ArgMatches, &CommandContext) -> R + Send + Sync,
+    R: IntoHandlerResult<T>,
     T: Serialize + Send + Sync,
 {
     /// Creates a new FnHandler wrapping the given closure.
@@ -465,15 +540,16 @@ where
     }
 }
 
-impl<F, T> Handler for FnHandler<F, T>
+impl<F, T, R> Handler for FnHandler<F, T, R>
 where
-    F: Fn(&ArgMatches, &CommandContext) -> HandlerResult<T> + Send + Sync,
+    F: Fn(&ArgMatches, &CommandContext) -> R + Send + Sync,
+    R: IntoHandlerResult<T>,
     T: Serialize + Send + Sync,
 {
     type Output = T;
 
     fn handle(&self, matches: &ArgMatches, ctx: &CommandContext) -> HandlerResult<T> {
-        (self.f)(matches, ctx)
+        (self.f)(matches, ctx).into_handler_result()
     }
 }
 
@@ -493,18 +569,38 @@ pub trait LocalHandler {
 }
 
 /// A wrapper that implements LocalHandler for FnMut closures.
-pub struct LocalFnHandler<F, T>
+///
+/// Similar to [`FnHandler`], but:
+/// - Does NOT require `Send + Sync`
+/// - Takes `FnMut` instead of `Fn` (allows mutation)
+///
+/// The closure can return either:
+/// - `Result<T, E>` - automatically wrapped in [`Output::Render`]
+/// - `HandlerResult<T>` - passed through unchanged (for [`Output::Silent`] or [`Output::Binary`])
+///
+/// # Example
+///
+/// ```rust
+/// use standout_dispatch::{LocalFnHandler, LocalHandler, CommandContext, Output};
+/// use clap::ArgMatches;
+///
+/// // Returning Result<T, E> directly (auto-wrapped)
+/// let mut handler = LocalFnHandler::new(|_m: &ArgMatches, _ctx: &CommandContext| {
+///     Ok::<_, anyhow::Error>("hello".to_string())
+/// });
+/// ```
+pub struct LocalFnHandler<F, T, R = HandlerResult<T>>
 where
-    F: FnMut(&ArgMatches, &CommandContext) -> HandlerResult<T>,
     T: Serialize,
 {
     f: F,
-    _phantom: std::marker::PhantomData<fn() -> T>,
+    _phantom: std::marker::PhantomData<fn() -> (T, R)>,
 }
 
-impl<F, T> LocalFnHandler<F, T>
+impl<F, T, R> LocalFnHandler<F, T, R>
 where
-    F: FnMut(&ArgMatches, &CommandContext) -> HandlerResult<T>,
+    F: FnMut(&ArgMatches, &CommandContext) -> R,
+    R: IntoHandlerResult<T>,
     T: Serialize,
 {
     /// Creates a new LocalFnHandler wrapping the given FnMut closure.
@@ -516,15 +612,135 @@ where
     }
 }
 
-impl<F, T> LocalHandler for LocalFnHandler<F, T>
+impl<F, T, R> LocalHandler for LocalFnHandler<F, T, R>
 where
-    F: FnMut(&ArgMatches, &CommandContext) -> HandlerResult<T>,
+    F: FnMut(&ArgMatches, &CommandContext) -> R,
+    R: IntoHandlerResult<T>,
     T: Serialize,
 {
     type Output = T;
 
     fn handle(&mut self, matches: &ArgMatches, ctx: &CommandContext) -> HandlerResult<T> {
-        (self.f)(matches, ctx)
+        (self.f)(matches, ctx).into_handler_result()
+    }
+}
+
+/// A handler wrapper for functions that don't need [`CommandContext`].
+///
+/// This is the simpler variant of [`FnHandler`] for handlers that only need
+/// [`ArgMatches`]. The context parameter is accepted but ignored internally.
+///
+/// The closure can return either:
+/// - `Result<T, E>` - automatically wrapped in [`Output::Render`]
+/// - `HandlerResult<T>` - passed through unchanged (for [`Output::Silent`] or [`Output::Binary`])
+///
+/// # Example
+///
+/// ```rust
+/// use standout_dispatch::{SimpleFnHandler, Handler, CommandContext, Output};
+/// use clap::ArgMatches;
+///
+/// // Handler that doesn't need context - just uses ArgMatches
+/// let handler = SimpleFnHandler::new(|_m: &ArgMatches| {
+///     Ok::<_, anyhow::Error>("Hello, world!".to_string())
+/// });
+///
+/// // Can still be used via Handler trait (context is ignored)
+/// let ctx = CommandContext::default();
+/// let matches = clap::Command::new("test").get_matches_from(vec!["test"]);
+/// let result = handler.handle(&matches, &ctx);
+/// assert!(matches!(result, Ok(Output::Render(_))));
+/// ```
+pub struct SimpleFnHandler<F, T, R = HandlerResult<T>>
+where
+    T: Serialize + Send + Sync,
+{
+    f: F,
+    _phantom: std::marker::PhantomData<fn() -> (T, R)>,
+}
+
+impl<F, T, R> SimpleFnHandler<F, T, R>
+where
+    F: Fn(&ArgMatches) -> R + Send + Sync,
+    R: IntoHandlerResult<T>,
+    T: Serialize + Send + Sync,
+{
+    /// Creates a new SimpleFnHandler wrapping the given closure.
+    pub fn new(f: F) -> Self {
+        Self {
+            f,
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<F, T, R> Handler for SimpleFnHandler<F, T, R>
+where
+    F: Fn(&ArgMatches) -> R + Send + Sync,
+    R: IntoHandlerResult<T>,
+    T: Serialize + Send + Sync,
+{
+    type Output = T;
+
+    fn handle(&self, matches: &ArgMatches, _ctx: &CommandContext) -> HandlerResult<T> {
+        (self.f)(matches).into_handler_result()
+    }
+}
+
+/// A local handler wrapper for functions that don't need [`CommandContext`].
+///
+/// This is the simpler variant of [`LocalFnHandler`] for handlers that only need
+/// [`ArgMatches`]. The context parameter is accepted but ignored internally.
+///
+/// Similar to [`SimpleFnHandler`], but:
+/// - Does NOT require `Send + Sync`
+/// - Takes `FnMut` instead of `Fn` (allows mutation)
+///
+/// # Example
+///
+/// ```rust
+/// use standout_dispatch::{LocalSimpleFnHandler, LocalHandler, CommandContext};
+/// use clap::ArgMatches;
+///
+/// let mut call_count = 0;
+/// let mut handler = LocalSimpleFnHandler::new(|m: &ArgMatches| {
+///     call_count += 1;
+///     Ok::<_, anyhow::Error>(format!("Call #{}", call_count))
+/// });
+/// ```
+pub struct LocalSimpleFnHandler<F, T, R = HandlerResult<T>>
+where
+    T: Serialize,
+{
+    f: F,
+    _phantom: std::marker::PhantomData<fn() -> (T, R)>,
+}
+
+impl<F, T, R> LocalSimpleFnHandler<F, T, R>
+where
+    F: FnMut(&ArgMatches) -> R,
+    R: IntoHandlerResult<T>,
+    T: Serialize,
+{
+    /// Creates a new LocalSimpleFnHandler wrapping the given FnMut closure.
+    pub fn new(f: F) -> Self {
+        Self {
+            f,
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<F, T, R> LocalHandler for LocalSimpleFnHandler<F, T, R>
+where
+    F: FnMut(&ArgMatches) -> R,
+    R: IntoHandlerResult<T>,
+    T: Serialize,
+{
+    type Output = T;
+
+    fn handle(&mut self, matches: &ArgMatches, _ctx: &CommandContext) -> HandlerResult<T> {
+        (self.f)(matches).into_handler_result()
     }
 }
 
@@ -886,5 +1102,291 @@ mod tests {
         if let Ok(Output::Render(count)) = result {
             assert_eq!(count, 3);
         }
+    }
+
+    // IntoHandlerResult tests
+    #[test]
+    fn test_into_handler_result_from_result_ok() {
+        use super::IntoHandlerResult;
+
+        let result: Result<String, anyhow::Error> = Ok("hello".to_string());
+        let handler_result = result.into_handler_result();
+
+        assert!(handler_result.is_ok());
+        match handler_result.unwrap() {
+            Output::Render(s) => assert_eq!(s, "hello"),
+            _ => panic!("Expected Output::Render"),
+        }
+    }
+
+    #[test]
+    fn test_into_handler_result_from_result_err() {
+        use super::IntoHandlerResult;
+
+        let result: Result<String, anyhow::Error> = Err(anyhow::anyhow!("test error"));
+        let handler_result = result.into_handler_result();
+
+        assert!(handler_result.is_err());
+        assert!(handler_result
+            .unwrap_err()
+            .to_string()
+            .contains("test error"));
+    }
+
+    #[test]
+    fn test_into_handler_result_passthrough_render() {
+        use super::IntoHandlerResult;
+
+        let handler_result: HandlerResult<String> = Ok(Output::Render("hello".to_string()));
+        let result = handler_result.into_handler_result();
+
+        assert!(result.is_ok());
+        match result.unwrap() {
+            Output::Render(s) => assert_eq!(s, "hello"),
+            _ => panic!("Expected Output::Render"),
+        }
+    }
+
+    #[test]
+    fn test_into_handler_result_passthrough_silent() {
+        use super::IntoHandlerResult;
+
+        let handler_result: HandlerResult<String> = Ok(Output::Silent);
+        let result = handler_result.into_handler_result();
+
+        assert!(result.is_ok());
+        assert!(matches!(result.unwrap(), Output::Silent));
+    }
+
+    #[test]
+    fn test_into_handler_result_passthrough_binary() {
+        use super::IntoHandlerResult;
+
+        let handler_result: HandlerResult<String> = Ok(Output::Binary {
+            data: vec![1, 2, 3],
+            filename: "test.bin".to_string(),
+        });
+        let result = handler_result.into_handler_result();
+
+        assert!(result.is_ok());
+        match result.unwrap() {
+            Output::Binary { data, filename } => {
+                assert_eq!(data, vec![1, 2, 3]);
+                assert_eq!(filename, "test.bin");
+            }
+            _ => panic!("Expected Output::Binary"),
+        }
+    }
+
+    #[test]
+    fn test_fn_handler_with_auto_wrap() {
+        // Handler that returns Result<T, E> directly (not HandlerResult)
+        let handler = FnHandler::new(|_m: &ArgMatches, _ctx: &CommandContext| {
+            Ok::<_, anyhow::Error>("auto-wrapped".to_string())
+        });
+
+        let ctx = CommandContext::default();
+        let matches = clap::Command::new("test").get_matches_from(vec!["test"]);
+
+        let result = handler.handle(&matches, &ctx);
+        assert!(result.is_ok());
+        match result.unwrap() {
+            Output::Render(s) => assert_eq!(s, "auto-wrapped"),
+            _ => panic!("Expected Output::Render"),
+        }
+    }
+
+    #[test]
+    fn test_fn_handler_with_explicit_output() {
+        // Handler that returns HandlerResult directly (for Silent/Binary)
+        let handler =
+            FnHandler::new(|_m: &ArgMatches, _ctx: &CommandContext| Ok(Output::<()>::Silent));
+
+        let ctx = CommandContext::default();
+        let matches = clap::Command::new("test").get_matches_from(vec!["test"]);
+
+        let result = handler.handle(&matches, &ctx);
+        assert!(result.is_ok());
+        assert!(matches!(result.unwrap(), Output::Silent));
+    }
+
+    #[test]
+    fn test_local_fn_handler_with_auto_wrap() {
+        let mut handler = LocalFnHandler::new(|_m: &ArgMatches, _ctx: &CommandContext| {
+            Ok::<_, anyhow::Error>(42i32)
+        });
+
+        let ctx = CommandContext::default();
+        let matches = clap::Command::new("test").get_matches_from(vec!["test"]);
+
+        let result = handler.handle(&matches, &ctx);
+        assert!(result.is_ok());
+        match result.unwrap() {
+            Output::Render(n) => assert_eq!(n, 42),
+            _ => panic!("Expected Output::Render"),
+        }
+    }
+
+    #[test]
+    fn test_fn_handler_with_custom_error_type() {
+        // Custom error type that implements Into<anyhow::Error>
+        #[derive(Debug)]
+        struct CustomError(String);
+
+        impl std::fmt::Display for CustomError {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "CustomError: {}", self.0)
+            }
+        }
+
+        impl std::error::Error for CustomError {}
+
+        let handler = FnHandler::new(|_m: &ArgMatches, _ctx: &CommandContext| {
+            Err::<String, CustomError>(CustomError("oops".to_string()))
+        });
+
+        let ctx = CommandContext::default();
+        let matches = clap::Command::new("test").get_matches_from(vec!["test"]);
+
+        let result = handler.handle(&matches, &ctx);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("CustomError: oops"));
+    }
+
+    // SimpleFnHandler tests (no CommandContext)
+    #[test]
+    fn test_simple_fn_handler_basic() {
+        use super::SimpleFnHandler;
+
+        let handler = SimpleFnHandler::new(|_m: &ArgMatches| {
+            Ok::<_, anyhow::Error>("no context needed".to_string())
+        });
+
+        let ctx = CommandContext::default();
+        let matches = clap::Command::new("test").get_matches_from(vec!["test"]);
+
+        let result = handler.handle(&matches, &ctx);
+        assert!(result.is_ok());
+        match result.unwrap() {
+            Output::Render(s) => assert_eq!(s, "no context needed"),
+            _ => panic!("Expected Output::Render"),
+        }
+    }
+
+    #[test]
+    fn test_simple_fn_handler_with_args() {
+        use super::SimpleFnHandler;
+
+        let handler = SimpleFnHandler::new(|m: &ArgMatches| {
+            let verbose = m.get_flag("verbose");
+            Ok::<_, anyhow::Error>(verbose)
+        });
+
+        let ctx = CommandContext::default();
+        let matches = clap::Command::new("test")
+            .arg(
+                clap::Arg::new("verbose")
+                    .short('v')
+                    .action(clap::ArgAction::SetTrue),
+            )
+            .get_matches_from(vec!["test", "-v"]);
+
+        let result = handler.handle(&matches, &ctx);
+        assert!(result.is_ok());
+        match result.unwrap() {
+            Output::Render(v) => assert!(v),
+            _ => panic!("Expected Output::Render"),
+        }
+    }
+
+    #[test]
+    fn test_simple_fn_handler_explicit_output() {
+        use super::SimpleFnHandler;
+
+        let handler = SimpleFnHandler::new(|_m: &ArgMatches| Ok(Output::<()>::Silent));
+
+        let ctx = CommandContext::default();
+        let matches = clap::Command::new("test").get_matches_from(vec!["test"]);
+
+        let result = handler.handle(&matches, &ctx);
+        assert!(result.is_ok());
+        assert!(matches!(result.unwrap(), Output::Silent));
+    }
+
+    #[test]
+    fn test_simple_fn_handler_error() {
+        use super::SimpleFnHandler;
+
+        let handler = SimpleFnHandler::new(|_m: &ArgMatches| {
+            Err::<String, _>(anyhow::anyhow!("simple error"))
+        });
+
+        let ctx = CommandContext::default();
+        let matches = clap::Command::new("test").get_matches_from(vec!["test"]);
+
+        let result = handler.handle(&matches, &ctx);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("simple error"));
+    }
+
+    // LocalSimpleFnHandler tests
+    #[test]
+    fn test_local_simple_fn_handler_basic() {
+        use super::LocalSimpleFnHandler;
+
+        let mut handler = LocalSimpleFnHandler::new(|_m: &ArgMatches| {
+            Ok::<_, anyhow::Error>("local no context".to_string())
+        });
+
+        let ctx = CommandContext::default();
+        let matches = clap::Command::new("test").get_matches_from(vec!["test"]);
+
+        let result = handler.handle(&matches, &ctx);
+        assert!(result.is_ok());
+        match result.unwrap() {
+            Output::Render(s) => assert_eq!(s, "local no context"),
+            _ => panic!("Expected Output::Render"),
+        }
+    }
+
+    #[test]
+    fn test_local_simple_fn_handler_mutation() {
+        use super::LocalSimpleFnHandler;
+
+        let mut counter = 0u32;
+        let mut handler = LocalSimpleFnHandler::new(|_m: &ArgMatches| {
+            counter += 1;
+            Ok::<_, anyhow::Error>(counter)
+        });
+
+        let ctx = CommandContext::default();
+        let matches = clap::Command::new("test").get_matches_from(vec!["test"]);
+
+        let _ = handler.handle(&matches, &ctx);
+        let _ = handler.handle(&matches, &ctx);
+        let result = handler.handle(&matches, &ctx);
+
+        assert!(result.is_ok());
+        match result.unwrap() {
+            Output::Render(n) => assert_eq!(n, 3),
+            _ => panic!("Expected Output::Render"),
+        }
+    }
+
+    #[test]
+    fn test_local_simple_fn_handler_explicit_output() {
+        use super::LocalSimpleFnHandler;
+
+        let mut handler = LocalSimpleFnHandler::new(|_m: &ArgMatches| Ok(Output::<()>::Silent));
+
+        let ctx = CommandContext::default();
+        let matches = clap::Command::new("test").get_matches_from(vec!["test"]);
+
+        let result = handler.handle(&matches, &ctx);
+        assert!(result.is_ok());
+        assert!(matches!(result.unwrap(), Output::Silent));
     }
 }

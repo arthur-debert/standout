@@ -1,21 +1,22 @@
 //! # Standout Render - Styled Terminal Output Library
 //!
-//! `standout-render` provides a complete rendering system for styled terminal output,
-//! including template processing, theming, and adaptive color support.
-//!
-//! This crate is the rendering foundation for the `standout` CLI framework, but can
-//! be used independently for any application that needs rich terminal output.
+//! `standout-render` combines templating, theming, and adaptive color handling so you
+//! can ship consistent terminal UI without re-implementing styling utilities.
+//! Although it powers the `standout` CLI framework, the crate is fully usable as a
+//! stand-alone renderer for any Rust application that needs rich TTY output.
 //!
 //! ## Core Concepts
 //!
-//! - [`Theme`]: Named collection of adaptive styles that respond to light/dark mode
-//! - [`ColorMode`]: Light or dark color mode enum
-//! - [`OutputMode`]: Control output formatting (Auto/Term/Text/TermDebug/Json/Yaml)
-//! - Style syntax: Tag-based styling `[name]content[/name]`
-//! - [`Renderer`]: Pre-compile templates for repeated rendering
-//! - [`validate_template`]: Check templates for unknown style tags
+//! - [`Theme`]: Named, adaptive styles that automatically respect [`ColorMode`]
+//! - [`Renderer`]: Compile and reuse templates for fast repeated rendering
+//! - [`validate_template`]: Surface typos or unknown tags before you ship templates
+//! - [`OutputMode`]: Control how content is emitted (Auto/Term/Text/TermDebug/Json/Yaml)
+//! - Style syntax: Tag-based `[name]content[/name]` markup for inline styling
 //!
 //! ## Quick Start
+//!
+//! Create a [`Theme`], pass serializable data, and call [`render`] to produce a styled
+//! `String` that you can print, persist, or feed into other systems:
 //!
 //! ```rust
 //! use standout_render::{render, Theme};
@@ -48,7 +49,9 @@
 //!
 //! ## Tag-Based Styling
 //!
-//! Use tag syntax `[name]content[/name]` for styling both static and dynamic content:
+//! Templates use lightweight `[name]content[/name]` tags, so you can mix static text
+//! and template variables without sprinkling manual `console::Style` calls. The
+//! renderer resolves each tag to the appropriate entry in your [`Theme`]:
 //!
 //! ```rust
 //! use standout_render::{render_with_output, Theme, OutputMode};
@@ -76,8 +79,9 @@
 //!
 //! ## Adaptive Themes (Light & Dark)
 //!
-//! Themes are inherently adaptive. Individual styles can define mode-specific
-//! variations that are automatically selected based on the user's OS color mode.
+//! Styles automatically adapt to the current [`ColorMode`]. Provide explicit
+//! overrides for light and dark variants, or rely on a shared default when you
+//! do not need per-mode differences:
 //!
 //! ```rust
 //! use standout_render::Theme;
@@ -97,7 +101,9 @@
 //!
 //! ## YAML-Based Themes
 //!
-//! Themes can be loaded from YAML files:
+//! Ship themes alongside your application or allow users to bring their own. The
+//! [`Theme::from_yaml`] helper loads named styles (and adaptive overrides) directly
+//! from a YAML definition:
 //!
 //! ```rust
 //! use standout_render::Theme;
@@ -116,7 +122,10 @@
 //! "#).unwrap();
 //! ```
 //!
-//! ## More Examples
+//! ## Renderer Example
+//!
+//! For larger applications, use [`Renderer`] to register templates once and render
+//! them repeatedly without reparsing:
 //!
 //! ```rust
 //! use standout_render::{Renderer, Theme};
