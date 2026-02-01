@@ -213,6 +213,12 @@ pub use dispatch::{
 // Re-export Resource types from standout-dispatch
 pub use standout_dispatch::{ResourceQuery, ResourceStore};
 
+// Re-export pipeline types from standout-dispatch
+pub use standout_dispatch::{
+    app_logic_identity, validate_identity, AppLogicError, IdResolutionError, ResourcePipelineError,
+    ValidationError,
+};
+
 /// Parses a clap command with styled help output.
 ///
 /// This is the simplest entry point for basic CLIs without topics.

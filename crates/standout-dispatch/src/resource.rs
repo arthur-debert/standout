@@ -122,6 +122,192 @@ impl ResourceQuery {
     }
 }
 
+// ============================================================================
+// Pipeline Error Types
+// ============================================================================
+
+/// Error that occurs during ID resolution stage.
+///
+/// This error indicates that an ID string could not be parsed or the
+/// referenced item does not exist.
+#[derive(Debug, Clone)]
+pub struct IdResolutionError {
+    /// The ID string that failed to resolve.
+    pub id: String,
+    /// A human-readable error message.
+    pub message: String,
+}
+
+impl IdResolutionError {
+    /// Creates a new ID resolution error for a parse failure.
+    pub fn parse_failed(id: impl Into<String>, reason: impl Into<String>) -> Self {
+        let id = id.into();
+        Self {
+            message: format!("Invalid ID '{}': {}", id, reason.into()),
+            id,
+        }
+    }
+
+    /// Creates a new ID resolution error for a missing item.
+    pub fn not_found(id: impl Into<String>) -> Self {
+        let id = id.into();
+        Self {
+            message: format!("Item '{}' not found", id),
+            id,
+        }
+    }
+}
+
+impl std::fmt::Display for IdResolutionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for IdResolutionError {}
+
+/// Error that occurs during validation stage.
+///
+/// This error indicates that input data failed validation rules.
+#[derive(Debug, Clone)]
+pub struct ValidationError {
+    /// The field that failed validation, if applicable.
+    pub field: Option<String>,
+    /// A human-readable error message.
+    pub message: String,
+}
+
+impl ValidationError {
+    /// Creates a validation error for a specific field.
+    pub fn field(field: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            field: Some(field.into()),
+            message: message.into(),
+        }
+    }
+
+    /// Creates a validation error not tied to a specific field.
+    pub fn general(message: impl Into<String>) -> Self {
+        Self {
+            field: None,
+            message: message.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for ValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.field {
+            Some(field) => write!(f, "Validation failed for '{}': {}", field, self.message),
+            None => write!(f, "Validation failed: {}", self.message),
+        }
+    }
+}
+
+impl std::error::Error for ValidationError {}
+
+/// Error that occurs during app logic stage.
+///
+/// This error indicates that application-specific business logic failed.
+#[derive(Debug, Clone)]
+pub struct AppLogicError {
+    /// A human-readable error message.
+    pub message: String,
+}
+
+impl AppLogicError {
+    /// Creates a new app logic error.
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for AppLogicError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for AppLogicError {}
+
+/// Unified error type for the Resource pipeline.
+///
+/// This enum captures all possible errors that can occur during Resource
+/// handler execution, with each variant corresponding to a pipeline stage.
+#[derive(Debug)]
+pub enum ResourcePipelineError<StoreErr: std::error::Error> {
+    /// Error during ID resolution (parsing or lookup).
+    IdResolution(IdResolutionError),
+    /// Error during input validation.
+    Validation(ValidationError),
+    /// Error from the underlying store.
+    Store(StoreErr),
+    /// Error from application logic.
+    AppLogic(AppLogicError),
+}
+
+impl<StoreErr: std::error::Error> std::fmt::Display for ResourcePipelineError<StoreErr> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::IdResolution(e) => write!(f, "{}", e),
+            Self::Validation(e) => write!(f, "{}", e),
+            Self::Store(e) => write!(f, "{}", e),
+            Self::AppLogic(e) => write!(f, "{}", e),
+        }
+    }
+}
+
+impl<StoreErr: std::error::Error + 'static> std::error::Error for ResourcePipelineError<StoreErr> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::IdResolution(e) => Some(e),
+            Self::Validation(e) => Some(e),
+            Self::Store(e) => Some(e),
+            Self::AppLogic(e) => Some(e),
+        }
+    }
+}
+
+impl<StoreErr: std::error::Error> From<IdResolutionError> for ResourcePipelineError<StoreErr> {
+    fn from(err: IdResolutionError) -> Self {
+        Self::IdResolution(err)
+    }
+}
+
+impl<StoreErr: std::error::Error> From<ValidationError> for ResourcePipelineError<StoreErr> {
+    fn from(err: ValidationError) -> Self {
+        Self::Validation(err)
+    }
+}
+
+impl<StoreErr: std::error::Error> From<AppLogicError> for ResourcePipelineError<StoreErr> {
+    fn from(err: AppLogicError) -> Self {
+        Self::AppLogic(err)
+    }
+}
+
+// ============================================================================
+// Pipeline Stage Functions
+// ============================================================================
+
+/// Identity validation function (no-op).
+///
+/// This is used as the default validation stage when no validation is configured.
+/// It simply passes the input through unchanged.
+pub fn validate_identity<T>(input: T) -> Result<T, ValidationError> {
+    Ok(input)
+}
+
+/// Identity app logic function (no-op).
+///
+/// This is used as the default app logic stage when no custom logic is configured.
+/// It simply passes the input through unchanged.
+pub fn app_logic_identity<T>(input: T) -> Result<T, AppLogicError> {
+    Ok(input)
+}
+
 /// Trait for Resource storage backends.
 ///
 /// Implement this trait to connect your data store (database, file, API, etc.)
@@ -490,5 +676,94 @@ mod tests {
         let store = InMemoryStore::new();
         let result = store.delete(&"nonexistent".to_string());
         assert!(result.is_err());
+    }
+
+    // ========================================================================
+    // Pipeline error type tests
+    // ========================================================================
+
+    #[test]
+    fn test_id_resolution_error_parse_failed() {
+        let err = IdResolutionError::parse_failed("bad-uuid", "not a valid UUID");
+        assert_eq!(err.id, "bad-uuid");
+        assert!(err.message.contains("Invalid ID"));
+        assert!(err.message.contains("not a valid UUID"));
+        assert!(err.to_string().contains("Invalid ID"));
+    }
+
+    #[test]
+    fn test_id_resolution_error_not_found() {
+        let err = IdResolutionError::not_found("task-123");
+        assert_eq!(err.id, "task-123");
+        assert!(err.message.contains("not found"));
+        assert!(err.to_string().contains("not found"));
+    }
+
+    #[test]
+    fn test_validation_error_field() {
+        let err = ValidationError::field("title", "must not be empty");
+        assert_eq!(err.field, Some("title".to_string()));
+        assert_eq!(err.message, "must not be empty");
+        let display = err.to_string();
+        assert!(display.contains("title"));
+        assert!(display.contains("must not be empty"));
+    }
+
+    #[test]
+    fn test_validation_error_general() {
+        let err = ValidationError::general("missing required fields");
+        assert_eq!(err.field, None);
+        assert_eq!(err.message, "missing required fields");
+        let display = err.to_string();
+        assert!(display.contains("missing required fields"));
+    }
+
+    #[test]
+    fn test_app_logic_error() {
+        let err = AppLogicError::new("operation not permitted");
+        assert_eq!(err.message, "operation not permitted");
+        assert_eq!(err.to_string(), "operation not permitted");
+    }
+
+    #[test]
+    fn test_pipeline_error_from_id_resolution() {
+        let id_err = IdResolutionError::not_found("x");
+        let pipeline_err: ResourcePipelineError<TestError> = id_err.into();
+        assert!(matches!(
+            pipeline_err,
+            ResourcePipelineError::IdResolution(_)
+        ));
+        assert!(pipeline_err.to_string().contains("not found"));
+    }
+
+    #[test]
+    fn test_pipeline_error_from_validation() {
+        let val_err = ValidationError::field("name", "too short");
+        let pipeline_err: ResourcePipelineError<TestError> = val_err.into();
+        assert!(matches!(pipeline_err, ResourcePipelineError::Validation(_)));
+        assert!(pipeline_err.to_string().contains("too short"));
+    }
+
+    #[test]
+    fn test_pipeline_error_from_app_logic() {
+        let app_err = AppLogicError::new("denied");
+        let pipeline_err: ResourcePipelineError<TestError> = app_err.into();
+        assert!(matches!(pipeline_err, ResourcePipelineError::AppLogic(_)));
+        assert!(pipeline_err.to_string().contains("denied"));
+    }
+
+    #[test]
+    fn test_validate_identity() {
+        let result = validate_identity(42);
+        assert_eq!(result.unwrap(), 42);
+
+        let result = validate_identity("hello".to_string());
+        assert_eq!(result.unwrap(), "hello");
+    }
+
+    #[test]
+    fn test_app_logic_identity() {
+        let result = app_logic_identity(vec![1, 2, 3]);
+        assert_eq!(result.unwrap(), vec![1, 2, 3]);
     }
 }

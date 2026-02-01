@@ -147,4 +147,7 @@ pub use hooks::{
 pub use render::{from_fn, from_fn_mut, LocalRenderFn, RenderError, RenderFn};
 
 // Re-export Resource types
-pub use resource::{ResourceQuery, ResourceStore};
+pub use resource::{
+    app_logic_identity, validate_identity, AppLogicError, IdResolutionError, ResourcePipelineError,
+    ResourceQuery, ResourceStore, ValidationError,
+};

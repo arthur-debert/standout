@@ -513,6 +513,7 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
             ) -> ::standout::cli::HandlerResult<::standout::views::ListViewResult<#struct_name>> {
                 let store = ctx.app_state.get_required::<#store_type>()?;
 
+                // ── Stage 1: Build Query ──
                 let query = {
                     let filter = matches.get_one::<String>("filter").cloned();
                     let sort = matches.get_one::<String>("sort").cloned();
@@ -529,9 +530,17 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                     }
                 };
 
+                // ── Stage 2: Validation (identity) ──
+                let query = ::standout::cli::validate_identity(query)?;
+
+                // ── Stage 3: Data Fetch ──
                 let items = store.list(query.as_ref())?;
                 let total = items.len();
 
+                // ── Stage 4: App Logic (identity) ──
+                let items = ::standout::cli::app_logic_identity(items)?;
+
+                // ── Stage 5: View Building ──
                 Ok(::standout::cli::Output::Render(
                     ::standout::views::list_view(items)
                         .total_count(total)
@@ -551,10 +560,23 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                 ctx: &::standout::cli::CommandContext,
             ) -> ::standout::cli::HandlerResult<::standout::views::DetailViewResult<#struct_name>> {
                 let store = ctx.app_state.get_required::<#store_type>()?;
-                let id_str = matches.get_one::<String>("id").unwrap();
-                let id = store.parse_id(id_str)?;
-                let item = store.resolve(&id)?;
 
+                // ── Stage 1: ID Resolution ──
+                let id_str = matches.get_one::<String>("id").unwrap();
+                let id = store.parse_id(id_str)
+                    .map_err(|e| ::standout::cli::IdResolutionError::parse_failed(id_str, e.to_string()))?;
+
+                // ── Stage 2: Data Fetch ──
+                let item = store.resolve(&id)
+                    .map_err(|_| ::standout::cli::IdResolutionError::not_found(id_str))?;
+
+                // ── Stage 3: Validation (identity) ──
+                let item = ::standout::cli::validate_identity(item)?;
+
+                // ── Stage 4: App Logic (identity) ──
+                let item = ::standout::cli::app_logic_identity(item)?;
+
+                // ── Stage 5: View Building ──
                 Ok(::standout::cli::Output::Render(
                     ::standout::views::detail_view(item)
                         .title(#object_name_upper)
@@ -578,14 +600,21 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                 let store = ctx.app_state.get_required::<#store_type>()?;
                 let dry_run = matches.get_flag("dry_run");
 
-                // Build JSON data from matches
+                // ── Stage 1: Build Data ──
                 let mut __data = ::serde_json::json!({});
                 #(#create_json_fields)*
+
+                // ── Stage 2: Validation (identity) ──
+                let __data = ::standout::cli::validate_identity(__data)?;
 
                 if dry_run {
                     // For dry-run, try to deserialize to show what would be created
                     match ::serde_json::from_value::<#struct_name>(__data) {
                         Ok(preview) => {
+                            // ── Stage 3: App Logic (identity) ──
+                            let preview = ::standout::cli::app_logic_identity(preview)?;
+
+                            // ── Stage 4: View Building ──
                             Ok(::standout::cli::Output::Render(
                                 ::standout::views::create_view(preview)
                                     .dry_run()
@@ -594,11 +623,17 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                             ))
                         }
                         Err(e) => {
-                            Err(::anyhow::anyhow!("Invalid data: {}", e))
+                            Err(::standout::cli::ValidationError::general(format!("Invalid data: {}", e)).into())
                         }
                     }
                 } else {
+                    // ── Stage 3: Data Store ──
                     let item = store.create(__data)?;
+
+                    // ── Stage 4: App Logic (identity) ──
+                    let item = ::standout::cli::app_logic_identity(item)?;
+
+                    // ── Stage 5: View Building ──
                     Ok(::standout::cli::Output::Render(
                         ::standout::views::create_view(item)
                             .success(format!("{} created", #object_name_upper))
@@ -618,19 +653,30 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                 ctx: &::standout::cli::CommandContext,
             ) -> ::standout::cli::HandlerResult<::standout::views::UpdateViewResult<#struct_name>> {
                 let store = ctx.app_state.get_required::<#store_type>()?;
-                let id_str = matches.get_one::<String>("id").unwrap();
-                let id = store.parse_id(id_str)?;
                 let dry_run = matches.get_flag("dry_run");
 
-                // Get the current state before update
-                let before = store.resolve(&id)?;
+                // ── Stage 1: ID Resolution ──
+                let id_str = matches.get_one::<String>("id").unwrap();
+                let id = store.parse_id(id_str)
+                    .map_err(|e| ::standout::cli::IdResolutionError::parse_failed(id_str, e.to_string()))?;
 
-                // Build JSON data and track changed fields
+                // ── Stage 2: Data Fetch (get current state) ──
+                let before = store.resolve(&id)
+                    .map_err(|_| ::standout::cli::IdResolutionError::not_found(id_str))?;
+
+                // ── Stage 3: Build Update Data ──
                 let mut __data = ::serde_json::json!({});
                 let mut __changed: Vec<String> = Vec::new();
                 #(#update_json_fields)*
 
+                // ── Stage 4: Validation (identity) ──
+                let __data = ::standout::cli::validate_identity(__data)?;
+
                 if dry_run {
+                    // ── Stage 5: App Logic (identity) ──
+                    let before = ::standout::cli::app_logic_identity(before)?;
+
+                    // ── Stage 6: View Building ──
                     Ok(::standout::cli::Output::Render(
                         ::standout::views::update_view(before.clone())
                             .before(before)
@@ -640,13 +686,23 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                             .build()
                     ))
                 } else if __changed.is_empty() {
+                    // ── Stage 5: App Logic (identity) ──
+                    let before = ::standout::cli::app_logic_identity(before)?;
+
+                    // ── Stage 6: View Building ──
                     Ok(::standout::cli::Output::Render(
                         ::standout::views::update_view(before)
                             .info("No changes specified")
                             .build()
                     ))
                 } else {
+                    // ── Stage 5: Store Update ──
                     let after = store.update(&id, __data)?;
+
+                    // ── Stage 6: App Logic (identity) ──
+                    let after = ::standout::cli::app_logic_identity(after)?;
+
+                    // ── Stage 7: View Building ──
                     Ok(::standout::cli::Output::Render(
                         ::standout::views::update_view(after)
                             .before(before)
@@ -668,23 +724,39 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                 ctx: &::standout::cli::CommandContext,
             ) -> ::standout::cli::HandlerResult<::standout::views::DeleteViewResult<#struct_name>> {
                 let store = ctx.app_state.get_required::<#store_type>()?;
-                let id_str = matches.get_one::<String>("id").unwrap();
-                let id = store.parse_id(id_str)?;
                 let confirm = matches.get_flag("confirm");
                 let force = matches.get_flag("force");
 
-                // Get the item to show what will be/was deleted
-                let item = store.resolve(&id)?;
+                // ── Stage 1: ID Resolution ──
+                let id_str = matches.get_one::<String>("id").unwrap();
+                let id = store.parse_id(id_str)
+                    .map_err(|e| ::standout::cli::IdResolutionError::parse_failed(id_str, e.to_string()))?;
+
+                // ── Stage 2: Data Fetch ──
+                let item = store.resolve(&id)
+                    .map_err(|_| ::standout::cli::IdResolutionError::not_found(id_str))?;
+
+                // ── Stage 3: Validation (identity) ──
+                let item = ::standout::cli::validate_identity(item)?;
 
                 if !confirm && !force {
-                    // Show confirmation prompt
+                    // ── Stage 4: App Logic (identity) ──
+                    let item = ::standout::cli::app_logic_identity(item)?;
+
+                    // ── Stage 5: View Building (confirmation required) ──
                     Ok(::standout::cli::Output::Render(
                         ::standout::views::delete_view(item)
                             .warning(format!("Use --confirm to delete this {}", #object_name))
                             .build()
                     ))
                 } else {
+                    // ── Stage 4: Store Delete ──
                     store.delete(&id)?;
+
+                    // ── Stage 5: App Logic (identity) ──
+                    let item = ::standout::cli::app_logic_identity(item)?;
+
+                    // ── Stage 6: View Building ──
                     Ok(::standout::cli::Output::Render(
                         ::standout::views::delete_view(item)
                             .confirmed()

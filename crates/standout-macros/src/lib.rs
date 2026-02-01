@@ -42,10 +42,10 @@
 //! [`EmbeddedSource`]: standout::EmbeddedSource
 //! [`RenderSetup`]: standout::RenderSetup
 
-mod resource;
 mod dispatch;
 mod embed;
 mod handler;
+mod resource;
 mod seeker;
 mod tabular;
 
