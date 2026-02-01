@@ -50,6 +50,8 @@ struct ResourceContainerAttrs {
     plural: Option<String>,
     /// Optional: subset of operations to generate
     operations: Option<Vec<ResourceOperation>>,
+    /// Optional: enable validify integration for validation/modification
+    validify: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -160,10 +162,13 @@ impl Parse for ResourceContainerAttrs {
                     }
                     attrs.operations = Some(ops);
                 }
+                Meta::Path(p) if p.is_ident("validify") => {
+                    attrs.validify = true;
+                }
                 _ => {
                     return Err(Error::new(
                         meta.span(),
-                        "unknown attribute, expected one of: object, store, plural, operations",
+                        "unknown attribute, expected one of: object, store, plural, operations, validify",
                     ));
                 }
             }
@@ -284,6 +289,8 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
     let operations = container_attrs
         .operations
         .unwrap_or_else(ResourceOperation::all);
+
+    let use_validify = container_attrs.validify;
 
     let struct_name = &input.ident;
 
@@ -591,6 +598,25 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         quote! {}
     };
 
+    // Generate validation stage based on whether validify is enabled
+    let create_validation_stage = if use_validify {
+        quote! {
+            // ── Stage 2: Validation (validify) ──
+            // Deserialize, apply modifiers, and validate
+            let mut __item: #struct_name = ::serde_json::from_value(__data)
+                .map_err(|e| ::standout::cli::ValidationError::general(format!("Invalid data: {}", e)))?;
+            __item.validify()
+                .map_err(|e| ::standout::cli::ValidationError::general(e.to_string()))?;
+            let __data = ::serde_json::to_value(&__item)
+                .map_err(|e| ::standout::cli::ValidationError::general(format!("Serialization failed: {}", e)))?;
+        }
+    } else {
+        quote! {
+            // ── Stage 2: Validation (identity) ──
+            let __data = ::standout::cli::validate_identity(__data)?;
+        }
+    };
+
     let create_handler = if operations.contains(&ResourceOperation::Create) {
         quote! {
             pub fn create(
@@ -604,8 +630,7 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                 let mut __data = ::serde_json::json!({});
                 #(#create_json_fields)*
 
-                // ── Stage 2: Validation (identity) ──
-                let __data = ::standout::cli::validate_identity(__data)?;
+                #create_validation_stage
 
                 if dry_run {
                     // For dry-run, try to deserialize to show what would be created
@@ -646,6 +671,31 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         quote! {}
     };
 
+    // Generate update validation stage based on whether validify is enabled
+    let update_validation_stage = if use_validify {
+        quote! {
+            // ── Stage 4: Validation (validify) ──
+            // Merge update data with existing item, validate, then use partial update
+            let mut __merged = ::serde_json::to_value(&before)
+                .map_err(|e| ::standout::cli::ValidationError::general(format!("Serialization failed: {}", e)))?;
+            if let (Some(merged_obj), Some(data_obj)) = (__merged.as_object_mut(), __data.as_object()) {
+                for (k, v) in data_obj {
+                    merged_obj.insert(k.clone(), v.clone());
+                }
+            }
+            let mut __merged_item: #struct_name = ::serde_json::from_value(__merged)
+                .map_err(|e| ::standout::cli::ValidationError::general(format!("Invalid data: {}", e)))?;
+            __merged_item.validify()
+                .map_err(|e| ::standout::cli::ValidationError::general(e.to_string()))?;
+            // Keep __data as the partial update for the store
+        }
+    } else {
+        quote! {
+            // ── Stage 4: Validation (identity) ──
+            let __data = ::standout::cli::validate_identity(__data)?;
+        }
+    };
+
     let update_handler = if operations.contains(&ResourceOperation::Update) {
         quote! {
             pub fn update(
@@ -669,8 +719,7 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                 let mut __changed: Vec<String> = Vec::new();
                 #(#update_json_fields)*
 
-                // ── Stage 4: Validation (identity) ──
-                let __data = ::standout::cli::validate_identity(__data)?;
+                #update_validation_stage
 
                 if dry_run {
                     // ── Stage 5: App Logic (identity) ──
