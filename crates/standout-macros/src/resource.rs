@@ -103,6 +103,8 @@ struct ResourceFieldAttrs {
     choices: Option<Vec<String>>,
     /// Field type is an enum that implements ValueEnum
     value_enum: bool,
+    /// Help text extracted from doc comments
+    doc: Option<String>,
 }
 
 /// Information about a field for Resource operations
@@ -252,8 +254,20 @@ impl Parse for ResourceContainerAttrs {
 /// Parse field-level #[resource(...)] attributes
 fn parse_field_attrs(attrs: &[syn::Attribute]) -> Result<ResourceFieldAttrs> {
     let mut field_attrs = ResourceFieldAttrs::default();
+    let mut doc_lines: Vec<String> = Vec::new();
 
     for attr in attrs {
+        // Extract doc comments (/// becomes #[doc = "..."])
+        if attr.path().is_ident("doc") {
+            if let Meta::NameValue(nv) = &attr.meta {
+                if let Expr::Lit(expr_lit) = &nv.value {
+                    if let syn::Lit::Str(lit_str) = &expr_lit.lit {
+                        doc_lines.push(lit_str.value().trim().to_string());
+                    }
+                }
+            }
+        }
+
         if attr.path().is_ident("resource") {
             let nested: Punctuated<Meta, Token![,]> =
                 attr.parse_args_with(Punctuated::parse_terminated)?;
@@ -295,6 +309,11 @@ fn parse_field_attrs(attrs: &[syn::Attribute]) -> Result<ResourceFieldAttrs> {
                 }
             }
         }
+    }
+
+    // Concatenate doc lines with spaces
+    if !doc_lines.is_empty() {
+        field_attrs.doc = Some(doc_lines.join(" "));
     }
 
     Ok(field_attrs)
@@ -413,14 +432,21 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         long_name: &str,
         choices: &Option<Vec<String>>,
         is_value_enum: bool,
+        doc: &Option<String>,
     ) -> TokenStream {
         let type_kind = TypeKind::from_type(ty);
+
+        // Generate help attribute if doc comment exists
+        let help_attr = doc
+            .as_ref()
+            .map(|d| quote! { help = #d, })
+            .unwrap_or_default();
 
         // Handle explicit choices (string-based)
         if let Some(choice_values) = choices {
             let choice_values: Vec<&String> = choice_values.iter().collect();
             return quote! {
-                #[arg(long = #long_name, value_parser = clap::builder::PossibleValuesParser::new([#(#choice_values),*]))]
+                #[arg(long = #long_name, #help_attr value_parser = clap::builder::PossibleValuesParser::new([#(#choice_values),*]))]
                 pub #name: Option<String>,
             };
         }
@@ -429,7 +455,7 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         if is_value_enum {
             let inner = type_kind.inner_type();
             return quote! {
-                #[arg(long = #long_name, value_enum)]
+                #[arg(long = #long_name, #help_attr value_enum)]
                 pub #name: Option<#inner>,
             };
         }
@@ -438,21 +464,21 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
             TypeKind::Vec(inner_ty) => {
                 // Vec<T> -> multi-value arg
                 quote! {
-                    #[arg(long = #long_name, num_args = 0..)]
+                    #[arg(long = #long_name, #help_attr num_args = 0..)]
                     pub #name: Vec<#inner_ty>,
                 }
             }
             TypeKind::Option(inner_ty) => {
                 // Option<T> -> optional arg (already optional)
                 quote! {
-                    #[arg(long = #long_name)]
+                    #[arg(long = #long_name, #help_attr)]
                     pub #name: Option<#inner_ty>,
                 }
             }
             TypeKind::Scalar(scalar_ty) | TypeKind::Enum(scalar_ty) => {
                 // Scalar -> wrap in Option for CLI
                 quote! {
-                    #[arg(long = #long_name)]
+                    #[arg(long = #long_name, #help_attr)]
                     pub #name: Option<#scalar_ty>,
                 }
             }
@@ -577,7 +603,14 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
             let ty = &f.ty;
             let name_str = name.to_string();
             let long_name = name_str.replace('_', "-");
-            generate_arg(name, ty, &long_name, &f.attrs.choices, f.attrs.value_enum)
+            generate_arg(
+                name,
+                ty,
+                &long_name,
+                &f.attrs.choices,
+                f.attrs.value_enum,
+                &f.attrs.doc,
+            )
         })
         .collect();
 
@@ -589,7 +622,14 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
             let ty = &f.ty;
             let name_str = name.to_string();
             let long_name = name_str.replace('_', "-");
-            generate_arg(name, ty, &long_name, &f.attrs.choices, f.attrs.value_enum)
+            generate_arg(
+                name,
+                ty,
+                &long_name,
+                &f.attrs.choices,
+                f.attrs.value_enum,
+                &f.attrs.doc,
+            )
         })
         .collect();
 
