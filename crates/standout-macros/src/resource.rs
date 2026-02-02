@@ -639,7 +639,7 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
             let choice_values: Vec<&String> = choice_values.iter().collect();
             return quote! {
                 #[arg(long = #long_name, #short_attr #help_attr #default_attr value_parser = clap::builder::PossibleValuesParser::new([#(#choice_values),*]))]
-                pub #name: Option<String>,
+                #name: Option<String>,
             };
         }
 
@@ -648,7 +648,7 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
             let inner = type_kind.inner_type();
             return quote! {
                 #[arg(long = #long_name, #short_attr #help_attr #default_attr value_enum)]
-                pub #name: Option<#inner>,
+                #name: Option<#inner>,
             };
         }
 
@@ -657,21 +657,21 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                 // Vec<T> -> multi-value arg
                 quote! {
                     #[arg(long = #long_name, #short_attr #help_attr num_args = 0..)]
-                    pub #name: Vec<#inner_ty>,
+                    #name: Vec<#inner_ty>,
                 }
             }
             TypeKind::Option(inner_ty) => {
                 // Option<T> -> optional arg (already optional)
                 quote! {
                     #[arg(long = #long_name, #short_attr #help_attr #default_attr)]
-                    pub #name: Option<#inner_ty>,
+                    #name: Option<#inner_ty>,
                 }
             }
             TypeKind::Scalar(scalar_ty) | TypeKind::Enum(scalar_ty) => {
                 // Scalar -> wrap in Option for CLI
                 quote! {
                     #[arg(long = #long_name, #short_attr #help_attr #default_attr)]
-                    pub #name: Option<#scalar_ty>,
+                    #name: Option<#scalar_ty>,
                 }
             }
         }
@@ -1256,15 +1256,17 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                     }
 
                     let total = items.len();
-                    let mut result = ::standout::views::list_view(items)
+                    let total = items.len();
+                    let mut builder = ::standout::views::list_view(items)
                         .total_count(total)
-                        .tabular_spec(<#struct_name as ::standout::tabular::Tabular>::tabular_spec())
-                        .build();
+                        .tabular_spec(<#struct_name as ::standout::tabular::Tabular>::tabular_spec());
 
                     // Add errors as warnings if any
                     for err in errors {
-                        result = result.warning(err);
+                        builder = builder.warning(err);
                     }
+
+                    let result = builder.build();
 
                     Ok(::standout::cli::Output::Render(
                         ::serde_json::to_value(result).unwrap_or_default()
@@ -1512,15 +1514,16 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                         }
 
                         let count = items.len();
-                        let mut result = ::standout::views::list_view(items)
+                        let mut builder = ::standout::views::list_view(items)
                             .total_count(count)
-                            .tabular_spec(<#struct_name as ::standout::tabular::Tabular>::tabular_spec())
-                            .build();
+                            .tabular_spec(<#struct_name as ::standout::tabular::Tabular>::tabular_spec());
 
-                        result = result.warning(format!("Use --confirm to delete {} {}(s)", count, #object_name));
+                        builder = builder.warning(format!("Use --confirm to delete {} {}(s)", count, #object_name));
                         for err in errors {
-                            result = result.warning(err);
+                            builder = builder.warning(err);
                         }
+
+                        let result = builder.build();
 
                         Ok(::standout::cli::Output::Render(
                             ::serde_json::to_value(result).unwrap_or_default()
@@ -1550,19 +1553,20 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                         let deleted_count = deleted.len();
                         let error_count = errors.len();
 
-                        let mut result = ::standout::views::list_view(deleted)
+                        let mut builder = ::standout::views::list_view(deleted)
                             .total_count(deleted_count)
-                            .tabular_spec(<#struct_name as ::standout::tabular::Tabular>::tabular_spec())
-                            .build();
+                            .tabular_spec(<#struct_name as ::standout::tabular::Tabular>::tabular_spec());
 
                         if error_count == 0 {
-                            result = result.success(format!("{} {}(s) deleted", deleted_count, #object_name));
+                            builder = builder.success(format!("{} {}(s) deleted", deleted_count, #object_name));
                         } else {
-                            result = result.info(format!("{} deleted, {} failed", deleted_count, error_count));
+                            builder = builder.info(format!("{} deleted, {} failed", deleted_count, error_count));
                         }
                         for err in errors {
-                            result = result.warning(err);
+                            builder = builder.warning(err);
                         }
+
+                        let result = builder.build();
 
                         Ok(::standout::cli::Output::Render(
                             ::serde_json::to_value(result).unwrap_or_default()
