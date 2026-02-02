@@ -67,6 +67,8 @@ struct ResourceContainerAttrs {
     aliases: std::collections::HashMap<String, String>,
     /// Optional: shortcut commands for common update patterns
     shortcuts: Vec<ResourceShortcut>,
+    /// Optional: overrides the default `standout` crate name
+    crate_name: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -255,6 +257,17 @@ impl Parse for ResourceContainerAttrs {
                         return Err(Error::new(nv.value.span(), "expected string literal"));
                     }
                 }
+                Meta::NameValue(nv) if nv.path.is_ident("crate") => {
+                    if let Expr::Lit(expr_lit) = &nv.value {
+                        if let syn::Lit::Str(lit_str) = &expr_lit.lit {
+                            attrs.crate_name = Some(lit_str.value());
+                        } else {
+                            return Err(Error::new(nv.value.span(), "expected string literal"));
+                        }
+                    } else {
+                        return Err(Error::new(nv.value.span(), "expected string literal"));
+                    }
+                }
                 Meta::List(list) if list.path.is_ident("aliases") => {
                     // Parse aliases(view = "show", delete = "rm")
                     let inner: Punctuated<Meta, Token![,]> =
@@ -388,7 +401,7 @@ impl Parse for ResourceContainerAttrs {
                 _ => {
                     return Err(Error::new(
                         meta.span(),
-                        "unknown attribute, expected one of: object, store, plural, operations, validify, default, aliases, shortcut",
+                        "unknown attribute, expected one of: object, store, plural, operations, validify, default, aliases, shortcut, crate",
                     ));
                 }
             }
@@ -564,6 +577,12 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
     };
 
     let struct_name = &input.ident;
+    let crate_ident = format_ident!(
+        "{}",
+        container_attrs
+            .crate_name
+            .unwrap_or_else(|| "standout".to_string())
+    );
 
     // Extract struct fields
     let fields = match &input.data {
@@ -1072,8 +1091,8 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         shortcut_handlers.push(quote! {
             pub fn #handler_name(
                 matches: &::clap::ArgMatches,
-                ctx: &::standout::cli::CommandContext,
-            ) -> ::standout::cli::HandlerResult<::serde_json::Value> {
+                ctx: &::#crate_ident::cli::CommandContext,
+            ) -> ::#crate_ident::cli::HandlerResult<::serde_json::Value> {
                 let store = ctx.app_state.get_required::<#store_type>()?;
 
                 let id_strs: Vec<String> = matches.get_many::<String>("ids")
@@ -1084,25 +1103,25 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                     // Single ID
                     let id_str = &id_strs[0];
                     let id = store.parse_id(id_str)
-                        .map_err(|e| ::standout::cli::IdResolutionError::parse_failed(id_str, e.to_string()))?;
+                        .map_err(|e| ::#crate_ident::cli::IdResolutionError::parse_failed(id_str, e.to_string()))?;
 
                     let before = store.resolve(&id)
-                        .map_err(|_| ::standout::cli::IdResolutionError::not_found(id_str))?;
+                        .map_err(|_| ::#crate_ident::cli::IdResolutionError::not_found(id_str))?;
 
                     let mut __data = ::serde_json::json!({});
                     let mut __changed: Vec<String> = Vec::new();
                     #(#field_sets)*
 
                     let after = store.update(&id, __data)?;
-                    let after = ::standout::cli::app_logic_identity(after)?;
+                    let after = ::#crate_ident::cli::app_logic_identity(after)?;
 
-                    let result = ::standout::views::update_view(after)
+                    let result = ::#crate_ident::views::update_view(after)
                         .before(before)
                         .changed_fields(__changed)
                         .success(format!("{} updated", #object_name_upper))
                         .build();
-                    Ok(::standout::cli::Output::Render(
-                        ::serde_json::to_value(result).unwrap_or_default()
+                    Ok(::#crate_ident::cli::Output::Render(
+                        ::serde_json::to_value(result).map_err(|e| ::#crate_ident::cli::ValidationError::general(format!("Serialization failed: {}", e)))?
                     ))
                 } else {
                     // Multiple IDs - batch update
@@ -1133,9 +1152,9 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                     let updated_count = updated.len();
                     let error_count = errors.len();
 
-                    let mut result = ::standout::views::list_view(updated)
+                    let mut result = ::#crate_ident::views::list_view(updated)
                         .total_count(updated_count)
-                        .tabular_spec(<#struct_name as ::standout::tabular::Tabular>::tabular_spec())
+                        .tabular_spec(<#struct_name as ::#crate_ident::tabular::Tabular>::tabular_spec())
                         .build();
 
                     if error_count == 0 {
@@ -1147,8 +1166,8 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                         result = result.warning(err);
                     }
 
-                    Ok(::standout::cli::Output::Render(
-                        ::serde_json::to_value(result).unwrap_or_default()
+                    Ok(::#crate_ident::cli::Output::Render(
+                        ::serde_json::to_value(result).map_err(|e| ::#crate_ident::cli::ValidationError::general(format!("Serialization failed: {}", e)))?
                     ))
                 }
             }
@@ -1160,8 +1179,8 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         quote! {
             pub fn list(
                 matches: &::clap::ArgMatches,
-                ctx: &::standout::cli::CommandContext,
-            ) -> ::standout::cli::HandlerResult<::standout::views::ListViewResult<#struct_name>> {
+                ctx: &::#crate_ident::cli::CommandContext,
+            ) -> ::#crate_ident::cli::HandlerResult<::#crate_ident::views::ListViewResult<#struct_name>> {
                 let store = ctx.app_state.get_required::<#store_type>()?;
 
                 // ── Stage 1: Build Query ──
@@ -1171,7 +1190,7 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                     let limit = matches.get_one::<usize>("limit").cloned();
 
                     if filter.is_some() || sort.is_some() || limit.is_some() {
-                        let mut q = ::standout::cli::ResourceQuery::new();
+                        let mut q = ::#crate_ident::cli::ResourceQuery::new();
                         if let Some(f) = filter { q = q.filter(f); }
                         if let Some(s) = sort { q = q.sort(s); }
                         if let Some(l) = limit { q = q.limit(l); }
@@ -1182,20 +1201,20 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                 };
 
                 // ── Stage 2: Validation (identity) ──
-                let query = ::standout::cli::validate_identity(query)?;
+                let query = ::#crate_ident::cli::validate_identity(query)?;
 
                 // ── Stage 3: Data Fetch ──
                 let items = store.list(query.as_ref())?;
                 let total = items.len();
 
                 // ── Stage 4: App Logic (identity) ──
-                let items = ::standout::cli::app_logic_identity(items)?;
+                let items = ::#crate_ident::cli::app_logic_identity(items)?;
 
                 // ── Stage 5: View Building ──
-                Ok(::standout::cli::Output::Render(
-                    ::standout::views::list_view(items)
+                Ok(::#crate_ident::cli::Output::Render(
+                    ::#crate_ident::views::list_view(items)
                         .total_count(total)
-                        .tabular_spec(<#struct_name as ::standout::tabular::Tabular>::tabular_spec())
+                        .tabular_spec(<#struct_name as ::#crate_ident::tabular::Tabular>::tabular_spec())
                         .build()
                 ))
             }
@@ -1208,8 +1227,8 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         quote! {
             pub fn view(
                 matches: &::clap::ArgMatches,
-                ctx: &::standout::cli::CommandContext,
-            ) -> ::standout::cli::HandlerResult<::serde_json::Value> {
+                ctx: &::#crate_ident::cli::CommandContext,
+            ) -> ::#crate_ident::cli::HandlerResult<::serde_json::Value> {
                 let store = ctx.app_state.get_required::<#store_type>()?;
 
                 // ── Stage 1: Get IDs ──
@@ -1221,22 +1240,22 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                     // Single ID - use DetailViewResult for backwards compatibility
                     let id_str = &id_strs[0];
                     let id = store.parse_id(id_str)
-                        .map_err(|e| ::standout::cli::IdResolutionError::parse_failed(id_str, e.to_string()))?;
+                        .map_err(|e| ::#crate_ident::cli::IdResolutionError::parse_failed(id_str, e.to_string()))?;
 
                     let item = store.resolve(&id)
-                        .map_err(|_| ::standout::cli::IdResolutionError::not_found(id_str))?;
+                        .map_err(|_| ::#crate_ident::cli::IdResolutionError::not_found(id_str))?;
 
-                    let item = ::standout::cli::validate_identity(item)?;
-                    let item = ::standout::cli::app_logic_identity(item)?;
+                    let item = ::#crate_ident::cli::validate_identity(item)?;
+                    let item = ::#crate_ident::cli::app_logic_identity(item)?;
 
-                    let result = ::standout::views::detail_view(item)
+                    let result = ::#crate_ident::views::detail_view(item)
                         .title(#object_name_upper)
                         .subtitle(id_str)
                         .action("Update", format!("{} update {}", #object_name, id_str))
                         .action("Delete", format!("{} delete {}", #object_name, id_str))
                         .build();
-                    Ok(::standout::cli::Output::Render(
-                        ::serde_json::to_value(result).unwrap_or_default()
+                    Ok(::#crate_ident::cli::Output::Render(
+                        ::serde_json::to_value(result).map_err(|e| ::#crate_ident::cli::ValidationError::general(format!("Serialization failed: {}", e)))?
                     ))
                 } else {
                     // Multiple IDs - collect items and use ListViewResult
@@ -1257,9 +1276,9 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
 
                     let total = items.len();
                     let total = items.len();
-                    let mut builder = ::standout::views::list_view(items)
+                    let mut builder = ::#crate_ident::views::list_view(items)
                         .total_count(total)
-                        .tabular_spec(<#struct_name as ::standout::tabular::Tabular>::tabular_spec());
+                        .tabular_spec(<#struct_name as ::#crate_ident::tabular::Tabular>::tabular_spec());
 
                     // Add errors as warnings if any
                     for err in errors {
@@ -1268,8 +1287,8 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
 
                     let result = builder.build();
 
-                    Ok(::standout::cli::Output::Render(
-                        ::serde_json::to_value(result).unwrap_or_default()
+                    Ok(::#crate_ident::cli::Output::Render(
+                        ::serde_json::to_value(result).map_err(|e| ::#crate_ident::cli::ValidationError::general(format!("Serialization failed: {}", e)))?
                     ))
                 }
             }
@@ -1284,16 +1303,16 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
             // ── Stage 2: Validation (validify) ──
             // Deserialize, apply modifiers, and validate
             let mut __item: #struct_name = ::serde_json::from_value(__data)
-                .map_err(|e| ::standout::cli::ValidationError::general(format!("Invalid data: {}", e)))?;
+                .map_err(|e| ::#crate_ident::cli::ValidationError::general(format!("Invalid data: {}", e)))?;
             __item.validify()
-                .map_err(|e| ::standout::cli::ValidationError::general(e.to_string()))?;
+                .map_err(|e| ::#crate_ident::cli::ValidationError::general(e.to_string()))?;
             let __data = ::serde_json::to_value(&__item)
-                .map_err(|e| ::standout::cli::ValidationError::general(format!("Serialization failed: {}", e)))?;
+                .map_err(|e| ::#crate_ident::cli::ValidationError::general(format!("Serialization failed: {}", e)))?;
         }
     } else {
         quote! {
             // ── Stage 2: Validation (identity) ──
-            let __data = ::standout::cli::validate_identity(__data)?;
+            let __data = ::#crate_ident::cli::validate_identity(__data)?;
         }
     };
 
@@ -1301,8 +1320,8 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         quote! {
             pub fn create(
                 matches: &::clap::ArgMatches,
-                ctx: &::standout::cli::CommandContext,
-            ) -> ::standout::cli::HandlerResult<::standout::views::CreateViewResult<#struct_name>> {
+                ctx: &::#crate_ident::cli::CommandContext,
+            ) -> ::#crate_ident::cli::HandlerResult<::#crate_ident::views::CreateViewResult<#struct_name>> {
                 let store = ctx.app_state.get_required::<#store_type>()?;
                 let dry_run = matches.get_flag("dry_run");
 
@@ -1320,18 +1339,18 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                     match ::serde_json::from_value::<#struct_name>(__data) {
                         Ok(preview) => {
                             // ── Stage 3: App Logic (identity) ──
-                            let preview = ::standout::cli::app_logic_identity(preview)?;
+                            let preview = ::#crate_ident::cli::app_logic_identity(preview)?;
 
                             // ── Stage 4: View Building ──
-                            Ok(::standout::cli::Output::Render(
-                                ::standout::views::create_view(preview)
+                            Ok(::#crate_ident::cli::Output::Render(
+                                ::#crate_ident::views::create_view(preview)
                                     .dry_run()
                                     .info("Dry run - no changes made")
                                     .build()
                             ))
                         }
                         Err(e) => {
-                            Err(::standout::cli::ValidationError::general(format!("Invalid data: {}", e)).into())
+                            Err(::#crate_ident::cli::ValidationError::general(format!("Invalid data: {}", e)).into())
                         }
                     }
                 } else {
@@ -1339,11 +1358,11 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                     let item = store.create(__data)?;
 
                     // ── Stage 4: App Logic (identity) ──
-                    let item = ::standout::cli::app_logic_identity(item)?;
+                    let item = ::#crate_ident::cli::app_logic_identity(item)?;
 
                     // ── Stage 5: View Building ──
-                    Ok(::standout::cli::Output::Render(
-                        ::standout::views::create_view(item)
+                    Ok(::#crate_ident::cli::Output::Render(
+                        ::#crate_ident::views::create_view(item)
                             .success(format!("{} created", #object_name_upper))
                             .build()
                     ))
@@ -1360,22 +1379,22 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
             // ── Stage 4: Validation (validify) ──
             // Merge update data with existing item, validate, then use partial update
             let mut __merged = ::serde_json::to_value(&before)
-                .map_err(|e| ::standout::cli::ValidationError::general(format!("Serialization failed: {}", e)))?;
+                .map_err(|e| ::#crate_ident::cli::ValidationError::general(format!("Serialization failed: {}", e)))?;
             if let (Some(merged_obj), Some(data_obj)) = (__merged.as_object_mut(), __data.as_object()) {
                 for (k, v) in data_obj {
                     merged_obj.insert(k.clone(), v.clone());
                 }
             }
             let mut __merged_item: #struct_name = ::serde_json::from_value(__merged)
-                .map_err(|e| ::standout::cli::ValidationError::general(format!("Invalid data: {}", e)))?;
+                .map_err(|e| ::#crate_ident::cli::ValidationError::general(format!("Invalid data: {}", e)))?;
             __merged_item.validify()
-                .map_err(|e| ::standout::cli::ValidationError::general(e.to_string()))?;
+                .map_err(|e| ::#crate_ident::cli::ValidationError::general(e.to_string()))?;
             // Keep __data as the partial update for the store
         }
     } else {
         quote! {
             // ── Stage 4: Validation (identity) ──
-            let __data = ::standout::cli::validate_identity(__data)?;
+            let __data = ::#crate_ident::cli::validate_identity(__data)?;
         }
     };
 
@@ -1383,19 +1402,19 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         quote! {
             pub fn update(
                 matches: &::clap::ArgMatches,
-                ctx: &::standout::cli::CommandContext,
-            ) -> ::standout::cli::HandlerResult<::standout::views::UpdateViewResult<#struct_name>> {
+                ctx: &::#crate_ident::cli::CommandContext,
+            ) -> ::#crate_ident::cli::HandlerResult<::#crate_ident::views::UpdateViewResult<#struct_name>> {
                 let store = ctx.app_state.get_required::<#store_type>()?;
                 let dry_run = matches.get_flag("dry_run");
 
                 // ── Stage 1: ID Resolution ──
                 let id_str = matches.get_one::<String>("id").unwrap();
                 let id = store.parse_id(id_str)
-                    .map_err(|e| ::standout::cli::IdResolutionError::parse_failed(id_str, e.to_string()))?;
+                    .map_err(|e| ::#crate_ident::cli::IdResolutionError::parse_failed(id_str, e.to_string()))?;
 
                 // ── Stage 2: Data Fetch (get current state) ──
                 let before = store.resolve(&id)
-                    .map_err(|_| ::standout::cli::IdResolutionError::not_found(id_str))?;
+                    .map_err(|_| ::#crate_ident::cli::IdResolutionError::not_found(id_str))?;
 
                 // ── Stage 3: Build Update Data ──
                 let mut __data = ::serde_json::json!({});
@@ -1406,11 +1425,11 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
 
                 if dry_run {
                     // ── Stage 5: App Logic (identity) ──
-                    let before = ::standout::cli::app_logic_identity(before)?;
+                    let before = ::#crate_ident::cli::app_logic_identity(before)?;
 
                     // ── Stage 6: View Building ──
-                    Ok(::standout::cli::Output::Render(
-                        ::standout::views::update_view(before.clone())
+                    Ok(::#crate_ident::cli::Output::Render(
+                        ::#crate_ident::views::update_view(before.clone())
                             .before(before)
                             .changed_fields(__changed)
                             .dry_run()
@@ -1419,11 +1438,11 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                     ))
                 } else if __changed.is_empty() {
                     // ── Stage 5: App Logic (identity) ──
-                    let before = ::standout::cli::app_logic_identity(before)?;
+                    let before = ::#crate_ident::cli::app_logic_identity(before)?;
 
                     // ── Stage 6: View Building ──
-                    Ok(::standout::cli::Output::Render(
-                        ::standout::views::update_view(before)
+                    Ok(::#crate_ident::cli::Output::Render(
+                        ::#crate_ident::views::update_view(before)
                             .info("No changes specified")
                             .build()
                     ))
@@ -1432,11 +1451,11 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                     let after = store.update(&id, __data)?;
 
                     // ── Stage 6: App Logic (identity) ──
-                    let after = ::standout::cli::app_logic_identity(after)?;
+                    let after = ::#crate_ident::cli::app_logic_identity(after)?;
 
                     // ── Stage 7: View Building ──
-                    Ok(::standout::cli::Output::Render(
-                        ::standout::views::update_view(after)
+                    Ok(::#crate_ident::cli::Output::Render(
+                        ::#crate_ident::views::update_view(after)
                             .before(before)
                             .changed_fields(__changed)
                             .success(format!("{} updated", #object_name_upper))
@@ -1453,8 +1472,8 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         quote! {
             pub fn delete(
                 matches: &::clap::ArgMatches,
-                ctx: &::standout::cli::CommandContext,
-            ) -> ::standout::cli::HandlerResult<::serde_json::Value> {
+                ctx: &::#crate_ident::cli::CommandContext,
+            ) -> ::#crate_ident::cli::HandlerResult<::serde_json::Value> {
                 let store = ctx.app_state.get_required::<#store_type>()?;
                 let confirm = matches.get_flag("confirm");
                 let force = matches.get_flag("force");
@@ -1468,30 +1487,30 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                     // Single ID - backwards compatible behavior
                     let id_str = &id_strs[0];
                     let id = store.parse_id(id_str)
-                        .map_err(|e| ::standout::cli::IdResolutionError::parse_failed(id_str, e.to_string()))?;
+                        .map_err(|e| ::#crate_ident::cli::IdResolutionError::parse_failed(id_str, e.to_string()))?;
 
                     let item = store.resolve(&id)
-                        .map_err(|_| ::standout::cli::IdResolutionError::not_found(id_str))?;
+                        .map_err(|_| ::#crate_ident::cli::IdResolutionError::not_found(id_str))?;
 
-                    let item = ::standout::cli::validate_identity(item)?;
+                    let item = ::#crate_ident::cli::validate_identity(item)?;
 
                     if !confirm && !force {
-                        let item = ::standout::cli::app_logic_identity(item)?;
-                        let result = ::standout::views::delete_view(item)
+                        let item = ::#crate_ident::cli::app_logic_identity(item)?;
+                        let result = ::#crate_ident::views::delete_view(item)
                             .warning(format!("Use --confirm to delete this {}", #object_name))
                             .build();
-                        Ok(::standout::cli::Output::Render(
-                            ::serde_json::to_value(result).unwrap_or_default()
+                        Ok(::#crate_ident::cli::Output::Render(
+                            ::serde_json::to_value(result).map_err(|e| ::#crate_ident::cli::ValidationError::general(format!("Serialization failed: {}", e)))?
                         ))
                     } else {
                         store.delete(&id)?;
-                        let item = ::standout::cli::app_logic_identity(item)?;
-                        let result = ::standout::views::delete_view(item)
+                        let item = ::#crate_ident::cli::app_logic_identity(item)?;
+                        let result = ::#crate_ident::views::delete_view(item)
                             .confirmed()
                             .success(format!("{} deleted", #object_name_upper))
                             .build();
-                        Ok(::standout::cli::Output::Render(
-                            ::serde_json::to_value(result).unwrap_or_default()
+                        Ok(::#crate_ident::cli::Output::Render(
+                            ::serde_json::to_value(result).map_err(|e| ::#crate_ident::cli::ValidationError::general(format!("Serialization failed: {}", e)))?
                         ))
                     }
                 } else {
@@ -1514,9 +1533,9 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                         }
 
                         let count = items.len();
-                        let mut builder = ::standout::views::list_view(items)
+                        let mut builder = ::#crate_ident::views::list_view(items)
                             .total_count(count)
-                            .tabular_spec(<#struct_name as ::standout::tabular::Tabular>::tabular_spec());
+                            .tabular_spec(<#struct_name as ::#crate_ident::tabular::Tabular>::tabular_spec());
 
                         builder = builder.warning(format!("Use --confirm to delete {} {}(s)", count, #object_name));
                         for err in errors {
@@ -1525,8 +1544,8 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
 
                         let result = builder.build();
 
-                        Ok(::standout::cli::Output::Render(
-                            ::serde_json::to_value(result).unwrap_or_default()
+                        Ok(::#crate_ident::cli::Output::Render(
+                            ::serde_json::to_value(result).map_err(|e| ::#crate_ident::cli::ValidationError::general(format!("Serialization failed: {}", e)))?
                         ))
                     } else {
                         // Actually delete
@@ -1553,9 +1572,9 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                         let deleted_count = deleted.len();
                         let error_count = errors.len();
 
-                        let mut builder = ::standout::views::list_view(deleted)
+                        let mut builder = ::#crate_ident::views::list_view(deleted)
                             .total_count(deleted_count)
-                            .tabular_spec(<#struct_name as ::standout::tabular::Tabular>::tabular_spec());
+                            .tabular_spec(<#struct_name as ::#crate_ident::tabular::Tabular>::tabular_spec());
 
                         if error_count == 0 {
                             builder = builder.success(format!("{} {}(s) deleted", deleted_count, #object_name));
@@ -1568,8 +1587,8 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
 
                         let result = builder.build();
 
-                        Ok(::standout::cli::Output::Render(
-                            ::serde_json::to_value(result).unwrap_or_default()
+                        Ok(::#crate_ident::cli::Output::Render(
+                            ::serde_json::to_value(result).map_err(|e| ::#crate_ident::cli::ValidationError::general(format!("Serialization failed: {}", e)))?
                         ))
                     }
                 }
@@ -1614,7 +1633,7 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
 
         impl #commands_enum_name {
             /// Returns the dispatch configuration for these Resource commands
-            pub fn dispatch_config() -> impl FnOnce(::standout::cli::GroupBuilder) -> ::standout::cli::GroupBuilder {
+            pub fn dispatch_config() -> impl FnOnce(::#crate_ident::cli::GroupBuilder) -> ::#crate_ident::cli::GroupBuilder {
                 |__builder| {
                     #(#dispatch_commands)*
                     __builder
