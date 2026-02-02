@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use super::dispatch::{render_handler_output, DispatchFn};
 use crate::cli::handler::{CommandContext, FnHandler, Handler, HandlerResult};
-use crate::cli::hooks::Hooks;
+use crate::cli::hooks::{Hooks, RenderedOutput, TextOutput};
 use standout_pipe::PipeTarget;
 
 // ============================================================================
@@ -402,6 +402,8 @@ impl<H> CommandConfig<H> {
     /// # Note
     ///
     /// Only [`RenderedOutput::Text`] is piped. Binary and silent outputs pass through unchanged.
+    /// The raw output (without ANSI codes) is piped to the command, matching shell semantics.
+    /// The terminal still displays the formatted output with colors.
     pub fn pipe_to_with_timeout(
         self,
         command: impl Into<String>,
@@ -409,12 +411,13 @@ impl<H> CommandConfig<H> {
     ) -> Self {
         let command = command.into();
         self.post_output(move |_matches, _ctx, output| {
-            if let crate::cli::hooks::RenderedOutput::Text(ref text) = output {
+            if let RenderedOutput::Text(ref text_output) = output {
                 let pipe = standout_pipe::SimplePipe::new(command.clone()).with_timeout(timeout);
-                let result = pipe
-                    .pipe(text)
+                // Pipe the raw output (no ANSI codes) - matches shell semantics
+                pipe.pipe(&text_output.raw)
                     .map_err(|e| crate::cli::hooks::HookError::post_output(e.to_string()))?;
-                Ok(crate::cli::hooks::RenderedOutput::Text(result))
+                // Passthrough: return original output (formatted for terminal)
+                Ok(output)
             } else {
                 Ok(output)
             }
@@ -443,6 +446,8 @@ impl<H> CommandConfig<H> {
     /// # Note
     ///
     /// Only [`RenderedOutput::Text`] is piped. Binary and silent outputs pass through unchanged.
+    /// The raw output (without ANSI codes) is piped to the command, matching shell semantics.
+    /// The command's stdout becomes the new output.
     pub fn pipe_through_with_timeout(
         self,
         command: impl Into<String>,
@@ -450,14 +455,16 @@ impl<H> CommandConfig<H> {
     ) -> Self {
         let command = command.into();
         self.post_output(move |_matches, _ctx, output| {
-            if let crate::cli::hooks::RenderedOutput::Text(ref text) = output {
+            if let RenderedOutput::Text(ref text_output) = output {
                 let pipe = standout_pipe::SimplePipe::new(command.clone())
                     .capture()
                     .with_timeout(timeout);
+                // Pipe the raw output (no ANSI codes) - matches shell semantics
                 let result = pipe
-                    .pipe(text)
+                    .pipe(&text_output.raw)
                     .map_err(|e| crate::cli::hooks::HookError::post_output(e.to_string()))?;
-                Ok(crate::cli::hooks::RenderedOutput::Text(result))
+                // Capture: command's output becomes the new output (plain text)
+                Ok(RenderedOutput::Text(TextOutput::plain(result)))
             } else {
                 Ok(output)
             }
@@ -471,6 +478,8 @@ impl<H> CommandConfig<H> {
     /// - Linux: `xclip -selection clipboard`
     ///
     /// This consumes the output (nothing is printed to terminal).
+    /// The raw output (without ANSI codes) is copied to the clipboard,
+    /// so you get clean text without escape sequences.
     ///
     /// # Errors
     ///
@@ -482,12 +491,14 @@ impl<H> CommandConfig<H> {
     /// Only [`RenderedOutput::Text`] is piped. Binary and silent outputs pass through unchanged.
     pub fn pipe_to_clipboard(self) -> Self {
         self.post_output(move |_matches, _ctx, output| {
-            if let crate::cli::hooks::RenderedOutput::Text(ref text) = output {
+            if let RenderedOutput::Text(ref text_output) = output {
                 if let Some(pipe) = standout_pipe::clipboard() {
+                    // Pipe the raw output (no ANSI codes) to clipboard
                     let result = pipe
-                        .pipe(text)
+                        .pipe(&text_output.raw)
                         .map_err(|e| crate::cli::hooks::HookError::post_output(e.to_string()))?;
-                    Ok(crate::cli::hooks::RenderedOutput::Text(result))
+                    // Consume mode: return empty (clipboard() uses .consume())
+                    Ok(RenderedOutput::Text(TextOutput::plain(result)))
                 } else {
                     Err(crate::cli::hooks::HookError::post_output(
                         "Clipboard not supported on this platform. \
@@ -508,17 +519,19 @@ impl<H> CommandConfig<H> {
     /// # Note
     ///
     /// Only [`RenderedOutput::Text`] is piped. Binary and silent outputs pass through unchanged.
+    /// The raw output (without ANSI codes) is piped to the target.
     pub fn pipe_with<P>(self, target: P) -> Self
     where
         P: standout_pipe::PipeTarget + Send + Sync + 'static,
     {
         let target = std::sync::Arc::new(target);
         self.post_output(move |_matches, _ctx, output| {
-            if let crate::cli::hooks::RenderedOutput::Text(ref text) = output {
+            if let RenderedOutput::Text(ref text_output) = output {
+                // Pipe the raw output (no ANSI codes)
                 let result = target
-                    .pipe(text)
+                    .pipe(&text_output.raw)
                     .map_err(|e| crate::cli::hooks::HookError::post_output(e.to_string()))?;
-                Ok(crate::cli::hooks::RenderedOutput::Text(result))
+                Ok(RenderedOutput::Text(TextOutput::plain(result)))
             } else {
                 Ok(output)
             }

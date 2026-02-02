@@ -45,8 +45,13 @@ pub trait Dispatchable {
 
 /// Internal result type for dispatch functions.
 pub enum DispatchOutput {
-    /// Text output (rendered template or JSON)
-    Text(String),
+    /// Text output with both formatted (ANSI) and raw versions.
+    Text {
+        /// The formatted output with ANSI codes (for terminal display)
+        formatted: String,
+        /// The raw output without ANSI codes (for piping)
+        raw: String,
+    },
     /// Binary output (bytes, filename)
     Binary(Vec<u8>, String),
     /// No output (silent)
@@ -92,7 +97,8 @@ pub(crate) fn render_handler_output<T: Serialize>(
                     &json_data,
                 );
 
-                let output = standout_render::template::render_auto_with_engine(
+                // Use the split render function to get both formatted and raw output
+                let render_result = standout_render::template::render_auto_with_engine_split(
                     template_engine,
                     template,
                     &json_data,
@@ -102,7 +108,11 @@ pub(crate) fn render_handler_output<T: Serialize>(
                     &render_ctx,
                 )
                 .map_err(|e| e.to_string())?;
-                Ok(DispatchOutput::Text(output))
+
+                Ok(DispatchOutput::Text {
+                    formatted: render_result.formatted,
+                    raw: render_result.raw,
+                })
             }
             HandlerOutput::Silent => Ok(DispatchOutput::Silent),
             HandlerOutput::Binary { data, filename } => Ok(DispatchOutput::Binary(data, filename)),

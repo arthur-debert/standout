@@ -21,7 +21,7 @@ use super::hooks::Hooks;
 use super::mode::{HandlerMode, ThreadSafe};
 use super::result::HelpResult;
 use crate::cli::handler::{CommandContext, HandlerResult, Output as HandlerOutput, RunResult};
-use crate::cli::hooks::{HookError, RenderedOutput};
+use crate::cli::hooks::{HookError, RenderedOutput, TextOutput};
 use std::collections::HashMap;
 
 use super::mode::Local;
@@ -235,7 +235,9 @@ impl<M: HandlerMode> App<M> {
 
             // Convert to RenderedOutput for post-output hooks
             let output = match dispatch_output {
-                DispatchOutput::Text(s) => RenderedOutput::Text(s),
+                DispatchOutput::Text { formatted, raw } => {
+                    RenderedOutput::Text(TextOutput::new(formatted, raw))
+                }
                 DispatchOutput::Binary(b, f) => RenderedOutput::Binary(b, f),
                 DispatchOutput::Silent => RenderedOutput::Silent,
             };
@@ -251,7 +253,7 @@ impl<M: HandlerMode> App<M> {
             };
 
             match final_output {
-                RenderedOutput::Text(s) => RunResult::Handled(s),
+                RenderedOutput::Text(t) => RunResult::Handled(t.formatted),
                 RenderedOutput::Binary(b, f) => RunResult::Binary(b, f),
                 RenderedOutput::Silent => RunResult::Handled(String::new()),
             }
@@ -425,9 +427,12 @@ impl<M: HandlerMode> App<M> {
                 }
 
                 // Render the (potentially modified) data
+                // Note: For inline handlers, we use TextOutput::plain since we don't
+                // have access to the split rendering path here. The main dispatch
+                // path uses render_auto_with_engine_split for proper raw/formatted split.
                 let theme = self.core.theme().cloned().unwrap_or_default();
                 match render_auto(template, &json_data, &theme, self.core.output_mode()) {
-                    Ok(rendered) => RenderedOutput::Text(rendered),
+                    Ok(rendered) => RenderedOutput::Text(TextOutput::plain(rendered)),
                     Err(e) => return Err(HookError::post_output("Render error").with_source(e)),
                 }
             }

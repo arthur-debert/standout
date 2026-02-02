@@ -18,7 +18,7 @@ use crate::cli::dispatch::{
 };
 use crate::cli::group::{ErasedConfigRecipe, GroupBuilder, GroupEntry};
 use crate::cli::handler::{CommandContext, RunResult};
-use crate::cli::hooks::RenderedOutput;
+use crate::cli::hooks::{RenderedOutput, TextOutput};
 use crate::SetupError;
 
 impl AppBuilder {
@@ -140,7 +140,9 @@ impl AppBuilder {
 
             // Convert to Output enum for post-output hooks
             let output = match dispatch_output {
-                DispatchOutput::Text(s) => RenderedOutput::Text(s),
+                DispatchOutput::Text { formatted, raw } => {
+                    RenderedOutput::Text(TextOutput::new(formatted, raw))
+                }
                 DispatchOutput::Binary(b, f) => RenderedOutput::Binary(b, f),
                 DispatchOutput::Silent => RenderedOutput::Silent,
             };
@@ -165,8 +167,9 @@ impl AppBuilder {
                     let dest = OutputDestination::File(path);
 
                     match &final_output {
-                        RenderedOutput::Text(s) => {
-                            if let Err(e) = write_output(s, &dest) {
+                        RenderedOutput::Text(t) => {
+                            // Write raw output (without ANSI codes) to file
+                            if let Err(e) = write_output(&t.raw, &dest) {
                                 return RunResult::Handled(format!("Error writing output: {}", e));
                             }
                             // Suppress further output
@@ -183,9 +186,9 @@ impl AppBuilder {
                 }
             }
 
-            // Convert back to RunResult
+            // Convert back to RunResult (using formatted for terminal display)
             match final_output {
-                RenderedOutput::Text(s) => RunResult::Handled(s),
+                RenderedOutput::Text(t) => RunResult::Handled(t.formatted),
                 RenderedOutput::Binary(b, f) => RunResult::Binary(b, f),
                 RenderedOutput::Silent => RunResult::Handled(String::new()),
             }
@@ -811,8 +814,11 @@ mod tests {
             .hooks(
                 "list",
                 Hooks::new().post_output(|_, _ctx, output| {
-                    if let RenderedOutput::Text(text) = output {
-                        Ok(RenderedOutput::Text(text.to_uppercase()))
+                    if let RenderedOutput::Text(text_output) = output {
+                        Ok(RenderedOutput::Text(TextOutput::new(
+                            text_output.formatted.to_uppercase(),
+                            text_output.raw.to_uppercase(),
+                        )))
                     } else {
                         Ok(output)
                     }
@@ -843,15 +849,21 @@ mod tests {
                 "list",
                 Hooks::new()
                     .post_output(|_, _ctx, output| {
-                        if let RenderedOutput::Text(text) = output {
-                            Ok(RenderedOutput::Text(format!("[{}]", text)))
+                        if let RenderedOutput::Text(text_output) = output {
+                            Ok(RenderedOutput::Text(TextOutput::new(
+                                format!("[{}]", text_output.formatted),
+                                format!("[{}]", text_output.raw),
+                            )))
                         } else {
                             Ok(output)
                         }
                     })
                     .post_output(|_, _ctx, output| {
-                        if let RenderedOutput::Text(text) = output {
-                            Ok(RenderedOutput::Text(text.to_uppercase()))
+                        if let RenderedOutput::Text(text_output) = output {
+                            Ok(RenderedOutput::Text(TextOutput::new(
+                                text_output.formatted.to_uppercase(),
+                                text_output.raw.to_uppercase(),
+                            )))
                         } else {
                             Ok(output)
                         }
@@ -911,7 +923,7 @@ mod tests {
                 "config.get",
                 Hooks::new().post_output(|_, _ctx, output| {
                     if let RenderedOutput::Text(_) = output {
-                        Ok(RenderedOutput::Text("***".into()))
+                        Ok(RenderedOutput::Text(TextOutput::plain("***".into())))
                     } else {
                         Ok(output)
                     }
@@ -1025,8 +1037,11 @@ mod tests {
             .hooks(
                 "test",
                 Hooks::new().post_output(|_, _ctx, output| {
-                    if let RenderedOutput::Text(text) = output {
-                        Ok(RenderedOutput::Text(format!("wrapped: {}", text)))
+                    if let RenderedOutput::Text(text_output) = output {
+                        Ok(RenderedOutput::Text(TextOutput::new(
+                            format!("wrapped: {}", text_output.formatted),
+                            format!("wrapped: {}", text_output.raw),
+                        )))
                     } else {
                         Ok(output)
                     }
