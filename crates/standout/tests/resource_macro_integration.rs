@@ -182,3 +182,83 @@ fn test_macro_update_flow() {
     let task = store.get(&"t1".to_string()).unwrap().unwrap();
     assert_eq!(task.title, "New Title");
 }
+
+// ============================================================================
+// Default Subcommand Help Text Test
+// ============================================================================
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Resource, Tabular)]
+#[resource(object = "item", store = InMemoryItemStore, default = "list")]
+struct Item {
+    #[resource(id)]
+    #[tabular(name = "ID")]
+    pub id: String,
+
+    #[tabular(name = "NAME")]
+    pub name: String,
+}
+
+struct InMemoryItemStore;
+
+impl ResourceStore for InMemoryItemStore {
+    type Item = Item;
+    type Id = String;
+    type Error = TestError;
+
+    fn parse_id(&self, id_str: &str) -> Result<Self::Id, Self::Error> {
+        Ok(id_str.to_string())
+    }
+
+    fn get(&self, _id: &Self::Id) -> Result<Option<Self::Item>, Self::Error> {
+        Ok(None)
+    }
+
+    fn not_found_error(id: &Self::Id) -> Self::Error {
+        TestError(format!("Item '{}' not found", id))
+    }
+
+    fn list(&self, _query: Option<&ResourceQuery>) -> Result<Vec<Self::Item>, Self::Error> {
+        Ok(vec![])
+    }
+
+    fn create(&self, data: serde_json::Value) -> Result<Self::Item, Self::Error> {
+        serde_json::from_value(data).map_err(|e| TestError(e.to_string()))
+    }
+
+    fn update(&self, id: &Self::Id, _data: serde_json::Value) -> Result<Self::Item, Self::Error> {
+        Err(Self::not_found_error(id))
+    }
+
+    fn delete(&self, id: &Self::Id) -> Result<(), Self::Error> {
+        Err(Self::not_found_error(id))
+    }
+}
+
+#[derive(Parser)]
+struct ItemCli {
+    #[command(subcommand)]
+    command: ItemCommands,
+}
+
+#[test]
+fn test_default_subcommand_help_text() {
+    // Build the command and render help
+    let mut cmd = ItemCommands::augment_subcommands(Command::new("item"));
+    let help = cmd.render_help().to_string();
+
+    // Verify the help text mentions the default subcommand
+    assert!(
+        help.contains("'list' is used by default"),
+        "Help text should indicate 'list' is the default subcommand. Got:\n{}",
+        help
+    );
+}
+
+#[test]
+fn test_default_command_method() {
+    // Verify the default_command() method returns the configured default
+    assert_eq!(ItemCommands::default_command(), Some("list"));
+
+    // Task doesn't have a default configured
+    assert_eq!(TaskCommands::default_command(), None);
+}

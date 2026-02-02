@@ -133,9 +133,13 @@ struct ResourceFieldInfo {
     attrs: ResourceFieldAttrs,
 }
 
-/// Categorizes field types for code generation
+/// Categorizes field types for code generation.
+///
+/// Note: Enum types are handled separately via the `#[resource(value_enum)]` attribute
+/// since they cannot be detected from the type signature alone (any custom type could
+/// be an enum). The `value_enum` flag is passed alongside the `TypeKind` to `generate_arg`
+/// and `generate_json_extraction`.
 #[derive(Clone)]
-#[allow(dead_code)] // Enum variant reserved for future use
 enum TypeKind {
     /// Simple scalar type (String, i32, etc.)
     Scalar(Type),
@@ -143,8 +147,6 @@ enum TypeKind {
     Option(Type),
     /// Collection type (Vec<T>)
     Vec(Type),
-    /// Enum type that should use ValueEnum
-    Enum(Type),
 }
 
 impl TypeKind {
@@ -184,7 +186,6 @@ impl TypeKind {
             TypeKind::Scalar(ty) => ty,
             TypeKind::Option(ty) => ty,
             TypeKind::Vec(ty) => ty,
-            TypeKind::Enum(ty) => ty,
         }
     }
 }
@@ -561,10 +562,6 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         .store
         .ok_or_else(|| Error::new(input.span(), "missing `store` in #[resource(...)]"))?;
 
-    let _plural_name = container_attrs
-        .plural
-        .unwrap_or_else(|| format!("{}s", object_name));
-
     let operations = container_attrs
         .operations
         .unwrap_or_else(ResourceOperation::all);
@@ -692,7 +689,7 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                     #name: Option<#inner_ty>,
                 }
             }
-            TypeKind::Scalar(scalar_ty) | TypeKind::Enum(scalar_ty) => {
+            TypeKind::Scalar(scalar_ty) => {
                 // Scalar -> wrap in Option for CLI
                 quote! {
                     #[arg(long = #long_name, #short_attr #help_attr #default_attr)]
@@ -792,7 +789,7 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                     }
                 }
             }
-            TypeKind::Scalar(scalar_ty) | TypeKind::Enum(scalar_ty) => {
+            TypeKind::Scalar(scalar_ty) => {
                 // Scalar -> get_one
                 if include_changed {
                     quote! {
@@ -1262,7 +1259,6 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                     }
 
                     let total = items.len();
-                    let total = items.len();
                     let mut builder = ::#crate_ident::views::list_view(items)
                         .total_count(total)
                         .tabular_spec(<#struct_name as ::#crate_ident::tabular::Tabular>::tabular_spec());
@@ -1395,7 +1391,8 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                 let dry_run = matches.get_flag("dry_run");
 
                 // ── Stage 1: ID Resolution ──
-                let id_str = matches.get_one::<String>("id").unwrap();
+                let id_str = matches.get_one::<String>("id")
+                    .expect("id is a required positional argument");
                 let id = store.parse_id(id_str)
                     .map_err(|e| ::#crate_ident::cli::IdResolutionError::parse_failed(id_str, e.to_string()))?;
 
@@ -1586,8 +1583,12 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
     };
 
     // Generate command attribute based on whether default is set
-    let command_attr = if default_command.is_some() {
-        quote! { #[command(subcommand_required = false)] }
+    let command_attr = if let Some(ref cmd) = default_command {
+        let default_note = format!(
+            "If no subcommand is specified, '{}' is used by default.",
+            cmd
+        );
+        quote! { #[command(subcommand_required = false, after_help = #default_note)] }
     } else {
         quote! {}
     };
