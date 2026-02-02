@@ -39,6 +39,15 @@ use syn::{
     Data, DeriveInput, Error, Expr, Fields, Ident, Meta, Result, Token, Type,
 };
 
+/// A shortcut command definition (e.g., "complete" -> sets status = "done")
+#[derive(Clone)]
+struct ResourceShortcut {
+    /// Command name (e.g., "complete")
+    name: String,
+    /// Field values to set (e.g., [("status", "done"), ("completed_at", "now")])
+    sets: Vec<(String, String)>,
+}
+
 /// Container-level attributes for #[resource(...)]
 #[derive(Default)]
 struct ResourceContainerAttrs {
@@ -56,6 +65,8 @@ struct ResourceContainerAttrs {
     default_command: Option<String>,
     /// Optional: command name aliases (e.g., view -> show, delete -> rm)
     aliases: std::collections::HashMap<String, String>,
+    /// Optional: shortcut commands for common update patterns
+    shortcuts: Vec<ResourceShortcut>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -286,10 +297,98 @@ impl Parse for ResourceContainerAttrs {
                         }
                     }
                 }
+                Meta::List(list) if list.path.is_ident("shortcut") => {
+                    // Parse shortcut(name = "complete", sets(status = "done", completed_at = "now"))
+                    let inner: Punctuated<Meta, Token![,]> =
+                        list.parse_args_with(Punctuated::parse_terminated)?;
+
+                    let mut shortcut_name: Option<String> = None;
+                    let mut shortcut_sets: Vec<(String, String)> = Vec::new();
+
+                    for shortcut_meta in inner {
+                        match &shortcut_meta {
+                            Meta::NameValue(nv) if nv.path.is_ident("name") => {
+                                if let Expr::Lit(expr_lit) = &nv.value {
+                                    if let syn::Lit::Str(lit_str) = &expr_lit.lit {
+                                        shortcut_name = Some(lit_str.value());
+                                    } else {
+                                        return Err(Error::new(
+                                            nv.value.span(),
+                                            "expected string literal for shortcut name",
+                                        ));
+                                    }
+                                } else {
+                                    return Err(Error::new(
+                                        nv.value.span(),
+                                        "expected string literal for shortcut name",
+                                    ));
+                                }
+                            }
+                            Meta::List(sets_list) if sets_list.path.is_ident("sets") => {
+                                // Parse sets(field = "value", field2 = "value2")
+                                let sets_inner: Punctuated<Meta, Token![,]> =
+                                    sets_list.parse_args_with(Punctuated::parse_terminated)?;
+                                for set_meta in sets_inner {
+                                    if let Meta::NameValue(nv) = set_meta {
+                                        let field_name = nv
+                                            .path
+                                            .get_ident()
+                                            .map(|i| i.to_string())
+                                            .ok_or_else(|| {
+                                                Error::new(nv.path.span(), "expected field name")
+                                            })?;
+                                        if let Expr::Lit(expr_lit) = &nv.value {
+                                            if let syn::Lit::Str(lit_str) = &expr_lit.lit {
+                                                shortcut_sets.push((field_name, lit_str.value()));
+                                            } else {
+                                                return Err(Error::new(
+                                                    nv.value.span(),
+                                                    "expected string literal for field value",
+                                                ));
+                                            }
+                                        } else {
+                                            return Err(Error::new(
+                                                nv.value.span(),
+                                                "expected string literal for field value",
+                                            ));
+                                        }
+                                    } else {
+                                        return Err(Error::new(
+                                            set_meta.span(),
+                                            "expected field = \"value\" format in sets()",
+                                        ));
+                                    }
+                                }
+                            }
+                            _ => {
+                                return Err(Error::new(
+                                    shortcut_meta.span(),
+                                    "expected name = \"...\" or sets(...) in shortcut",
+                                ));
+                            }
+                        }
+                    }
+
+                    // Validate shortcut has required fields
+                    let name = shortcut_name.ok_or_else(|| {
+                        Error::new(list.span(), "shortcut requires name = \"...\"")
+                    })?;
+                    if shortcut_sets.is_empty() {
+                        return Err(Error::new(
+                            list.span(),
+                            "shortcut requires sets(...) with at least one field",
+                        ));
+                    }
+
+                    attrs.shortcuts.push(ResourceShortcut {
+                        name,
+                        sets: shortcut_sets,
+                    });
+                }
                 _ => {
                     return Err(Error::new(
                         meta.span(),
-                        "unknown attribute, expected one of: object, store, plural, operations, validify, default, aliases",
+                        "unknown attribute, expected one of: object, store, plural, operations, validify, default, aliases, shortcut",
                     ));
                 }
             }
@@ -454,6 +553,7 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
     let use_validify = container_attrs.validify;
     let default_command = container_attrs.default_command;
     let aliases = container_attrs.aliases;
+    let shortcuts = container_attrs.shortcuts;
 
     // Helper to get command name (alias or default)
     let get_cmd_name = |default: &str| -> String {
@@ -912,6 +1012,146 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                 #handlers_module_name::delete,
                 |cfg| cfg.template("standout/delete-view")
             );
+        });
+    }
+
+    // Generate shortcut commands
+    let mut shortcut_handlers: Vec<TokenStream> = Vec::new();
+    for shortcut in &shortcuts {
+        let shortcut_name = &shortcut.name;
+        let variant_name = format_ident!(
+            "{}",
+            shortcut
+                .name
+                .chars()
+                .enumerate()
+                .map(|(i, c)| if i == 0 { c.to_ascii_uppercase() } else { c })
+                .collect::<String>()
+        );
+        let handler_name = format_ident!("shortcut_{}", shortcut.name.replace('-', "_"));
+
+        // Generate the sets as JSON insertions
+        let field_sets: Vec<TokenStream> = shortcut
+            .sets
+            .iter()
+            .map(|(field, value)| {
+                quote! {
+                    __data[#field] = ::serde_json::json!(#value);
+                    __changed.push(#field.to_string());
+                }
+            })
+            .collect();
+
+        // Build doc comment for the shortcut
+        let sets_desc: Vec<String> = shortcut
+            .sets
+            .iter()
+            .map(|(f, v)| format!("{} = \"{}\"", f, v))
+            .collect();
+        let doc_comment = format!("Shortcut: sets {}", sets_desc.join(", "));
+
+        command_variants.push(quote! {
+            #[doc = #doc_comment]
+            #[command(name = #shortcut_name)]
+            #variant_name {
+                /// The ID(s) of the item(s) to update
+                #[arg(num_args = 1..)]
+                ids: Vec<String>,
+            },
+        });
+
+        dispatch_commands.push(quote! {
+            let __builder = __builder.command_with(
+                #shortcut_name,
+                #handlers_module_name::#handler_name,
+                |cfg| cfg.template("standout/update-view")
+            );
+        });
+
+        // Generate the shortcut handler
+        shortcut_handlers.push(quote! {
+            pub fn #handler_name(
+                matches: &::clap::ArgMatches,
+                ctx: &::standout::cli::CommandContext,
+            ) -> ::standout::cli::HandlerResult<::serde_json::Value> {
+                let store = ctx.app_state.get_required::<#store_type>()?;
+
+                let id_strs: Vec<String> = matches.get_many::<String>("ids")
+                    .map(|v| v.cloned().collect())
+                    .unwrap_or_default();
+
+                if id_strs.len() == 1 {
+                    // Single ID
+                    let id_str = &id_strs[0];
+                    let id = store.parse_id(id_str)
+                        .map_err(|e| ::standout::cli::IdResolutionError::parse_failed(id_str, e.to_string()))?;
+
+                    let before = store.resolve(&id)
+                        .map_err(|_| ::standout::cli::IdResolutionError::not_found(id_str))?;
+
+                    let mut __data = ::serde_json::json!({});
+                    let mut __changed: Vec<String> = Vec::new();
+                    #(#field_sets)*
+
+                    let after = store.update(&id, __data)?;
+                    let after = ::standout::cli::app_logic_identity(after)?;
+
+                    let result = ::standout::views::update_view(after)
+                        .before(before)
+                        .changed_fields(__changed)
+                        .success(format!("{} updated", #object_name_upper))
+                        .build();
+                    Ok(::standout::cli::Output::Render(
+                        ::serde_json::to_value(result).unwrap_or_default()
+                    ))
+                } else {
+                    // Multiple IDs - batch update
+                    let mut updated: Vec<#struct_name> = Vec::new();
+                    let mut errors: Vec<String> = Vec::new();
+
+                    for id_str in &id_strs {
+                        match store.parse_id(id_str) {
+                            Ok(id) => {
+                                match store.resolve(&id) {
+                                    Ok(_before) => {
+                                        let mut __data = ::serde_json::json!({});
+                                        let mut __changed: Vec<String> = Vec::new();
+                                        #(#field_sets)*
+
+                                        match store.update(&id, __data) {
+                                            Ok(after) => updated.push(after),
+                                            Err(e) => errors.push(format!("Failed to update '{}': {}", id_str, e)),
+                                        }
+                                    }
+                                    Err(_) => errors.push(format!("'{}' not found", id_str)),
+                                }
+                            }
+                            Err(e) => errors.push(format!("Invalid ID '{}': {}", id_str, e)),
+                        }
+                    }
+
+                    let updated_count = updated.len();
+                    let error_count = errors.len();
+
+                    let mut result = ::standout::views::list_view(updated)
+                        .total_count(updated_count)
+                        .tabular_spec(<#struct_name as ::standout::tabular::Tabular>::tabular_spec())
+                        .build();
+
+                    if error_count == 0 {
+                        result = result.success(format!("{} {}(s) updated", updated_count, #object_name));
+                    } else {
+                        result = result.info(format!("{} updated, {} failed", updated_count, error_count));
+                    }
+                    for err in errors {
+                        result = result.warning(err);
+                    }
+
+                    Ok(::standout::cli::Output::Render(
+                        ::serde_json::to_value(result).unwrap_or_default()
+                    ))
+                }
+            }
         });
     }
 
@@ -1390,6 +1630,7 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
             #create_handler
             #update_handler
             #delete_handler
+            #(#shortcut_handlers)*
         }
     };
 
