@@ -140,6 +140,7 @@ pub use handler::{
 // Re-export hook types
 pub use hooks::{
     HookError, HookPhase, Hooks, PostDispatchFn, PostOutputFn, PreDispatchFn, RenderedOutput,
+    TextOutput,
 };
 
 // Re-export render abstraction

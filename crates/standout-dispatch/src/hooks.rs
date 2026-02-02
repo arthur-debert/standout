@@ -36,13 +36,47 @@ use thiserror::Error;
 use crate::handler::CommandContext;
 use clap::ArgMatches;
 
+/// Text output with both formatted and raw versions.
+///
+/// This struct carries both the terminal-formatted output (with ANSI codes)
+/// and the raw output (with style tags but no ANSI codes). This allows
+/// post-output hooks like piping to choose the appropriate version.
+#[derive(Debug, Clone)]
+pub struct TextOutput {
+    /// The formatted output with ANSI codes applied (for terminal display)
+    pub formatted: String,
+    /// The raw output with `[tag]...[/tag]` markers but no ANSI codes.
+    /// This is the intermediate output after template rendering but before
+    /// style tag processing. Piping uses this by default.
+    pub raw: String,
+}
+
+impl TextOutput {
+    /// Creates a new TextOutput with both formatted and raw versions.
+    pub fn new(formatted: String, raw: String) -> Self {
+        Self { formatted, raw }
+    }
+
+    /// Creates a TextOutput where formatted and raw are the same.
+    /// Use this for output that doesn't go through style tag processing
+    /// (e.g., JSON output, error messages).
+    pub fn plain(text: String) -> Self {
+        Self {
+            formatted: text.clone(),
+            raw: text,
+        }
+    }
+}
+
 /// Output from a command, used in post-output hooks.
 ///
 /// This represents the final output from a command handler after rendering.
 #[derive(Debug, Clone)]
 pub enum RenderedOutput {
-    /// Text output (rendered template or error message)
-    Text(String),
+    /// Text output with both formatted (ANSI) and raw versions.
+    /// The `formatted` field contains ANSI codes for terminal display.
+    /// The `raw` field contains the intermediate output for piping.
+    Text(TextOutput),
     /// Binary output with suggested filename
     Binary(Vec<u8>, String),
     /// No output (silent command)
@@ -65,10 +99,27 @@ impl RenderedOutput {
         matches!(self, RenderedOutput::Silent)
     }
 
-    /// Returns the text content if this is text output.
+    /// Returns the formatted text content (with ANSI codes) if this is text output.
     pub fn as_text(&self) -> Option<&str> {
         match self {
-            RenderedOutput::Text(s) => Some(s),
+            RenderedOutput::Text(t) => Some(&t.formatted),
+            _ => None,
+        }
+    }
+
+    /// Returns the raw text content (without ANSI codes) if this is text output.
+    /// This is the intermediate output suitable for piping.
+    pub fn as_raw_text(&self) -> Option<&str> {
+        match self {
+            RenderedOutput::Text(t) => Some(&t.raw),
+            _ => None,
+        }
+    }
+
+    /// Returns the full TextOutput if this is text output.
+    pub fn as_text_output(&self) -> Option<&TextOutput> {
+        match self {
+            RenderedOutput::Text(t) => Some(t),
             _ => None,
         }
     }
@@ -322,11 +373,17 @@ mod tests {
 
     #[test]
     fn test_rendered_output_variants() {
-        let text = RenderedOutput::Text("hello".into());
+        let text = RenderedOutput::Text(TextOutput::new("formatted".into(), "raw".into()));
         assert!(text.is_text());
         assert!(!text.is_binary());
         assert!(!text.is_silent());
-        assert_eq!(text.as_text(), Some("hello"));
+        assert_eq!(text.as_text(), Some("formatted"));
+        assert_eq!(text.as_raw_text(), Some("raw"));
+
+        // Test plain constructor (formatted == raw)
+        let plain = RenderedOutput::Text(TextOutput::plain("hello".into()));
+        assert_eq!(plain.as_text(), Some("hello"));
+        assert_eq!(plain.as_raw_text(), Some("hello"));
 
         let binary = RenderedOutput::Binary(vec![1, 2, 3], "file.bin".into());
         assert!(!binary.is_text());
@@ -457,8 +514,11 @@ mod tests {
     #[test]
     fn test_post_output_transformation() {
         let hooks = Hooks::new().post_output(|_, _, output| {
-            if let RenderedOutput::Text(text) = output {
-                Ok(RenderedOutput::Text(text.to_uppercase()))
+            if let RenderedOutput::Text(text_output) = output {
+                Ok(RenderedOutput::Text(TextOutput::new(
+                    text_output.formatted.to_uppercase(),
+                    text_output.raw.to_uppercase(),
+                )))
             } else {
                 Ok(output)
             }
@@ -466,7 +526,8 @@ mod tests {
 
         let ctx = test_context();
         let matches = test_matches();
-        let result = hooks.run_post_output(&matches, &ctx, RenderedOutput::Text("hello".into()));
+        let input = RenderedOutput::Text(TextOutput::plain("hello".into()));
+        let result = hooks.run_post_output(&matches, &ctx, input);
 
         assert!(result.is_ok());
         assert_eq!(result.unwrap().as_text(), Some("HELLO"));

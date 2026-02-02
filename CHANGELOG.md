@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Piped content is now automatically plain text** - When using `pipe_to()`, `pipe_through()`, `pipe_to_clipboard()`, or custom `PipeTarget` implementations, ANSI escape codes are automatically stripped from the piped content. This matches standard shell semantics where `command | other_command` receives unformatted output.
+
+  ```rust
+  // Template with styled output
+  cfg.template("[bold]{{ title }}[/bold]: [green]{{ count }}[/green]")
+     .pipe_through("jq .")
+
+  // Terminal sees formatted output with colors
+  // jq receives plain text: "Report: 42"
+  ```
+
+  **Implementation details:**
+  - `TextOutput` struct now has both `formatted` (ANSI codes for terminal) and `raw` (plain text for piping) fields
+  - All piping methods use `raw` for external commands while returning `formatted` for terminal display
+  - Uses existing `OutputMode::Text` rendering path to strip style tags cleanly
+
 ## [3.7.0] - 2026-01-31
 
 ## [3.6.1] - 2026-01-31

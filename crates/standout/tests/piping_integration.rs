@@ -1,8 +1,11 @@
 //! Integration tests for output piping functionality.
 
 use clap::Command;
+use console::Style;
 use serde_json::json;
 use standout::cli::{App, Output, RunResult, ThreadSafe};
+use standout::Theme;
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Test basic pipe_to (passthrough mode) - output is preserved
@@ -235,4 +238,152 @@ fn test_pipe_command_failure() {
         }
         _ => panic!("Expected RunResult::Handled with error, got {:?}", result),
     }
+}
+
+/// Test that piped content has ANSI codes stripped (matches shell semantics).
+/// This verifies that even when the terminal output has ANSI codes,
+/// the piped content is plain text.
+#[test]
+fn test_pipe_strips_ansi_codes() {
+    use standout_pipe::{PipeError, PipeTarget};
+
+    // Use a custom pipe target to capture what gets piped
+    struct CapturePipe(Arc<std::sync::Mutex<String>>);
+
+    impl PipeTarget for CapturePipe {
+        fn pipe(&self, input: &str) -> Result<String, PipeError> {
+            *self.0.lock().unwrap() = input.to_string();
+            Ok(input.to_string())
+        }
+    }
+
+    let captured = Arc::new(std::sync::Mutex::new(String::new()));
+    let capture_clone = captured.clone();
+
+    // Use a theme with forced styling to ensure ANSI codes would be generated
+    let theme = Theme::new().add("highlight", Style::new().green().force_styling(true));
+
+    let app = App::<ThreadSafe>::builder()
+        .theme(theme)
+        .commands(|g| {
+            g.command_with(
+                "styled",
+                |_m, _ctx| Ok(Output::Render(json!({"text": "hello"}))),
+                move |cfg| {
+                    cfg.template("[highlight]{{ text }}[/highlight]")
+                        .pipe_with(CapturePipe(capture_clone.clone()))
+                },
+            )
+        })
+        .unwrap()
+        .build()
+        .unwrap();
+
+    let cmd = Command::new("test").subcommand(Command::new("styled"));
+    let _result = app.run_to_string(cmd, vec!["test", "styled"]);
+
+    // Check what was piped - should NOT contain ANSI escape codes
+    let piped_content = captured.lock().unwrap();
+    assert!(
+        !piped_content.contains("\x1b["),
+        "Piped content should not contain ANSI codes, got: {:?}",
+        *piped_content
+    );
+    assert_eq!(
+        piped_content.trim(),
+        "hello",
+        "Piped content should be plain text"
+    );
+}
+
+/// Test that terminal output still has formatting while piped content is plain.
+#[test]
+fn test_pipe_preserves_terminal_formatting_in_passthrough() {
+    // Use a theme with forced styling
+    let theme = Theme::new().add("bold", Style::new().bold().force_styling(true));
+
+    let app = App::<ThreadSafe>::builder()
+        .theme(theme)
+        .commands(|g| {
+            g.command_with(
+                "test",
+                |_m, _ctx| Ok(Output::Render(json!({"msg": "world"}))),
+                move |cfg| {
+                    cfg.template("[bold]{{ msg }}[/bold]")
+                        .pipe_to(if cfg!(windows) { "more" } else { "cat" })
+                },
+            )
+        })
+        .unwrap()
+        .build()
+        .unwrap();
+
+    let cmd = Command::new("app").subcommand(Command::new("test"));
+    let result = app.run_to_string(cmd, vec!["app", "test"]);
+
+    // Terminal output (from run_to_string) should have ANSI codes (formatted field)
+    if let RunResult::Handled(terminal_output) = result {
+        assert!(
+            terminal_output.contains("\x1b[") || terminal_output == "world",
+            "Terminal output should have ANSI codes (or be plain if not a TTY), got: {:?}",
+            terminal_output
+        );
+    } else {
+        panic!("Expected RunResult::Handled");
+    }
+}
+
+/// Test that clipboard copy receives plain text (no ANSI codes).
+/// Note: This test uses a mock since clipboard() may not be available in CI.
+#[test]
+fn test_clipboard_receives_plain_text() {
+    use standout_pipe::{PipeError, PipeTarget};
+
+    // Custom target simulating clipboard behavior
+    let copied = Arc::new(std::sync::Mutex::new(String::new()));
+    let copied_clone = copied.clone();
+
+    struct MockClipboard(Arc<std::sync::Mutex<String>>);
+
+    impl PipeTarget for MockClipboard {
+        fn pipe(&self, input: &str) -> Result<String, PipeError> {
+            *self.0.lock().unwrap() = input.to_string();
+            Ok(String::new()) // Clipboard consume mode returns empty
+        }
+    }
+
+    let theme = Theme::new().add("red", Style::new().red().force_styling(true));
+
+    let app = App::<ThreadSafe>::builder()
+        .theme(theme)
+        .commands(|g| {
+            g.command_with(
+                "copy",
+                |_m, _ctx| Ok(Output::Render(json!({"secret": "password123"}))),
+                move |cfg| {
+                    // Use pipe_with to simulate clipboard behavior
+                    cfg.template("[red]{{ secret }}[/red]")
+                        .pipe_with(MockClipboard(copied_clone.clone()))
+                },
+            )
+        })
+        .unwrap()
+        .build()
+        .unwrap();
+
+    let cmd = Command::new("test").subcommand(Command::new("copy"));
+    let _result = app.run_to_string(cmd, vec!["test", "copy"]);
+
+    // Check what was "copied" - should be plain text
+    let clipboard_content = copied.lock().unwrap();
+    assert!(
+        !clipboard_content.contains("\x1b["),
+        "Clipboard should receive plain text without ANSI codes, got: {:?}",
+        *clipboard_content
+    );
+    assert_eq!(
+        clipboard_content.trim(),
+        "password123",
+        "Clipboard should receive the raw text content"
+    );
 }

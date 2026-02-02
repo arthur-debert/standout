@@ -106,12 +106,44 @@ fn output_mode_to_transform(mode: OutputMode) -> TagTransform {
 /// Post-processes rendered output with BBParser to apply style tags.
 ///
 /// This is the second pass of the two-pass rendering system.
-pub(crate) fn apply_style_tags(output: &str, styles: &Styles, mode: OutputMode) -> String {
+pub fn apply_style_tags(output: &str, styles: &Styles, mode: OutputMode) -> String {
     let transform = output_mode_to_transform(mode);
     let resolved_styles = styles.to_resolved_map();
     let parser =
         BBParser::new(resolved_styles, transform).unknown_behavior(UnknownTagBehavior::Passthrough);
     parser.parse(output)
+}
+
+/// Result of rendering that includes both formatted and raw output.
+///
+/// This struct is used when the caller needs both the terminal-formatted output
+/// (with ANSI codes) and the raw output (with style tags but no ANSI codes).
+/// The raw output is useful for piping to external commands.
+#[derive(Debug, Clone)]
+pub struct RenderResult {
+    /// The formatted output with ANSI codes applied (for terminal display)
+    pub formatted: String,
+    /// The raw output with `[tag]...[/tag]` markers but no ANSI codes.
+    /// This is the intermediate output after template rendering but before
+    /// style tag processing. Suitable for piping.
+    pub raw: String,
+}
+
+impl RenderResult {
+    /// Creates a new RenderResult with both formatted and raw versions.
+    pub fn new(formatted: String, raw: String) -> Self {
+        Self { formatted, raw }
+    }
+
+    /// Creates a RenderResult where formatted and raw are the same.
+    /// Use this for output that doesn't need style tag processing
+    /// (e.g., JSON output, error messages).
+    pub fn plain(text: String) -> Self {
+        Self {
+            formatted: text.clone(),
+            raw: text,
+        }
+    }
 }
 
 /// Validates a template for unknown style tags.
@@ -879,6 +911,76 @@ pub fn render_auto_with_engine(
         let final_output = apply_style_tags(&template_output, &styles, mode);
 
         Ok(final_output)
+    }
+}
+
+/// Auto-dispatches rendering and returns both formatted and raw output.
+///
+/// This is similar to `render_auto_with_engine` but returns a `RenderResult`
+/// containing both the formatted output (with ANSI codes) and the raw output
+/// (with style tags but no ANSI codes). The raw output is useful for piping
+/// to external commands.
+///
+/// For structured modes (JSON, YAML, etc.), both formatted and raw are the same
+/// since no style processing occurs.
+pub fn render_auto_with_engine_split(
+    engine: &dyn super::TemplateEngine,
+    template: &str,
+    data: &serde_json::Value,
+    theme: &Theme,
+    mode: OutputMode,
+    context_registry: &ContextRegistry,
+    render_context: &RenderContext,
+) -> Result<RenderResult, RenderError> {
+    if mode.is_structured() {
+        // For structured modes, no style processing, so raw == formatted
+        let output = match mode {
+            OutputMode::Json => serde_json::to_string_pretty(data)?,
+            OutputMode::Yaml => serde_yaml::to_string(data)?,
+            OutputMode::Xml => quick_xml::se::to_string(data)?,
+            OutputMode::Csv => {
+                let (headers, rows) = crate::util::flatten_json_for_csv(data);
+
+                let mut wtr = csv::Writer::from_writer(Vec::new());
+                wtr.write_record(&headers)?;
+                for row in rows {
+                    wtr.write_record(&row)?;
+                }
+                let bytes = wtr.into_inner()?;
+                String::from_utf8(bytes)?
+            }
+            _ => unreachable!("is_structured() returned true for non-structured mode"),
+        };
+        Ok(RenderResult::plain(output))
+    } else {
+        let color_mode = detect_color_mode();
+        let styles = theme.resolve_styles(Some(color_mode));
+
+        // Validate style aliases before rendering
+        styles
+            .validate()
+            .map_err(|e| RenderError::StyleError(e.to_string()))?;
+
+        // Build the combined context: data + injected context
+        let context_map = build_combined_context(data, context_registry, render_context)?;
+
+        // Merge into a single Value for the engine
+        let combined_value = serde_json::Value::Object(context_map.into_iter().collect());
+
+        // Pass 1: Render template (this is the raw/intermediate output)
+        let raw_output = if engine.has_template(template) {
+            engine.render_named(template, &combined_value)?
+        } else {
+            engine.render_template(template, &combined_value)?
+        };
+
+        // Pass 2: Apply styles to get formatted output
+        let formatted_output = apply_style_tags(&raw_output, &styles, mode);
+
+        // For raw output, strip style tags (OutputMode::Text behavior)
+        let stripped_output = apply_style_tags(&raw_output, &styles, OutputMode::Text);
+
+        Ok(RenderResult::new(formatted_output, stripped_output))
     }
 }
 

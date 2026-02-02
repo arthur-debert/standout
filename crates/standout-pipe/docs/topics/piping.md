@@ -208,6 +208,32 @@ This is useful for transformations that don't need a shell command.
 
 ---
 
+## ANSI Code Handling
+
+**Piped content is always plain text.** This matches standard shell behavior where `command | other_command` receives unformatted output because stdout is not a TTY.
+
+When you pipe output:
+- The piped content has all ANSI escape codes stripped automatically
+- Terminal display still shows rich formatting (colors, bold, etc.)
+- Clipboard operations receive clean, pasteable text
+
+```rust
+// Your template has styled output
+cfg.template("[bold]{{ title }}[/bold]: [green]{{ count }}[/green]")
+   .pipe_through("jq .")
+
+// Terminal sees: "\x1b[1mReport\x1b[0m: \x1b[32m42\x1b[0m" (formatted)
+// jq receives:   "Report: 42" (plain text)
+```
+
+This is implemented using the framework's two-pass rendering:
+1. Template engine produces output with `[style]...[/style]` tags
+2. `apply_style_tags` is called twice: once with ANSI codes for terminal, once stripped for piping
+
+**Custom pipe targets** also receive plain text via the `PipeTarget::pipe(&self, input: &str)` method.
+
+---
+
 ## Limitations
 
 **Text output only**: Piping only operates on `RenderedOutput::Text`. Binary and silent outputs pass through unchanged.
