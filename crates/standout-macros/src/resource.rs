@@ -544,6 +544,12 @@ fn extract_fields(fields: &Fields) -> Result<Vec<ResourceFieldInfo>> {
 }
 
 /// Main implementation of the Resource derive macro
+///
+/// Note on Templates:
+/// This macro generates code that references templates using the `standout/` prefix (e.g., "standout/list-view").
+/// These templates are embedded within the `standout` framework itself. Even if the crate is renamed
+/// via `#[resource(crate = "...")]`, the template registry keys remain under the `standout/` namespace
+/// unless the underlying template engine configuration is also modified.
 pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
     let container_attrs = parse_container_attrs(&input)?;
 
@@ -858,53 +864,34 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         })
         .collect();
 
-    // Generate JSON field builders for create handler
-    let create_json_fields: Vec<TokenStream> = mutable_fields
-        .iter()
-        .map(|f| {
-            let name = &f.ident;
-            let ty = &f.ty;
-            let name_str = name.to_string();
-            // Use custom long name if provided for CLI arg matching
-            let long_name = f
-                .attrs
-                .long
-                .clone()
-                .unwrap_or_else(|| name_str.replace('_', "-"));
-            generate_json_extraction(
-                name,
-                ty,
-                &long_name,
-                &f.attrs.choices,
-                f.attrs.value_enum,
-                false,
-            )
-        })
-        .collect();
+    // Generate JSON field builders
+    let generate_json_fields_helper = |include_changed: bool| -> Vec<TokenStream> {
+        mutable_fields
+            .iter()
+            .map(|f| {
+                let name = &f.ident;
+                let ty = &f.ty;
+                let name_str = name.to_string();
+                // Use custom long name if provided for CLI arg matching
+                let long_name = f
+                    .attrs
+                    .long
+                    .clone()
+                    .unwrap_or_else(|| name_str.replace('_', "-"));
+                generate_json_extraction(
+                    name,
+                    ty,
+                    &long_name,
+                    &f.attrs.choices,
+                    f.attrs.value_enum,
+                    include_changed,
+                )
+            })
+            .collect()
+    };
 
-    // Generate JSON field builders for update handler
-    let update_json_fields: Vec<TokenStream> = mutable_fields
-        .iter()
-        .map(|f| {
-            let name = &f.ident;
-            let ty = &f.ty;
-            let name_str = name.to_string();
-            // Use custom long name if provided for CLI arg matching
-            let long_name = f
-                .attrs
-                .long
-                .clone()
-                .unwrap_or_else(|| name_str.replace('_', "-"));
-            generate_json_extraction(
-                name,
-                ty,
-                &long_name,
-                &f.attrs.choices,
-                f.attrs.value_enum,
-                true,
-            )
-        })
-        .collect();
+    let create_json_fields = generate_json_fields_helper(false);
+    let update_json_fields = generate_json_fields_helper(true);
 
     // Generate default value injections for create handler
     let create_default_injections: Vec<TokenStream> = mutable_fields
