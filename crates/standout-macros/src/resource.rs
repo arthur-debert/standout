@@ -54,6 +54,8 @@ struct ResourceContainerAttrs {
     validify: bool,
     /// Optional: default subcommand when none specified (e.g., "list")
     default_command: Option<String>,
+    /// Optional: command name aliases (e.g., view -> show, delete -> rm)
+    aliases: std::collections::HashMap<String, String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -242,10 +244,52 @@ impl Parse for ResourceContainerAttrs {
                         return Err(Error::new(nv.value.span(), "expected string literal"));
                     }
                 }
+                Meta::List(list) if list.path.is_ident("aliases") => {
+                    // Parse aliases(view = "show", delete = "rm")
+                    let inner: Punctuated<Meta, Token![,]> =
+                        list.parse_args_with(Punctuated::parse_terminated)?;
+                    for alias_meta in inner {
+                        if let Meta::NameValue(nv) = alias_meta {
+                            let cmd_name =
+                                nv.path.get_ident().map(|i| i.to_string()).ok_or_else(|| {
+                                    Error::new(nv.path.span(), "expected command name")
+                                })?;
+
+                            // Validate that it's a valid command name
+                            if ResourceOperation::from_str(&cmd_name).is_none() {
+                                return Err(Error::new(
+                                    nv.path.span(),
+                                    format!("unknown command '{}', expected one of: list, view, create, update, delete", cmd_name),
+                                ));
+                            }
+
+                            if let Expr::Lit(expr_lit) = &nv.value {
+                                if let syn::Lit::Str(lit_str) = &expr_lit.lit {
+                                    attrs.aliases.insert(cmd_name, lit_str.value());
+                                } else {
+                                    return Err(Error::new(
+                                        nv.value.span(),
+                                        "expected string literal for alias",
+                                    ));
+                                }
+                            } else {
+                                return Err(Error::new(
+                                    nv.value.span(),
+                                    "expected string literal for alias",
+                                ));
+                            }
+                        } else {
+                            return Err(Error::new(
+                                alias_meta.span(),
+                                "expected command = \"alias\" format",
+                            ));
+                        }
+                    }
+                }
                 _ => {
                     return Err(Error::new(
                         meta.span(),
-                        "unknown attribute, expected one of: object, store, plural, operations, validify, default",
+                        "unknown attribute, expected one of: object, store, plural, operations, validify, default, aliases",
                     ));
                 }
             }
@@ -409,6 +453,15 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
 
     let use_validify = container_attrs.validify;
     let default_command = container_attrs.default_command;
+    let aliases = container_attrs.aliases;
+
+    // Helper to get command name (alias or default)
+    let get_cmd_name = |default: &str| -> String {
+        aliases
+            .get(default)
+            .cloned()
+            .unwrap_or_else(|| default.to_string())
+    };
 
     let struct_name = &input.ident;
 
@@ -754,8 +807,10 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
     let mut dispatch_commands = Vec::new();
 
     if operations.contains(&ResourceOperation::List) {
+        let cmd_name = get_cmd_name("list");
         command_variants.push(quote! {
             /// List all items
+            #[command(name = #cmd_name)]
             List {
                 #[arg(long)]
                 filter: Option<String>,
@@ -767,7 +822,7 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         });
         dispatch_commands.push(quote! {
             let __builder = __builder.command_with(
-                "list",
+                #cmd_name,
                 #handlers_module_name::list,
                 |cfg| cfg.template("standout/list-view")
             );
@@ -775,8 +830,10 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
     }
 
     if operations.contains(&ResourceOperation::View) {
+        let cmd_name = get_cmd_name("view");
         command_variants.push(quote! {
             /// View one or more items
+            #[command(name = #cmd_name)]
             View {
                 /// The ID(s) of the item(s) to view
                 #[arg(num_args = 1..)]
@@ -785,7 +842,7 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         });
         dispatch_commands.push(quote! {
             let __builder = __builder.command_with(
-                "view",
+                #cmd_name,
                 #handlers_module_name::view,
                 |cfg| cfg.template("standout/detail-view")
             );
@@ -793,8 +850,10 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
     }
 
     if operations.contains(&ResourceOperation::Create) {
+        let cmd_name = get_cmd_name("create");
         command_variants.push(quote! {
             /// Create a new item
+            #[command(name = #cmd_name)]
             Create {
                 #(#create_args)*
                 #[arg(long)]
@@ -803,7 +862,7 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         });
         dispatch_commands.push(quote! {
             let __builder = __builder.command_with(
-                "create",
+                #cmd_name,
                 #handlers_module_name::create,
                 |cfg| cfg.template("standout/create-view")
             );
@@ -811,8 +870,10 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
     }
 
     if operations.contains(&ResourceOperation::Update) {
+        let cmd_name = get_cmd_name("update");
         command_variants.push(quote! {
             /// Update an existing item
+            #[command(name = #cmd_name)]
             Update {
                 /// The ID of the item to update
                 id: String,
@@ -823,7 +884,7 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         });
         dispatch_commands.push(quote! {
             let __builder = __builder.command_with(
-                "update",
+                #cmd_name,
                 #handlers_module_name::update,
                 |cfg| cfg.template("standout/update-view")
             );
@@ -831,8 +892,10 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
     }
 
     if operations.contains(&ResourceOperation::Delete) {
+        let cmd_name = get_cmd_name("delete");
         command_variants.push(quote! {
             /// Delete one or more items
+            #[command(name = #cmd_name)]
             Delete {
                 /// The ID(s) of the item(s) to delete
                 #[arg(num_args = 1..)]
@@ -845,7 +908,7 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         });
         dispatch_commands.push(quote! {
             let __builder = __builder.command_with(
-                "delete",
+                #cmd_name,
                 #handlers_module_name::delete,
                 |cfg| cfg.template("standout/delete-view")
             );
