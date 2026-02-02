@@ -52,6 +52,8 @@ struct ResourceContainerAttrs {
     operations: Option<Vec<ResourceOperation>>,
     /// Optional: enable validify integration for validation/modification
     validify: bool,
+    /// Optional: default subcommand when none specified (e.g., "list")
+    default_command: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -223,10 +225,21 @@ impl Parse for ResourceContainerAttrs {
                 Meta::Path(p) if p.is_ident("validify") => {
                     attrs.validify = true;
                 }
+                Meta::NameValue(nv) if nv.path.is_ident("default") => {
+                    if let Expr::Lit(expr_lit) = &nv.value {
+                        if let syn::Lit::Str(lit_str) = &expr_lit.lit {
+                            attrs.default_command = Some(lit_str.value());
+                        } else {
+                            return Err(Error::new(nv.value.span(), "expected string literal"));
+                        }
+                    } else {
+                        return Err(Error::new(nv.value.span(), "expected string literal"));
+                    }
+                }
                 _ => {
                     return Err(Error::new(
                         meta.span(),
-                        "unknown attribute, expected one of: object, store, plural, operations, validify",
+                        "unknown attribute, expected one of: object, store, plural, operations, validify, default",
                     ));
                 }
             }
@@ -352,6 +365,7 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         .unwrap_or_else(ResourceOperation::all);
 
     let use_validify = container_attrs.validify;
+    let default_command = container_attrs.default_command;
 
     let struct_name = &input.ident;
 
@@ -1026,10 +1040,35 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         quote! {}
     };
 
+    // Generate command attribute based on whether default is set
+    let command_attr = if default_command.is_some() {
+        quote! { #[command(subcommand_required = false)] }
+    } else {
+        quote! {}
+    };
+
+    // Generate default_command method
+    let default_command_method = if let Some(ref cmd) = default_command {
+        quote! {
+            /// Returns the default subcommand name, if configured.
+            pub fn default_command() -> Option<&'static str> {
+                Some(#cmd)
+            }
+        }
+    } else {
+        quote! {
+            /// Returns the default subcommand name, if configured.
+            pub fn default_command() -> Option<&'static str> {
+                None
+            }
+        }
+    };
+
     // Generate the full output
     let expanded = quote! {
         /// Commands enum for Resource operations on #struct_name
         #[derive(::clap::Subcommand, Clone, Debug)]
+        #command_attr
         pub enum #commands_enum_name {
             #(#command_variants)*
         }
@@ -1042,6 +1081,8 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                     __builder
                 }
             }
+
+            #default_command_method
         }
 
         #[doc(hidden)]
