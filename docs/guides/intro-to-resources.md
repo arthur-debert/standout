@@ -426,17 +426,6 @@ pub struct Config {
 
 Valid operations: `list`, `view`, `create`, `update`, `delete`
 
-### Default Subcommand
-
-Make `app tasks` equivalent to `app tasks list`:
-
-```rust
-#[resource(object = "task", store = TaskStore, default = "list")]
-pub struct Task { ... }
-```
-
-Help text will show: "If no subcommand is specified, 'list' is used by default."
-
 ### Command Aliases
 
 Rename commands to match your preferences:
@@ -675,7 +664,7 @@ Into this:
 ```rust
 // ~20 lines total
 #[derive(Resource, Tabular)]
-#[resource(object = "task", store = TaskStore, default = "list")]
+#[resource(object = "task", store = TaskStore)]
 pub struct Task {
     #[resource(id)]
     pub id: String,
@@ -686,6 +675,15 @@ pub struct Task {
     #[resource(arg(long), default = "pending")]
     pub status: String,
 }
+```
+
+To set the default subcommand, configure it at the App level:
+
+```rust
+App::builder()
+    .default("task")  // Makes `app` equivalent to `app task list`
+    .group("task", TaskCommands::dispatch_config())
+    .build()?
 ```
 
 The macro generates type-safe CLI commands, argument parsing, validation, and output formatting—all from your domain type definition.
@@ -700,7 +698,6 @@ The macro generates type-safe CLI commands, argument parsing, validation, and ou
 | `store` | Store type (required) | `store = TaskStore` |
 | `plural` | Plural name | `plural = "tasks"` |
 | `operations` | Subset of CRUD | `operations(list, view)` |
-| `default` | Default subcommand | `default = "list"` |
 | `aliases` | Rename commands | `aliases(view = "show")` |
 | `keep_aliases` | Keep original names | `keep_aliases` |
 | `shortcut` | Convenience commands | `shortcut(name = "done", sets(status = "done"))` |

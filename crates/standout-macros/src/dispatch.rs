@@ -516,7 +516,7 @@ pub fn dispatch_derive_impl(input: DeriveInput) -> Result<TokenStream> {
     // Generate default command registration if one was marked
     let default_command_registration = default_command.map(|name| {
         quote! {
-            let __builder = __builder.default_command(#name);
+            let __builder = __builder.default(#name);
         }
     });
 

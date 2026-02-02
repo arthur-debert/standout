@@ -61,8 +61,6 @@ struct ResourceContainerAttrs {
     operations: Option<Vec<ResourceOperation>>,
     /// Optional: enable validify integration for validation/modification
     validify: bool,
-    /// Optional: default subcommand when none specified (e.g., "list")
-    default_command: Option<String>,
     /// Optional: command name aliases (e.g., view -> show, delete -> rm)
     aliases: std::collections::HashMap<String, String>,
     /// Optional: keep original command names as hidden aliases when aliasing
@@ -247,17 +245,6 @@ impl Parse for ResourceContainerAttrs {
                 Meta::Path(p) if p.is_ident("validify") => {
                     attrs.validify = true;
                 }
-                Meta::NameValue(nv) if nv.path.is_ident("default") => {
-                    if let Expr::Lit(expr_lit) = &nv.value {
-                        if let syn::Lit::Str(lit_str) = &expr_lit.lit {
-                            attrs.default_command = Some(lit_str.value());
-                        } else {
-                            return Err(Error::new(nv.value.span(), "expected string literal"));
-                        }
-                    } else {
-                        return Err(Error::new(nv.value.span(), "expected string literal"));
-                    }
-                }
                 Meta::NameValue(nv) if nv.path.is_ident("crate") => {
                     if let Expr::Lit(expr_lit) = &nv.value {
                         if let syn::Lit::Str(lit_str) = &expr_lit.lit {
@@ -405,7 +392,7 @@ impl Parse for ResourceContainerAttrs {
                 _ => {
                     return Err(Error::new(
                         meta.span(),
-                        "unknown attribute, expected one of: object, store, plural, operations, validify, default, aliases, keep_aliases, shortcut, crate",
+                        "unknown attribute, expected one of: object, store, plural, operations, validify, aliases, keep_aliases, shortcut, crate",
                     ));
                 }
             }
@@ -564,7 +551,6 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         .unwrap_or_else(ResourceOperation::all);
 
     let use_validify = container_attrs.validify;
-    let default_command = container_attrs.default_command;
     let aliases = container_attrs.aliases;
     let keep_aliases = container_attrs.keep_aliases;
     let shortcuts = container_attrs.shortcuts;
@@ -1586,31 +1572,36 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         quote! {}
     };
 
-    // Generate command attribute based on whether default is set
-    let command_attr = if let Some(ref cmd) = default_command {
-        let default_note = format!(
-            "If no subcommand is specified, '{}' is used by default.",
-            cmd
-        );
-        quote! { #[command(subcommand_required = false, after_help = #default_note)] }
-    } else {
-        quote! {}
-    };
+    // Resources always require a subcommand
+    let command_attr = quote! {};
 
-    // Generate default_command method
-    let default_command_method = if let Some(ref cmd) = default_command {
-        quote! {
-            /// Returns the default subcommand name, if configured.
-            pub fn default_command() -> Option<&'static str> {
-                Some(#cmd)
-            }
-        }
-    } else {
-        quote! {
-            /// Returns the default subcommand name, if configured.
-            pub fn default_command() -> Option<&'static str> {
-                None
-            }
+    // Collect subcommand names from operations and shortcuts for conflict detection
+    let mut subcommand_names_list: Vec<String> = Vec::new();
+    if operations.contains(&ResourceOperation::List) {
+        subcommand_names_list.push(get_cmd_name("list"));
+    }
+    if operations.contains(&ResourceOperation::View) {
+        subcommand_names_list.push(get_cmd_name("view"));
+    }
+    if operations.contains(&ResourceOperation::Create) {
+        subcommand_names_list.push(get_cmd_name("create"));
+    }
+    if operations.contains(&ResourceOperation::Update) {
+        subcommand_names_list.push(get_cmd_name("update"));
+    }
+    if operations.contains(&ResourceOperation::Delete) {
+        subcommand_names_list.push(get_cmd_name("delete"));
+    }
+    for shortcut in &shortcuts {
+        subcommand_names_list.push(shortcut.name.clone());
+    }
+
+    let subcommand_names_method = quote! {
+        /// Returns the names of all subcommands generated for this resource.
+        ///
+        /// Used for conflict detection when setting a resource as the default.
+        pub fn subcommand_names() -> &'static [&'static str] {
+            &[#(#subcommand_names_list),*]
         }
     };
 
@@ -1632,7 +1623,7 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                 }
             }
 
-            #default_command_method
+            #subcommand_names_method
         }
 
         #[doc(hidden)]

@@ -315,29 +315,49 @@ impl AppBuilder {
         self
     }
 
-    /// Sets a default command to use when no subcommand is specified.
+    /// Sets the default command when no subcommand is provided.
     ///
-    /// When the CLI is invoked without a subcommand (a "naked" invocation),
-    /// the default command is automatically inserted and the arguments are reparsed.
+    /// # How It Works
     ///
-    /// # Example
+    /// 1. **Parse**: Arguments are parsed normally with clap
+    /// 2. **Check**: If no subcommand found and default is configured
+    /// 3. **Inject**: Default name inserted after program name
+    /// 4. **Reparse**: Arguments parsed again with injected command
+    ///
+    /// This approach ensures correct parsing of edge cases (flags before
+    /// commands, argument values that look like commands, etc.).
+    ///
+    /// # Conflict Detection
+    ///
+    /// When the default is a group (e.g., `default("todo")` for a resource),
+    /// its subcommands become directly invocable. This creates potential
+    /// ambiguity:
+    ///
+    /// - `todo` has subcommands: `list`, `view`, `create`, `update`, `delete`
+    /// - If root also has `view` command: `app view` is ambiguous
+    ///
+    /// The builder detects conflicts at build time and returns an error:
+    /// ```text
+    /// Cannot set 'todo' as default: its subcommand 'view' conflicts
+    /// with existing root command 'view'
+    /// ```
+    ///
+    /// # Examples
     ///
     /// ```rust,ignore
-    /// use standout::cli::App;
-    ///
-    /// // With this configuration:
-    /// // - `myapp` becomes `myapp list`
-    /// // - `myapp --verbose` becomes `myapp list --verbose`
-    /// // - `myapp add foo` stays as `myapp add foo`
-    ///
+    /// // Simple command as default
     /// App::builder()
-    ///     .default_command("list")
+    ///     .default("list")
     ///     .command("list", list_handler, "...")
-    ///     .command("add", add_handler, "...")
     ///     .build()?
-    ///     .run(cmd, args);
+    ///
+    /// // Resource group as default
+    /// App::builder()
+    ///     .default("todo")
+    ///     .group("todo", TodoCommands::dispatch_config())
+    ///     .build()?
     /// ```
-    pub fn default_command(mut self, name: &str) -> Self {
+    pub fn default(mut self, name: &str) -> Self {
         self.default_command = Some(name.to_string());
         self
     }
