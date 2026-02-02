@@ -624,6 +624,26 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         .filter(|f| !f.attrs.id && !f.attrs.readonly && !f.attrs.skip)
         .collect();
 
+    // Validate no duplicate short options
+    {
+        let mut seen_shorts: std::collections::HashMap<char, &Ident> =
+            std::collections::HashMap::new();
+        for field in &mutable_fields {
+            if let Some(short) = field.attrs.short {
+                if let Some(other_field) = seen_shorts.get(&short) {
+                    return Err(Error::new(
+                        field.ident.span(),
+                        format!(
+                            "duplicate short option '-{}': already used by field '{}'",
+                            short, other_field
+                        ),
+                    ));
+                }
+                seen_shorts.insert(short, &field.ident);
+            }
+        }
+    }
+
     // Helper function to generate clap args based on type
     #[allow(clippy::too_many_arguments)]
     fn generate_arg(
