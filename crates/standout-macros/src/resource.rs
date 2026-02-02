@@ -433,6 +433,7 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         choices: &Option<Vec<String>>,
         is_value_enum: bool,
         doc: &Option<String>,
+        default_expr: &Option<String>,
     ) -> TokenStream {
         let type_kind = TypeKind::from_type(ty);
 
@@ -442,11 +443,17 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
             .map(|d| quote! { help = #d, })
             .unwrap_or_default();
 
+        // Generate default_value attribute for display in help
+        let default_attr = default_expr
+            .as_ref()
+            .map(|d| quote! { default_value = #d, })
+            .unwrap_or_default();
+
         // Handle explicit choices (string-based)
         if let Some(choice_values) = choices {
             let choice_values: Vec<&String> = choice_values.iter().collect();
             return quote! {
-                #[arg(long = #long_name, #help_attr value_parser = clap::builder::PossibleValuesParser::new([#(#choice_values),*]))]
+                #[arg(long = #long_name, #help_attr #default_attr value_parser = clap::builder::PossibleValuesParser::new([#(#choice_values),*]))]
                 pub #name: Option<String>,
             };
         }
@@ -455,7 +462,7 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         if is_value_enum {
             let inner = type_kind.inner_type();
             return quote! {
-                #[arg(long = #long_name, #help_attr value_enum)]
+                #[arg(long = #long_name, #help_attr #default_attr value_enum)]
                 pub #name: Option<#inner>,
             };
         }
@@ -471,14 +478,14 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
             TypeKind::Option(inner_ty) => {
                 // Option<T> -> optional arg (already optional)
                 quote! {
-                    #[arg(long = #long_name, #help_attr)]
+                    #[arg(long = #long_name, #help_attr #default_attr)]
                     pub #name: Option<#inner_ty>,
                 }
             }
             TypeKind::Scalar(scalar_ty) | TypeKind::Enum(scalar_ty) => {
                 // Scalar -> wrap in Option for CLI
                 quote! {
-                    #[arg(long = #long_name, #help_attr)]
+                    #[arg(long = #long_name, #help_attr #default_attr)]
                     pub #name: Option<#scalar_ty>,
                 }
             }
@@ -610,11 +617,12 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                 &f.attrs.choices,
                 f.attrs.value_enum,
                 &f.attrs.doc,
+                &f.attrs.default_expr,
             )
         })
         .collect();
 
-    // Generate clap args for update command (all optional)
+    // Generate clap args for update command (all optional, no defaults)
     let update_args: Vec<TokenStream> = mutable_fields
         .iter()
         .map(|f| {
@@ -629,6 +637,7 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                 &f.attrs.choices,
                 f.attrs.value_enum,
                 &f.attrs.doc,
+                &None, // No defaults for update - user is changing existing values
             )
         })
         .collect();
@@ -668,6 +677,21 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                 f.attrs.value_enum,
                 true,
             )
+        })
+        .collect();
+
+    // Generate default value injections for create handler
+    let create_default_injections: Vec<TokenStream> = mutable_fields
+        .iter()
+        .filter_map(|f| {
+            f.attrs.default_expr.as_ref().map(|default_val| {
+                let name_str = f.ident.to_string();
+                quote! {
+                    if __data.get(#name_str).is_none() {
+                        __data[#name_str] = ::serde_json::json!(#default_val);
+                    }
+                }
+            })
         })
         .collect();
 
@@ -890,6 +914,9 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                 // ── Stage 1: Build Data ──
                 let mut __data = ::serde_json::json!({});
                 #(#create_json_fields)*
+
+                // Inject defaults for missing fields
+                #(#create_default_injections)*
 
                 #create_validation_stage
 
