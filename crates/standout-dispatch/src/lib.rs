@@ -59,7 +59,7 @@
 //! [`CommandContext`] provides two mechanisms for dependency injection:
 //!
 //! - **`app_state`**: Immutable, app-lifetime state (database, config, API clients).
-//!   Configured at app build time, shared across all dispatches via `Arc<Extensions>`.
+//!   Configured at app build time, shared across all dispatches via `Rc<Extensions>`.
 //!
 //! - **`extensions`**: Mutable, per-request state. Injected by pre-dispatch hooks
 //!   for request-scoped data like user sessions or request IDs.
@@ -81,10 +81,10 @@
 //! # Features
 //!
 //! - Command routing: Extract command paths from clap `ArgMatches`
-//! - Handler traits: Thread-safe ([`Handler`]) and local ([`LocalHandler`]) variants
+//! - Handler traits: [`Handler`] trait with `&mut self` for mutable state
 //! - Hook system: Pre/post dispatch and post-output hooks for cross-cutting concerns
 //! - State injection: App-level state via `app_state`, per-request state via `extensions`
-//! - Render abstraction: Pluggable render handlers via [`RenderFn`] / [`LocalRenderFn`]
+//! - Render abstraction: Pluggable render handlers via [`RenderFn`]
 //!
 //! # Usage
 //!
@@ -133,8 +133,8 @@ pub use dispatch::{
 
 // Re-export handler types
 pub use handler::{
-    CommandContext, Extensions, FnHandler, Handler, HandlerResult, IntoHandlerResult,
-    LocalFnHandler, LocalHandler, LocalSimpleFnHandler, Output, RunResult, SimpleFnHandler,
+    CommandContext, Extensions, FnHandler, Handler, HandlerResult, IntoHandlerResult, Output,
+    RunResult, SimpleFnHandler,
 };
 
 // Re-export hook types
@@ -144,4 +144,4 @@ pub use hooks::{
 };
 
 // Re-export render abstraction
-pub use render::{from_fn, from_fn_mut, LocalRenderFn, RenderError, RenderFn};
+pub use render::{from_fn, RenderError, RenderFn};

@@ -30,7 +30,7 @@
 //!   Use for: logging, clipboard copy, output filtering.
 
 use std::fmt;
-use std::sync::Arc;
+use std::rc::Rc;
 use thiserror::Error;
 
 use crate::handler::CommandContext;
@@ -209,22 +209,16 @@ impl HookError {
 ///
 /// Pre-dispatch hooks receive mutable access to [`CommandContext`], allowing them
 /// to inject state into `ctx.extensions` that handlers can retrieve.
-pub type PreDispatchFn =
-    Arc<dyn Fn(&ArgMatches, &mut CommandContext) -> Result<(), HookError> + Send + Sync>;
+pub type PreDispatchFn = Rc<dyn Fn(&ArgMatches, &mut CommandContext) -> Result<(), HookError>>;
 
 /// Type alias for post-dispatch hook functions.
-pub type PostDispatchFn = Arc<
-    dyn Fn(&ArgMatches, &CommandContext, serde_json::Value) -> Result<serde_json::Value, HookError>
-        + Send
-        + Sync,
+pub type PostDispatchFn = Rc<
+    dyn Fn(&ArgMatches, &CommandContext, serde_json::Value) -> Result<serde_json::Value, HookError>,
 >;
 
 /// Type alias for post-output hook functions.
-pub type PostOutputFn = Arc<
-    dyn Fn(&ArgMatches, &CommandContext, RenderedOutput) -> Result<RenderedOutput, HookError>
-        + Send
-        + Sync,
->;
+pub type PostOutputFn =
+    Rc<dyn Fn(&ArgMatches, &CommandContext, RenderedOutput) -> Result<RenderedOutput, HookError>>;
 
 /// Per-command hook configuration.
 ///
@@ -269,9 +263,9 @@ impl Hooks {
     /// ```
     pub fn pre_dispatch<F>(mut self, f: F) -> Self
     where
-        F: Fn(&ArgMatches, &mut CommandContext) -> Result<(), HookError> + Send + Sync + 'static,
+        F: Fn(&ArgMatches, &mut CommandContext) -> Result<(), HookError> + 'static,
     {
-        self.pre_dispatch.push(Arc::new(f));
+        self.pre_dispatch.push(Rc::new(f));
         self
     }
 
@@ -283,11 +277,9 @@ impl Hooks {
                 &CommandContext,
                 serde_json::Value,
             ) -> Result<serde_json::Value, HookError>
-            + Send
-            + Sync
             + 'static,
     {
-        self.post_dispatch.push(Arc::new(f));
+        self.post_dispatch.push(Rc::new(f));
         self
     }
 
@@ -295,11 +287,9 @@ impl Hooks {
     pub fn post_output<F>(mut self, f: F) -> Self
     where
         F: Fn(&ArgMatches, &CommandContext, RenderedOutput) -> Result<RenderedOutput, HookError>
-            + Send
-            + Sync
             + 'static,
     {
-        self.post_output.push(Arc::new(f));
+        self.post_output.push(Rc::new(f));
         self
     }
 
@@ -409,11 +399,14 @@ mod tests {
 
     #[test]
     fn test_pre_dispatch_success() {
-        let called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let called = Rc::new(Cell::new(false));
         let called_clone = called.clone();
 
         let hooks = Hooks::new().pre_dispatch(move |_, _| {
-            called_clone.store(true, std::sync::atomic::Ordering::SeqCst);
+            called_clone.set(true);
             Ok(())
         });
 
@@ -422,7 +415,7 @@ mod tests {
         let result = hooks.run_pre_dispatch(&matches, &mut ctx);
 
         assert!(result.is_ok());
-        assert!(called.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(called.get());
     }
 
     #[test]

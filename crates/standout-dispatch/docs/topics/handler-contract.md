@@ -48,61 +48,51 @@ The macro:
 
 ---
 
-## Handler Modes
-
-`standout-dispatch` supports two handler modes:
-
-| Aspect | `Handler` (default) | `LocalHandler` |
-|--------|---------------------|----------------|
-| Self reference | `&self` | `&mut self` |
-| Closure type | `Fn` | `FnMut` |
-| Thread bounds | `Send + Sync` | None |
-| State mutation | Via interior mutability | Direct |
-| Use case | Libraries, async, multi-threaded | Simple CLIs with mutable state |
-
-Choose based on your needs:
-
-- **`Handler`**: Default. Use when handlers are stateless or use interior mutability (`Arc<Mutex<_>>`). Required for potential multi-threading.
-
-- **`LocalHandler`**: Use when your handlers need `&mut self` access without wrapper types. Ideal for single-threaded CLIs.
-
----
-
-## The Handler Trait (Thread-safe)
+## The Handler Trait
 
 ```rust
-pub trait Handler: Send + Sync {
+pub trait Handler {
     type Output: Serialize;
-    fn handle(&self, matches: &ArgMatches, ctx: &CommandContext) -> HandlerResult<Self::Output>;
+    fn handle(&mut self, matches: &ArgMatches, ctx: &CommandContext) -> HandlerResult<Self::Output>;
 }
 ```
 
-Key constraints:
+Key characteristics:
 
-- **Send + Sync required**: Handlers may be called from multiple threads
+- **Mutable self**: `&mut self` allows direct state modification
 - **Output must be Serialize**: Needed for JSON/YAML modes and template context
-- **Immutable references**: Handlers cannot modify arguments or context
 
-Implementing the trait directly is useful when your handler needs internal state—database connections, configuration, etc.
+Implementing the trait directly is useful when your handler needs internal state—database connections, configuration, caches, etc.
 
-### Example: Struct Handler
+### Example: Struct Handler with State
 
 ```rust
 use standout_dispatch::{Handler, Output, CommandContext, HandlerResult};
 use clap::ArgMatches;
 use serde::Serialize;
 
-struct DbHandler {
-    pool: DatabasePool,
-    config: Config,
+struct CachingDatabase {
+    connection: Connection,
+    cache: HashMap<String, Vec<Row>>,
 }
 
-impl Handler for DbHandler {
+impl CachingDatabase {
+    fn query_with_cache(&mut self, sql: &str) -> Result<Vec<Row>, Error> {
+        if let Some(cached) = self.cache.get(sql) {
+            return Ok(cached.clone());
+        }
+        let result = self.connection.execute(sql)?;
+        self.cache.insert(sql.to_string(), result.clone());
+        Ok(result)
+    }
+}
+
+impl Handler for CachingDatabase {
     type Output = Vec<Row>;
 
-    fn handle(&self, matches: &ArgMatches, _ctx: &CommandContext) -> HandlerResult<Vec<Row>> {
+    fn handle(&mut self, matches: &ArgMatches, _ctx: &CommandContext) -> HandlerResult<Vec<Row>> {
         let query: &String = matches.get_one("query").unwrap();
-        let rows = self.pool.query(query)?;
+        let rows = self.query_with_cache(query)?;  // &mut self works!
         Ok(Output::Render(rows))
     }
 }
@@ -117,10 +107,11 @@ Most handlers are simple closures using `FnHandler`:
 ```rust
 use standout_dispatch::{FnHandler, Output, HandlerResult};
 
-let handler = FnHandler::new(|matches, ctx| {
-    let verbose = matches.get_flag("verbose");
-    let items = storage::list()?;
-    Ok(Output::Render(ListResult { items, verbose }))
+let mut counter = 0;
+
+let handler = FnHandler::new(move |_matches, _ctx| {
+    counter += 1;  // Mutation works!
+    Ok(Output::Render(counter))
 });
 ```
 
@@ -128,10 +119,10 @@ The closure signature:
 
 ```rust
 fn(&ArgMatches, &CommandContext) -> HandlerResult<T>
-where T: Serialize + Send + Sync
+where T: Serialize
 ```
 
-Closures must be `Fn` (not `FnMut` or `FnOnce`) for thread safety.
+Closures are `FnMut`, allowing captured variables to be mutated.
 
 ---
 
@@ -153,21 +144,10 @@ The closure signature:
 
 ```rust
 fn(&ArgMatches) -> Result<T, E>
-where T: Serialize + Send + Sync, E: Into<anyhow::Error>
+where T: Serialize, E: Into<anyhow::Error>
 ```
 
 `SimpleFnHandler` automatically wraps the result in `Output::Render` via `IntoHandlerResult`.
-
-For `LocalHandler` equivalent, use `LocalSimpleFnHandler`:
-
-```rust
-use standout_dispatch::LocalSimpleFnHandler;
-
-let handler = LocalSimpleFnHandler::new(|matches| {
-    // No Send + Sync required
-    Ok(items)
-});
-```
 
 ---
 
@@ -195,80 +175,6 @@ The trait is implemented for:
 - `HandlerResult<T>` → passes through unchanged
 
 This is used internally by `SimpleFnHandler` and the `#[handler]` macro.
-
----
-
-## The LocalHandler Trait (Mutable State)
-
-When your handlers need `&mut self` access—common with database connections, file caches, or in-memory indices:
-
-```rust
-pub trait LocalHandler {
-    type Output: Serialize;
-    fn handle(&mut self, matches: &ArgMatches, ctx: &CommandContext) -> HandlerResult<Self::Output>;
-}
-```
-
-Key differences from `Handler`:
-
-- **No Send + Sync**: Handlers don't need to be thread-safe
-- **Mutable self**: `&mut self` allows direct state modification
-- **FnMut closures**: Captured variables can be mutated
-
-### When to Use LocalHandler
-
-Use `LocalHandler` when:
-
-- Your API uses `&mut self` methods (common for file/database operations)
-- You want to avoid `Arc<Mutex<_>>` wrappers
-- Your CLI is single-threaded (the typical case)
-
-### Example: LocalHandler with Cache
-
-```rust
-use standout_dispatch::{LocalHandler, Output, CommandContext, HandlerResult};
-
-struct CachingDatabase {
-    connection: Connection,
-    cache: HashMap<String, Record>,
-}
-
-impl CachingDatabase {
-    fn query_with_cache(&mut self, sql: &str) -> Result<Vec<Row>, Error> {
-        if let Some(cached) = self.cache.get(sql) {
-            return Ok(cached.clone());
-        }
-        let result = self.connection.execute(sql)?;
-        self.cache.insert(sql.to_string(), result.clone());
-        Ok(result)
-    }
-}
-
-impl LocalHandler for CachingDatabase {
-    type Output = Vec<Row>;
-
-    fn handle(&mut self, matches: &ArgMatches, _ctx: &CommandContext) -> HandlerResult<Vec<Row>> {
-        let query: &String = matches.get_one("query").unwrap();
-        let rows = self.query_with_cache(query)?;
-        Ok(Output::Render(rows))
-    }
-}
-```
-
-### Local Closure Handlers
-
-`LocalFnHandler` accepts `FnMut` closures:
-
-```rust
-use standout_dispatch::LocalFnHandler;
-
-let mut counter = 0;
-
-let handler = LocalFnHandler::new(move |_matches, _ctx| {
-    counter += 1;  // Mutation works!
-    Ok(Output::Render(counter))
-});
-```
 
 ---
 
@@ -368,7 +274,7 @@ Binary output bypasses the render function entirely.
 ```rust
 pub struct CommandContext {
     pub command_path: Vec<String>,
-    pub app_state: Arc<Extensions>,
+    pub app_state: Rc<Extensions>,
     pub extensions: Extensions,
 }
 ```
@@ -402,7 +308,7 @@ Configure long-lived resources at build time:
 App::builder()
     .app_state(Database::connect()?)
     .app_state(Config::load()?)
-    .command("list", list_handler, template)
+    .command("list", list_handler, template)?
     .build()?
 ```
 
@@ -501,7 +407,7 @@ App::builder()
             let user = authenticate(matches, db)?;
             ctx.extensions.insert(user);
             Ok(())
-        }))
+        }))?
 ```
 
 > For comprehensive coverage of state management patterns, see [App State and Extensions](app-state.md).
@@ -595,16 +501,16 @@ fn test_handler_with_app_state() {
 }
 ```
 
-### Testing LocalHandlers
+### Testing Handlers with Mutable State
 
-`LocalHandler` tests work the same way, but use `&mut self`:
+Handler tests can verify state mutation across calls:
 
 ```rust
 #[test]
-fn test_local_handler_state_mutation() {
+fn test_handler_state_mutation() {
     struct Counter { count: u32 }
 
-    impl LocalHandler for Counter {
+    impl Handler for Counter {
         type Output = u32;
         fn handle(&mut self, _m: &ArgMatches, _ctx: &CommandContext) -> HandlerResult<u32> {
             self.count += 1;
@@ -628,17 +534,3 @@ fn test_local_handler_state_mutation() {
     assert!(matches!(result, Ok(Output::Render(3))));
 }
 ```
-
----
-
-## Choosing Between Handler and LocalHandler
-
-| Your situation | Use |
-|----------------|-----|
-| Stateless handlers | `FnHandler` + closures |
-| State with `Arc<Mutex<_>>` already | `Handler` trait |
-| API with `&mut self` methods | `LocalHandler` trait |
-| Building a library | `Handler` (consumers might need thread safety) |
-| Simple single-threaded CLI | Either works; `LocalHandler` avoids wrapper types |
-
-The key insight: CLIs are fundamentally single-threaded (parse → run one handler → output → exit). The `Send + Sync` requirement in `Handler` is conventional, not strictly necessary. `LocalHandler` removes this requirement for simpler code when thread safety isn't needed.

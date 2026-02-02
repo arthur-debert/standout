@@ -356,12 +356,12 @@ impl Handler for DbHandler {
 }
 ```
 
-### Local Handlers (Mutable State)
+### Struct Handlers (With State)
 
-When handlers need `&mut self`:
+When handlers need internal state with `&mut self`:
 
 ```rust
-impl LocalHandler for Cache {
+impl Handler for Cache {
     type Output = Data;
 
     fn handle(&mut self, matches: &ArgMatches, _ctx: &CommandContext) -> HandlerResult<Data> {

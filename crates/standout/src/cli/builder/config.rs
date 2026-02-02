@@ -15,7 +15,7 @@ use crate::TemplateRegistry;
 use crate::{EmbeddedStyles, EmbeddedTemplates, Theme};
 use minijinja::Value;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::rc::Rc;
 
 use super::AppBuilder;
 
@@ -140,7 +140,7 @@ impl AppBuilder {
     ///     .run(cmd, args);
     /// ```
     pub fn templates(mut self, templates: EmbeddedTemplates) -> Self {
-        self.template_registry = Some(Arc::new(TemplateRegistry::from(templates)));
+        self.template_registry = Some(Rc::new(TemplateRegistry::from(templates)));
         self
     }
 
@@ -243,11 +243,11 @@ impl AppBuilder {
     /// ```
     pub fn templates_dir<P: AsRef<std::path::Path>>(mut self, path: P) -> Result<Self, SetupError> {
         if self.template_registry.is_none() {
-            self.template_registry = Some(Arc::new(TemplateRegistry::new()));
+            self.template_registry = Some(Rc::new(TemplateRegistry::new()));
         }
 
         let arc = self.template_registry.as_mut().unwrap();
-        match Arc::get_mut(arc) {
+        match Rc::get_mut(arc) {
             Some(registry) => {
                 registry.add_template_dir(path)?;
             }

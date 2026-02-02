@@ -11,7 +11,7 @@
 | **Mutability** | Immutable (`&`) | Mutable (`&mut`) |
 | **Lifetime** | App lifetime | Per-request |
 | **Set by** | `AppBuilder::app_state()` | Pre-dispatch hooks |
-| **Storage** | `Arc<Extensions>` | `Extensions` |
+| **Storage** | `Rc<Extensions>` | `Extensions` |
 | **Use for** | Database, Config, API clients | User sessions, request IDs |
 
 ---
@@ -251,19 +251,15 @@ fn test_list_handler() {
 
 ---
 
-## Thread Safety
+## Single-Threaded Design
 
-App state is wrapped in `Arc<Extensions>`, making it safe to share across threads. The `Extensions` type requires all values to be `Send + Sync`:
+App state is wrapped in `Rc<Extensions>` for cheap cloning within the single-threaded dispatch system. Since CLI apps are fundamentally single-threaded (parse → run one handler → output → exit), there are no thread-safety requirements on app state values.
 
 ```rust
-// This works: Pool is Send + Sync
+// Both work - no Send + Sync requirements
 app_state(Database { pool: Pool::new() })
-
-// This fails: Rc is not Send
-app_state(Wrapper { rc: Rc::new(data) })  // Compile error
+app_state(Wrapper { rc: Rc::new(data) })  // Works fine
 ```
-
-For `LocalApp` (single-threaded), the `Send + Sync` bounds still apply to `app_state` because it uses the same `Extensions` type.
 
 ---
 

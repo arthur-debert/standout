@@ -51,8 +51,8 @@ impl Handler for MyHandler {
     }
 }
 
-// Local handler for mutable state (&mut self, no Send + Sync)
-impl LocalHandler for MyCache {
+// Handlers support mutable state via &mut self
+impl Handler for MyCache {
     type Output = Data;
     fn handle(&mut self, matches: &ArgMatches, ctx: &CommandContext) -> HandlerResult<Data> {
         self.invalidate();  // &mut self works
