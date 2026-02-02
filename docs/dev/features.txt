@@ -140,23 +140,14 @@ Container Annotations:
 DISPATCH
 --------
 
-Handler Modes:
-  - ThreadSafe (default): Handler trait (Send + Sync, &self)
-  - Local: LocalHandler trait (mutable state, &mut self)
-
 App Types:
-  - App<ThreadSafe>: default thread-safe dispatcher
-  - App<Local> / LocalApp: single-threaded with mutable state
-  - AppBuilder: thread-safe application builder
-  - LocalAppBuilder: local application builder
+  - App: single-threaded CLI application
+  - AppBuilder: application builder
 
 Command Handler Types:
-  - Handler trait: thread-safe handler interface
-  - LocalHandler trait: local mutable handler interface
-  - FnHandler<F, T>: closure wrapper for Fn handlers
-  - LocalFnHandler<F, T>: closure wrapper for FnMut handlers
-  - SimpleFnHandler<F, T>: simplified closure variant
-  - LocalSimpleFnHandler<F, T>: local simplified variant
+  - Handler trait: handler interface (&mut self)
+  - FnHandler<F, T>: closure wrapper for FnMut handlers
+  - SimpleFnHandler<F, T>: simplified closure variant (no CommandContext)
 
 Handler Output:
   - Output::Render(data): data to render via template

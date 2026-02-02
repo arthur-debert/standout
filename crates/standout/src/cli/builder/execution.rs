@@ -13,7 +13,7 @@ use std::path::PathBuf;
 
 use super::{AppBuilder, PendingCommand};
 use crate::cli::dispatch::{
-    extract_command_path, get_deepest_matches, has_subcommand, insert_default_command,
+    dispatch, extract_command_path, get_deepest_matches, has_subcommand, insert_default_command,
     DispatchOutput,
 };
 use crate::cli::group::{ErasedConfigRecipe, GroupBuilder, GroupEntry};
@@ -115,7 +115,7 @@ impl AppBuilder {
 
         // Look up handler
         let commands = self.get_commands();
-        if let Some(dispatch) = commands.get(&path_str) {
+        if let Some(dispatch_fn) = commands.get(&path_str) {
             let mut ctx = CommandContext::new(path, self.app_state.clone());
 
             // Get hooks for this command (used for pre-dispatch, post-dispatch, and post-output)
@@ -133,7 +133,8 @@ impl AppBuilder {
 
             // Run the handler (post-dispatch hooks are run inside dispatch function)
             // output_mode is passed separately because CommandContext is render-agnostic
-            let dispatch_output = match dispatch(sub_matches, &ctx, hooks, output_mode) {
+            let dispatch_output = match dispatch(dispatch_fn, sub_matches, &ctx, hooks, output_mode)
+            {
                 Ok(output) => output,
                 Err(e) => return RunResult::Handled(e),
             };

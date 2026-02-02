@@ -13,19 +13,15 @@ use serde::Serialize;
 
 use super::core::AppCore;
 use super::dispatch::{
-    extract_command_path, get_deepest_matches, has_subcommand, insert_default_command,
-    DispatchOutput, Dispatchable,
+    dispatch, extract_command_path, get_deepest_matches, has_subcommand, insert_default_command,
+    DispatchFn, DispatchOutput,
 };
 use super::help::{render_help, render_help_with_topics, HelpConfig};
 use super::hooks::Hooks;
-use super::mode::{HandlerMode, ThreadSafe};
 use super::result::HelpResult;
 use crate::cli::handler::{CommandContext, HandlerResult, Output as HandlerOutput, RunResult};
 use crate::cli::hooks::{HookError, RenderedOutput, TextOutput};
 use std::collections::HashMap;
-
-use super::mode::Local;
-use super::LocalAppBuilder;
 
 /// Gets the current terminal width, or None if not available.
 pub(crate) fn get_terminal_width() -> Option<usize> {
@@ -37,6 +33,12 @@ pub(crate) fn get_terminal_width() -> Option<usize> {
 /// Handles help interception, output flag, topic rendering, command hooks,
 /// and template rendering.
 ///
+/// # Single-Threaded Design
+///
+/// CLI applications are single-threaded: parse args → run one handler → output → exit.
+/// Handlers use `&mut self` and `FnMut`, allowing natural Rust patterns without
+/// forcing interior mutability wrappers (`Arc<Mutex<_>>`).
+///
 /// # Rendering Templates
 ///
 /// When configured with templates and styles, `App` can render templates
@@ -46,37 +48,30 @@ pub(crate) fn get_terminal_width() -> Option<usize> {
 /// use standout::cli::App;
 /// use standout::OutputMode;
 ///
-/// let app = App::<standout::cli::ThreadSafe>::builder()
+/// let app = App::builder()
 ///     .templates(embed_templates!("src/templates"))
 ///     .styles(embed_styles!("src/styles"))
 ///     .build()?;
 ///
 /// let output = app.render("list", &data, OutputMode::Term)?;
 /// ```
-pub struct App<M: HandlerMode = ThreadSafe> {
+pub struct App {
     /// Shared core configuration and functionality.
     pub(crate) core: AppCore,
     /// Topic registry for help topics (App-specific).
     pub(crate) registry: TopicRegistry,
     /// Registered command handlers.
-    pub(crate) commands: HashMap<String, M::DispatchFn>,
+    pub(crate) commands: HashMap<String, DispatchFn>,
 }
 
-impl App<ThreadSafe> {
+impl App {
     /// Creates a new builder for constructing an App instance.
     pub fn builder() -> super::AppBuilder {
         super::AppBuilder::new()
     }
 }
 
-impl App<Local> {
-    /// Creates a new builder for constructing a LocalApp instance.
-    pub fn builder() -> LocalAppBuilder {
-        LocalAppBuilder::new()
-    }
-}
-
-impl<M: HandlerMode> App<M> {
+impl App {
     /// Creates a new App instance with default settings.
     ///
     /// By default:
@@ -213,7 +208,7 @@ impl<M: HandlerMode> App<M> {
         let path = extract_command_path(&matches);
         let path_str = path.join(".");
 
-        if let Some(dispatch) = self.commands.get(&path_str) {
+        if let Some(dispatch_fn) = self.commands.get(&path_str) {
             let mut ctx = CommandContext::new(path, self.core.app_state.clone());
 
             let hooks = self.core.get_hooks(&path_str);
@@ -228,7 +223,8 @@ impl<M: HandlerMode> App<M> {
             let sub_matches = get_deepest_matches(&matches);
 
             // Run the handler (output_mode passed separately as CommandContext is render-agnostic)
-            let dispatch_output = match dispatch.dispatch(sub_matches, &ctx, hooks, output_mode) {
+            let dispatch_output = match dispatch(dispatch_fn, sub_matches, &ctx, hooks, output_mode)
+            {
                 Ok(output) => output,
                 Err(e) => return RunResult::Handled(e),
             };
@@ -674,7 +670,7 @@ mod tests {
 
     #[test]
     fn test_output_flag_enabled_by_default() {
-        let standout = App::<ThreadSafe>::new();
+        let standout = App::new();
         assert!(standout.core.output_flag.is_some());
         assert_eq!(standout.core.output_flag.as_deref(), Some("output"));
     }

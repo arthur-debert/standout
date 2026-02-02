@@ -1,6 +1,6 @@
 use clap::Command;
 use console::Style;
-use standout::cli::{LocalApp, Output};
+use standout::cli::{App, Output};
 use standout::Theme;
 
 #[test]
@@ -11,7 +11,7 @@ fn test_theme_preservation_bug() {
     let theme = Theme::new().add("custom_error", style);
 
     // 2. Build the app
-    let app = LocalApp::builder()
+    let app = App::builder()
         .theme(theme)
         .command(
             "test",

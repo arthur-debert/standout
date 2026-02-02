@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING: Unified `App` and `LocalApp` into single-threaded `App`** - The dual architecture has been removed in favor of a simpler, single-threaded design. CLI applications are fundamentally single-threaded (parse → run one handler → output → exit), so thread-safety bounds were unnecessary complexity.
+
+  **Removed types:**
+  - `LocalApp`, `LocalAppBuilder` (merged into `App`, `AppBuilder`)
+  - `LocalHandler` (merged into `Handler`)
+  - `Local`, `ThreadSafe` marker types
+  - `HandlerMode` trait
+
+  **Key changes:**
+  - `App` now uses `Rc<RefCell<...>>` instead of `Arc<...>`
+  - `Handler::handle()` takes `&mut self` instead of `&self`
+  - Handler functions use `FnMut` instead of `Fn`
+  - `App::builder()` no longer requires generic type parameter
+  - Removed all `Send + Sync` bounds from handler system
+
+  **Migration:**
+  ```rust
+  // Before
+  use standout::cli::{App, ThreadSafe, LocalApp, LocalHandler};
+  App::<ThreadSafe>::builder()
+      .command("list", handler, template)?
+      .build()?
+
+  // After
+  use standout::cli::{App, Handler};
+  App::builder()
+      .command("list", handler, template)?
+      .build()?
+
+  // Handler trait: &self → &mut self
+  impl Handler for MyHandler {
+      fn handle(&mut self, m: &ArgMatches, ctx: &CommandContext) -> HandlerResult<T> {
+          // ...
+      }
+  }
+  ```
+
+  This simplifies the API for the common case (single-threaded CLI apps) while supporting mutable handler state directly without `Arc<Mutex<_>>` wrappers.
+
 ## [3.8.0] - 2026-02-02
 
 ### Changed
@@ -270,7 +311,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **BREAKING: `CommandContext` now includes `app_state` field** - The struct now has three fields: `command_path`, `app_state`, and `extensions`. Code that constructs `CommandContext` manually needs to include `app_state: Arc::new(Extensions::new())` or use `..Default::default()`.
+- **BREAKING: `CommandContext` now includes `app_state` field** - The struct now has three fields: `command_path`, `app_state`, and `extensions`. Code that constructs `CommandContext` manually needs to include `app_state: Rc::new(Extensions::new())` or use `..Default::default()`.
 
 ## [3.3.0] - 2026-01-30
 

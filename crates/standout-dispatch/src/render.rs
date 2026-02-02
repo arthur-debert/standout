@@ -33,19 +33,22 @@
 //! Dispatch calls `render_handler(data)` without knowing what's inside the closure.
 //! All format/theme/template logic lives in the closure, created by the framework layer.
 //!
-//! # Thread Safety
+//! # Single-Threaded Design
 //!
-//! Two variants are provided:
-//! - [`RenderFn`]: Thread-safe (`Send + Sync`), uses `Arc`
-//! - [`LocalRenderFn`]: Single-threaded, uses `Rc<RefCell>`, allows `FnMut`
+//! CLI applications are single-threaded, so render functions use `Rc<RefCell>`
+//! and accept `FnMut` closures for flexible mutable state handling.
 
-use std::sync::Arc;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 /// The render function signature.
 ///
 /// Takes handler data (as JSON) and returns formatted output. The render function
 /// is a closure that captures all rendering context (format, theme, templates, etc.)
 /// so dispatch doesn't need to know about any of it.
+///
+/// Uses `Rc<RefCell>` since CLI applications are single-threaded, and accepts
+/// `FnMut` closures for flexible mutable state handling.
 ///
 /// # Example
 ///
@@ -59,14 +62,7 @@ use std::sync::Arc;
 ///     }
 /// });
 /// ```
-pub type RenderFn = Arc<dyn Fn(&serde_json::Value) -> Result<String, RenderError> + Send + Sync>;
-
-/// A local (non-Send) render function for single-threaded use.
-///
-/// Unlike [`RenderFn`], this uses `Rc<RefCell>` and allows `FnMut` closures,
-/// enabling mutable state in the render handler without `Send + Sync` overhead.
-pub type LocalRenderFn =
-    std::rc::Rc<std::cell::RefCell<dyn FnMut(&serde_json::Value) -> Result<String, RenderError>>>;
+pub type RenderFn = Rc<RefCell<dyn FnMut(&serde_json::Value) -> Result<String, RenderError>>>;
 
 /// Errors that can occur during rendering.
 #[derive(Debug, thiserror::Error)]
@@ -95,6 +91,8 @@ impl From<serde_json::Error> for RenderError {
 /// This is the primary way to provide custom rendering logic. The closure
 /// should capture any context it needs (format, theme, templates, etc.).
 ///
+/// Accepts `FnMut` closures, allowing mutable state in the render handler.
+///
 /// # Example
 ///
 /// ```rust
@@ -106,20 +104,9 @@ impl From<serde_json::Error> for RenderError {
 /// ```
 pub fn from_fn<F>(f: F) -> RenderFn
 where
-    F: Fn(&serde_json::Value) -> Result<String, RenderError> + Send + Sync + 'static,
-{
-    Arc::new(f)
-}
-
-/// Creates a local render function from a FnMut closure.
-///
-/// Use this when the render handler needs mutable state and doesn't need
-/// to be thread-safe.
-pub fn from_fn_mut<F>(f: F) -> LocalRenderFn
-where
     F: FnMut(&serde_json::Value) -> Result<String, RenderError> + 'static,
 {
-    std::rc::Rc::new(std::cell::RefCell::new(f))
+    Rc::new(RefCell::new(f))
 }
 
 #[cfg(test)]
@@ -135,7 +122,7 @@ mod tests {
         });
 
         let data = json!({"name": "test"});
-        let result = render(&data).unwrap();
+        let result = render.borrow_mut()(&data).unwrap();
         assert!(result.contains("\"name\": \"test\""));
     }
 
@@ -150,17 +137,23 @@ mod tests {
         });
 
         let data = json!({"name": "world"});
-        let result = render(&data).unwrap();
+        let result = render.borrow_mut()(&data).unwrap();
         assert_eq!(result, "Hello, world!");
     }
 
     #[test]
-    fn test_from_fn_mut() {
-        let render = from_fn_mut(|data| Ok(data.to_string()));
+    fn test_from_fn_mutable_state() {
+        let mut call_count = 0;
+        let render = from_fn(move |data| {
+            call_count += 1;
+            Ok(format!("Call {}: {}", call_count, data))
+        });
 
         let data = json!({"key": "value"});
-        let result = render.borrow_mut()(&data).unwrap();
-        assert!(result.contains("key"));
+        let result1 = render.borrow_mut()(&data).unwrap();
+        let result2 = render.borrow_mut()(&data).unwrap();
+        assert!(result1.contains("Call 1"));
+        assert!(result2.contains("Call 2"));
     }
 
     #[test]

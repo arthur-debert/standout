@@ -56,7 +56,7 @@ use super::theme::Theme;
 use minijinja::Value;
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::sync::Arc;
+use std::rc::Rc;
 
 /// Information available at render time for dynamic context providers.
 ///
@@ -171,10 +171,11 @@ impl<'a> RenderContext<'a> {
 /// };
 /// ```
 ///
-/// # Thread Safety
+/// # Single-Threaded Design
 ///
-/// All context providers must be `Send + Sync` to support concurrent rendering.
-pub trait ContextProvider: Send + Sync {
+/// CLI applications are single-threaded, so context providers don't require
+/// `Send + Sync` bounds.
+pub trait ContextProvider {
     /// Produce a context object for the given render context.
     ///
     /// The returned value will be made available in templates under the
@@ -185,7 +186,7 @@ pub trait ContextProvider: Send + Sync {
 /// Blanket implementation for closures that return values convertible to minijinja::Value.
 impl<F> ContextProvider for F
 where
-    F: Fn(&RenderContext) -> Value + Send + Sync,
+    F: Fn(&RenderContext) -> Value,
 {
     fn provide(&self, ctx: &RenderContext) -> Value {
         (self)(ctx)
@@ -216,10 +217,10 @@ impl ContextProvider for StaticProvider {
 
 /// Storage for context entries, supporting both static and dynamic providers.
 ///
-/// `ContextRegistry` is cheap to clone since it stores providers as `Arc`.
+/// `ContextRegistry` is cheap to clone since it stores providers as `Rc`.
 #[derive(Default, Clone)]
 pub struct ContextRegistry {
-    providers: HashMap<String, Arc<dyn ContextProvider>>,
+    providers: HashMap<String, Rc<dyn ContextProvider>>,
 }
 
 impl ContextRegistry {
@@ -233,7 +234,7 @@ impl ContextRegistry {
     /// The value will be available in templates under the given name.
     pub fn add_static(&mut self, name: impl Into<String>, value: Value) {
         self.providers
-            .insert(name.into(), Arc::new(StaticProvider::new(value)));
+            .insert(name.into(), Rc::new(StaticProvider::new(value)));
     }
 
     /// Registers a dynamic context provider.
@@ -244,7 +245,7 @@ impl ContextRegistry {
         name: impl Into<String>,
         provider: P,
     ) {
-        self.providers.insert(name.into(), Arc::new(provider));
+        self.providers.insert(name.into(), Rc::new(provider));
     }
 
     /// Returns true if the registry has no entries.

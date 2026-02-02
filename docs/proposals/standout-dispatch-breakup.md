@@ -36,11 +36,11 @@ Each library crate is independently useful. The `standout` crate becomes the int
 
 **Owns:**
 - Command routing (name → handler mapping)
-- Handler traits (`Handler`, `LocalHandler`, `FnHandler`, `LocalFnHandler`)
+- Handler traits (`Handler`, `FnHandler`)
 - Handler result types (`Output<T>`, `HandlerResult<T>`, `RunResult`)
 - Execution context (`CommandContext`)
 - Hook system (`Hooks`, `HookError`, `RenderedOutput`)
-- App/LocalApp structs and builders (generic over render function)
+- App struct and builder (single-threaded, supports FnMut handlers)
 - `OutputMode` enum (all variants: Auto, Term, TermDebug, Text, Json, Yaml, Csv, Xml)
 - Auto mode detection (TTY capability check)
 - Structured serialization (JSON, YAML, CSV, XML) — bypasses render entirely
@@ -86,7 +86,7 @@ Each library crate is independently useful. The `standout` crate becomes the int
 
 **Owns:**
 - Integration of standout-dispatch with standout-render
-- `App` and `LocalApp` type aliases with standout rendering
+- `App` type alias with standout rendering
 - Builder conveniences that wire templates/themes to dispatch
 - Help topics system (requires both dispatch and render)
 - Re-exports for ergonomic imports

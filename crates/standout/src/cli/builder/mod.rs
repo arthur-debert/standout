@@ -37,14 +37,13 @@ use crate::{OutputMode, Theme};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::rc::Rc;
 
 use super::app::App;
 use super::dispatch::DispatchFn;
 use super::group::CommandRecipe;
 use super::handler::Extensions;
 use super::hooks::Hooks;
-use super::mode::ThreadSafe;
 
 /// Stores a pending command recipe along with its resolved template.
 struct PendingCommand {
@@ -59,7 +58,7 @@ struct PendingCommand {
 /// ```rust
 /// use standout::cli::App;
 ///
-/// let standout = App::<standout::cli::ThreadSafe>::builder()
+/// let standout = App::builder()
 ///     .topics_dir(".").unwrap()
 ///     .output_flag(Some("format"))
 ///     .build();
@@ -75,7 +74,7 @@ struct PendingCommand {
 /// use crate::context::RenderContext;
 /// use minijinja::Value;
 ///
-/// App::<standout::cli::ThreadSafe>::builder()
+/// App::builder()
 ///     // Static context
 ///     .context("app_version", Value::from("1.0.0"))
 ///
@@ -98,7 +97,7 @@ pub struct AppBuilder {
     /// Stylesheet registry (built from embedded styles)
     pub(crate) stylesheet_registry: Option<crate::StylesheetRegistry>,
     /// Template registry (built from embedded templates)
-    pub(crate) template_registry: Option<Arc<TemplateRegistry>>,
+    pub(crate) template_registry: Option<Rc<TemplateRegistry>>,
     pub(crate) default_theme_name: Option<String>,
     /// Pending commands - closures are created lazily at dispatch time
     pending_commands: RefCell<HashMap<String, PendingCommand>>,
@@ -116,14 +115,14 @@ pub struct AppBuilder {
     pub(crate) include_framework_styles: bool,
     /// App-level state shared across all dispatches.
     ///
-    /// Stored as `Arc<Extensions>` so it can be cloned cheaply into CommandContext.
-    /// During builder phase, `Arc::get_mut` is used since only the builder holds the Arc.
-    pub(crate) app_state: Arc<Extensions>,
+    /// Stored as `Rc<Extensions>` so it can be cloned cheaply into CommandContext.
+    /// During builder phase, `Rc::get_mut` is used since only the builder holds the Rc.
+    pub(crate) app_state: Rc<Extensions>,
 
     /// Optional template engine.
     ///
     /// If not provided, a default MiniJinja engine will be created.
-    pub(crate) template_engine: Arc<Box<dyn standout_render::template::TemplateEngine>>,
+    pub(crate) template_engine: Rc<Box<dyn standout_render::template::TemplateEngine>>,
 }
 
 impl Default for AppBuilder {
@@ -155,14 +154,14 @@ impl AppBuilder {
             default_command: None,
             include_framework_templates: true,
             include_framework_styles: true,
-            app_state: Arc::new(Extensions::new()),
-            template_engine: Arc::new(Box::new(standout_render::template::MiniJinjaEngine::new())),
+            app_state: Rc::new(Extensions::new()),
+            template_engine: Rc::new(Box::new(standout_render::template::MiniJinjaEngine::new())),
         }
     }
 
     /// Adds app-level state that will be available to all handlers.
     ///
-    /// App state is immutable and shared across all dispatches via `Arc<Extensions>`.
+    /// App state is immutable and shared across all dispatches via `Rc<Extensions>`.
     /// Use for long-lived resources like database connections, configuration, and
     /// API clients.
     ///
@@ -178,7 +177,7 @@ impl AppBuilder {
     ///     requests: AtomicUsize,
     /// }
     ///
-    /// let app = App::<standout::cli::ThreadSafe>::builder()
+    /// let app = App::builder()
     ///     .app_state(Metrics { requests: AtomicUsize::new(0) })
     ///     .command("test", |_m, ctx| {
     ///         let metrics = ctx.app_state.get_required::<Metrics>()?;
@@ -219,10 +218,10 @@ impl AppBuilder {
     ///     .app_state(Config { debug: false })
     ///     .app_state(Config { debug: true })  // Replaces previous Config
     /// ```
-    pub fn app_state<T: Send + Sync + 'static>(mut self, value: T) -> Self {
-        // During builder phase, only the builder holds the Arc, so get_mut succeeds.
-        Arc::get_mut(&mut self.app_state)
-            .expect("app_state Arc should be exclusively owned during builder phase")
+    pub fn app_state<T: 'static>(mut self, value: T) -> Self {
+        // During builder phase, only the builder holds the Rc, so get_mut succeeds.
+        Rc::get_mut(&mut self.app_state)
+            .expect("app_state Rc should be exclusively owned during builder phase")
             .insert(value);
         self
     }
@@ -234,7 +233,7 @@ impl AppBuilder {
         mut self,
         engine: Box<dyn standout_render::template::TemplateEngine>,
     ) -> Self {
-        self.template_engine = Arc::new(engine);
+        self.template_engine = Rc::new(engine);
         self
     }
 
@@ -294,12 +293,12 @@ impl AppBuilder {
     /// # Example
     ///
     /// ```rust,ignore
-    /// let standout = App::<standout::cli::ThreadSafe>::builder()
+    /// let standout = App::builder()
     ///     .styles(embed_styles!("src/styles"))
     ///     .default_theme("dark")
     ///     .build()?;
     /// ```
-    pub fn build(mut self) -> Result<App<ThreadSafe>, SetupError> {
+    pub fn build(mut self) -> Result<App, SetupError> {
         use super::core::AppCore;
         use crate::assets::FRAMEWORK_TEMPLATES;
 
@@ -308,7 +307,7 @@ impl AppBuilder {
             match self.template_registry.as_mut() {
                 Some(arc) => {
                     // Get mutable access to the registry
-                    if let Some(registry) = Arc::get_mut(arc) {
+                    if let Some(registry) = Rc::get_mut(arc) {
                         registry.add_framework_entries(FRAMEWORK_TEMPLATES);
                     } else {
                         // Shouldn't happen during build before finalization
@@ -319,15 +318,15 @@ impl AppBuilder {
                     // Create new registry with just framework templates
                     let mut registry = TemplateRegistry::new();
                     registry.add_framework_entries(FRAMEWORK_TEMPLATES);
-                    self.template_registry = Some(Arc::new(registry));
+                    self.template_registry = Some(Rc::new(registry));
                 }
             };
         }
 
         // Populate engine with templates from registry
-        // We use Arc::get_mut to mutate the engine in-place before sharing it
+        // We use Rc::get_mut to mutate the engine in-place before sharing it
         if let Some(registry) = &self.template_registry {
-            if let Some(engine_box) = Arc::get_mut(&mut self.template_engine) {
+            if let Some(engine_box) = Rc::get_mut(&mut self.template_engine) {
                 for name in registry.names() {
                     if let Ok(content) = registry.get_content(name) {
                         let _ = engine_box.add_template(name, &content);
@@ -368,7 +367,7 @@ impl AppBuilder {
             None
         };
 
-        // Template registry is already Arc (or None)
+        // Template registry is already Rc (or None)
         let template_registry = self.template_registry.take();
 
         // Build the AppCore with all shared configuration

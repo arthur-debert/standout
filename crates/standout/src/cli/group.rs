@@ -9,8 +9,9 @@ use crate::Theme;
 
 use clap::ArgMatches;
 use serde::Serialize;
+use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::rc::Rc;
 
 use super::dispatch::{render_handler_output, DispatchFn};
 use crate::cli::handler::{CommandContext, FnHandler, Handler, HandlerResult};
@@ -27,7 +28,7 @@ use standout_pipe::PipeTarget;
 /// allows creating dispatch closures on demand without consuming the recipe.
 /// This enables deferred closure creation where the theme and context_registry
 /// are captured at dispatch time rather than at registration time.
-pub(crate) trait CommandRecipe: Send + Sync {
+pub(crate) trait CommandRecipe {
     /// Returns the template for this command, if explicitly set.
     #[allow(dead_code)]
     fn template(&self) -> Option<&str>;
@@ -48,29 +49,29 @@ pub(crate) trait CommandRecipe: Send + Sync {
         template: &str,
         context_registry: &ContextRegistry,
         theme: &Theme,
-        template_engine: Arc<Box<dyn standout_render::template::TemplateEngine>>,
+        template_engine: Rc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn;
 }
 
 /// Recipe for closure-based command handlers.
 pub(crate) struct ClosureRecipe<F, T>
 where
-    F: Fn(&ArgMatches, &CommandContext) -> HandlerResult<T> + Send + Sync + 'static,
-    T: Serialize + Send + Sync + 'static,
+    F: FnMut(&ArgMatches, &CommandContext) -> HandlerResult<T> + 'static,
+    T: Serialize + 'static,
 {
-    handler: Arc<FnHandler<F, T>>,
+    handler: Rc<RefCell<FnHandler<F, T>>>,
     template: Option<String>,
     hooks: Option<Hooks>,
 }
 
 impl<F, T> ClosureRecipe<F, T>
 where
-    F: Fn(&ArgMatches, &CommandContext) -> HandlerResult<T> + Send + Sync + 'static,
-    T: Serialize + Send + Sync + 'static,
+    F: FnMut(&ArgMatches, &CommandContext) -> HandlerResult<T> + 'static,
+    T: Serialize + 'static,
 {
     pub fn new(handler: FnHandler<F, T>) -> Self {
         Self {
-            handler: Arc::new(handler),
+            handler: Rc::new(RefCell::new(handler)),
             template: None,
             hooks: None,
         }
@@ -91,8 +92,8 @@ where
 
 impl<F, T> CommandRecipe for ClosureRecipe<F, T>
 where
-    F: Fn(&ArgMatches, &CommandContext) -> HandlerResult<T> + Send + Sync + 'static,
-    T: Serialize + Send + Sync + 'static,
+    F: FnMut(&ArgMatches, &CommandContext) -> HandlerResult<T> + 'static,
+    T: Serialize + 'static,
 {
     fn template(&self) -> Option<&str> {
         self.template.as_deref()
@@ -111,19 +112,22 @@ where
         template: &str,
         context_registry: &ContextRegistry,
         theme: &Theme,
-        template_engine: Arc<Box<dyn standout_render::template::TemplateEngine>>,
+        template_engine: Rc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn {
         let handler = self.handler.clone();
         let template = template.to_string();
         let context_registry = context_registry.clone();
         let theme = theme.clone();
 
-        Arc::new(
+        Rc::new(RefCell::new(
             move |matches: &ArgMatches,
                   ctx: &CommandContext,
                   hooks: Option<&Hooks>,
                   output_mode: crate::OutputMode| {
-                let result = handler.handle(matches, ctx).map_err(|e| e.to_string());
+                let result = handler
+                    .borrow_mut()
+                    .handle(matches, ctx)
+                    .map_err(|e| e.to_string());
                 render_handler_output(
                     result,
                     matches,
@@ -136,17 +140,17 @@ where
                     output_mode,
                 )
             },
-        )
+        ))
     }
 }
 
 /// Recipe for struct-based command handlers.
 pub(crate) struct StructRecipe<H, T>
 where
-    H: Handler<Output = T> + Send + Sync + 'static,
-    T: Serialize + Send + Sync + 'static,
+    H: Handler<Output = T> + 'static,
+    T: Serialize + 'static,
 {
-    handler: Arc<H>,
+    handler: Rc<RefCell<H>>,
     #[allow(dead_code)]
     template: Option<String>,
     hooks: Option<Hooks>,
@@ -155,12 +159,12 @@ where
 
 impl<H, T> StructRecipe<H, T>
 where
-    H: Handler<Output = T> + Send + Sync + 'static,
-    T: Serialize + Send + Sync + 'static,
+    H: Handler<Output = T> + 'static,
+    T: Serialize + 'static,
 {
     pub fn new(handler: H) -> Self {
         Self {
-            handler: Arc::new(handler),
+            handler: Rc::new(RefCell::new(handler)),
             template: None,
             hooks: None,
             _phantom: std::marker::PhantomData,
@@ -182,8 +186,8 @@ where
 
 impl<H, T> CommandRecipe for StructRecipe<H, T>
 where
-    H: Handler<Output = T> + Send + Sync + 'static,
-    T: Serialize + Send + Sync + 'static,
+    H: Handler<Output = T> + 'static,
+    T: Serialize + 'static,
 {
     fn template(&self) -> Option<&str> {
         self.template.as_deref()
@@ -202,19 +206,22 @@ where
         template: &str,
         context_registry: &ContextRegistry,
         theme: &Theme,
-        template_engine: Arc<Box<dyn standout_render::template::TemplateEngine>>,
+        template_engine: Rc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn {
         let handler = self.handler.clone();
         let template = template.to_string();
         let context_registry = context_registry.clone();
         let theme = theme.clone();
 
-        Arc::new(
+        Rc::new(RefCell::new(
             move |matches: &ArgMatches,
                   ctx: &CommandContext,
                   hooks: Option<&Hooks>,
                   output_mode: crate::OutputMode| {
-                let result = handler.handle(matches, ctx).map_err(|e| e.to_string());
+                let result = handler
+                    .borrow_mut()
+                    .handle(matches, ctx)
+                    .map_err(|e| e.to_string());
                 render_handler_output(
                     result,
                     matches,
@@ -227,31 +234,31 @@ where
                     output_mode,
                 )
             },
-        )
+        ))
     }
 }
 
 /// Wrapper around ErasedCommandConfig that implements CommandRecipe.
 ///
 /// This allows group-registered commands to use the deferred closure pattern.
-/// The inner config is wrapped in a Mutex to allow interior mutability.
+/// The inner config is wrapped in RefCell to allow interior mutability.
 pub(crate) struct ErasedConfigRecipe {
-    config: std::sync::Mutex<Option<Box<dyn ErasedCommandConfig + Send>>>,
+    config: RefCell<Option<Box<dyn ErasedCommandConfig>>>,
     #[allow(dead_code)]
     template: Option<String>,
     #[allow(dead_code)]
-    hooks: std::sync::Mutex<Option<Hooks>>,
+    hooks: RefCell<Option<Hooks>>,
 }
 
 impl ErasedConfigRecipe {
     /// Creates a new recipe from an existing boxed handler (for group registration).
-    pub fn from_handler(mut handler: Box<dyn ErasedCommandConfig + Send>) -> Self {
+    pub fn from_handler(mut handler: Box<dyn ErasedCommandConfig>) -> Self {
         let template = handler.template().map(String::from);
         let hooks = handler.take_hooks();
         Self {
-            config: std::sync::Mutex::new(Some(handler)),
+            config: RefCell::new(Some(handler)),
             template,
-            hooks: std::sync::Mutex::new(hooks),
+            hooks: RefCell::new(hooks),
         }
     }
 }
@@ -262,12 +269,12 @@ impl CommandRecipe for ErasedConfigRecipe {
     }
 
     fn hooks(&self) -> Option<&Hooks> {
-        // Can't return reference through mutex, but hooks are extracted during construction
+        // Can't return reference through RefCell, but hooks are extracted during construction
         None
     }
 
     fn take_hooks(&mut self) -> Option<Hooks> {
-        self.hooks.lock().unwrap().take()
+        self.hooks.borrow_mut().take()
     }
 
     fn create_dispatch(
@@ -275,12 +282,11 @@ impl CommandRecipe for ErasedConfigRecipe {
         template: &str,
         context_registry: &ContextRegistry,
         theme: &Theme,
-        template_engine: Arc<Box<dyn standout_render::template::TemplateEngine>>,
+        template_engine: Rc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn {
         let config = self
             .config
-            .lock()
-            .unwrap()
+            .borrow_mut()
             .take()
             .expect("ErasedConfigRecipe::create_dispatch called more than once");
         config.register(
@@ -335,8 +341,6 @@ impl<H> CommandConfig<H> {
     pub fn pre_dispatch<F>(mut self, f: F) -> Self
     where
         F: Fn(&ArgMatches, &mut CommandContext) -> Result<(), crate::cli::hooks::HookError>
-            + Send
-            + Sync
             + 'static,
     {
         let hooks = self.hooks.take().unwrap_or_default();
@@ -352,8 +356,6 @@ impl<H> CommandConfig<H> {
                 &CommandContext,
                 serde_json::Value,
             ) -> Result<serde_json::Value, crate::cli::hooks::HookError>
-            + Send
-            + Sync
             + 'static,
     {
         let hooks = self.hooks.take().unwrap_or_default();
@@ -370,8 +372,6 @@ impl<H> CommandConfig<H> {
                 crate::cli::hooks::RenderedOutput,
             )
                 -> Result<crate::cli::hooks::RenderedOutput, crate::cli::hooks::HookError>
-            + Send
-            + Sync
             + 'static,
     {
         let hooks = self.hooks.take().unwrap_or_default();
@@ -522,9 +522,9 @@ impl<H> CommandConfig<H> {
     /// The raw output (without ANSI codes) is piped to the target.
     pub fn pipe_with<P>(self, target: P) -> Self
     where
-        P: standout_pipe::PipeTarget + Send + Sync + 'static,
+        P: standout_pipe::PipeTarget + 'static,
     {
-        let target = std::sync::Arc::new(target);
+        let target = Rc::new(target);
         self.post_output(move |_matches, _ctx, output| {
             if let RenderedOutput::Text(ref text_output) = output {
                 // Pipe the raw output (no ANSI codes)
@@ -543,7 +543,7 @@ impl<H> CommandConfig<H> {
 pub(crate) enum GroupEntry {
     /// A leaf command with handler, optional template, and optional hooks
     Command {
-        handler: Box<dyn ErasedCommandConfig + Send + Sync>,
+        handler: Box<dyn ErasedCommandConfig>,
     },
     /// A nested group
     Group { builder: GroupBuilder },
@@ -561,7 +561,7 @@ pub(crate) trait ErasedCommandConfig {
         template: String,
         context_registry: ContextRegistry,
         theme: Theme,
-        template_engine: Arc<Box<dyn standout_render::template::TemplateEngine>>,
+        template_engine: Rc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn;
 }
 
@@ -628,8 +628,8 @@ impl GroupBuilder {
     /// ```
     pub fn command<F, T>(self, name: &str, handler: F) -> Self
     where
-        F: Fn(&ArgMatches, &CommandContext) -> HandlerResult<T> + Send + Sync + 'static,
-        T: Serialize + Send + Sync + 'static,
+        F: FnMut(&ArgMatches, &CommandContext) -> HandlerResult<T> + 'static,
+        T: Serialize + 'static,
     {
         self.command_with(name, handler, |cfg| cfg)
     }
@@ -646,8 +646,8 @@ impl GroupBuilder {
     /// ```
     pub fn command_with<F, T, C>(mut self, name: &str, handler: F, configure: C) -> Self
     where
-        F: Fn(&ArgMatches, &CommandContext) -> HandlerResult<T> + Send + Sync + 'static,
-        T: Serialize + Send + Sync + 'static,
+        F: FnMut(&ArgMatches, &CommandContext) -> HandlerResult<T> + 'static,
+        T: Serialize + 'static,
         C: FnOnce(CommandConfig<FnHandler<F, T>>) -> CommandConfig<FnHandler<F, T>>,
     {
         let config = CommandConfig::new(FnHandler::new(handler));
@@ -656,7 +656,7 @@ impl GroupBuilder {
             name.to_string(),
             GroupEntry::Command {
                 handler: Box::new(ClosureCommandConfig {
-                    handler: config.handler,
+                    handler: Rc::new(RefCell::new(config.handler)),
                     template: config.template,
                     hooks: config.hooks,
                 }),
@@ -687,7 +687,7 @@ impl GroupBuilder {
             name.to_string(),
             GroupEntry::Command {
                 handler: Box::new(StructCommandConfig {
-                    handler: config.handler,
+                    handler: Rc::new(RefCell::new(config.handler)),
                     template: config.template,
                     hooks: config.hooks,
                 }),
@@ -749,18 +749,18 @@ impl GroupBuilder {
 /// Internal: closure-based command config that implements ErasedCommandConfig
 struct ClosureCommandConfig<F, T>
 where
-    F: Fn(&ArgMatches, &CommandContext) -> HandlerResult<T> + Send + Sync + 'static,
-    T: Serialize + Send + Sync + 'static,
+    F: FnMut(&ArgMatches, &CommandContext) -> HandlerResult<T> + 'static,
+    T: Serialize + 'static,
 {
-    handler: FnHandler<F, T>,
+    handler: Rc<RefCell<FnHandler<F, T>>>,
     template: Option<String>,
     hooks: Option<Hooks>,
 }
 
 impl<F, T> ErasedCommandConfig for ClosureCommandConfig<F, T>
 where
-    F: Fn(&ArgMatches, &CommandContext) -> HandlerResult<T> + Send + Sync + 'static,
-    T: Serialize + Send + Sync + 'static,
+    F: FnMut(&ArgMatches, &CommandContext) -> HandlerResult<T> + 'static,
+    T: Serialize + 'static,
 {
     fn template(&self) -> Option<&str> {
         self.template.as_deref()
@@ -780,16 +780,19 @@ where
         template: String,
         context_registry: ContextRegistry,
         theme: Theme,
-        template_engine: Arc<Box<dyn standout_render::template::TemplateEngine>>,
+        template_engine: Rc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn {
-        let handler = Arc::new(self.handler);
+        let handler = self.handler;
 
-        Arc::new(
+        Rc::new(RefCell::new(
             move |matches: &ArgMatches,
                   ctx: &CommandContext,
                   hooks: Option<&Hooks>,
                   output_mode: crate::OutputMode| {
-                let result = handler.handle(matches, ctx).map_err(|e| e.to_string());
+                let result = handler
+                    .borrow_mut()
+                    .handle(matches, ctx)
+                    .map_err(|e| e.to_string());
                 render_handler_output(
                     result,
                     matches,
@@ -802,7 +805,7 @@ where
                     output_mode,
                 )
             },
-        )
+        ))
     }
 }
 
@@ -812,7 +815,7 @@ where
     H: Handler<Output = T> + 'static,
     T: Serialize + 'static,
 {
-    handler: H,
+    handler: Rc<RefCell<H>>,
     template: Option<String>,
     hooks: Option<Hooks>,
 }
@@ -840,16 +843,19 @@ where
         template: String,
         context_registry: ContextRegistry,
         theme: Theme,
-        template_engine: Arc<Box<dyn standout_render::template::TemplateEngine>>,
+        template_engine: Rc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn {
-        let handler = Arc::new(self.handler);
+        let handler = self.handler;
 
-        Arc::new(
+        Rc::new(RefCell::new(
             move |matches: &ArgMatches,
                   ctx: &CommandContext,
                   hooks: Option<&Hooks>,
                   output_mode: crate::OutputMode| {
-                let result = handler.handle(matches, ctx).map_err(|e| e.to_string());
+                let result = handler
+                    .borrow_mut()
+                    .handle(matches, ctx)
+                    .map_err(|e| e.to_string());
                 render_handler_output(
                     result,
                     matches,
@@ -862,7 +868,7 @@ where
                     output_mode,
                 )
             },
-        )
+        ))
     }
 }
 

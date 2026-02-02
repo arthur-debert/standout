@@ -6,14 +6,13 @@
 
 Standout is designed to be flexible. It supports:
 - **8 Output Modes** (Auto, Term, Text, TermDebug, Json, Yaml, Xml, Csv)
-- **2 Handler Modes** (ThreadSafe, Local)
 - **3 Template Sources** (Embedded, File, None)
 - **4 Style Sources** (Embedded, File, Programmatic, None)
 - **2 Help Systems** (Standard, Topics)
 
-This creates a combinatorial explosion of **1,152+ possible configurations**.
+This creates a combinatorial explosion of **576+ possible configurations**.
 
-In early versions, we relied on manual testing and "happy path" assumptions. This led to fragility where a feature would work in `Term` mode but break in `Json` mode, or work in `App` but panic in `LocalApp`.
+In early versions, we relied on manual testing and "happy path" assumptions. This led to fragility where a feature would work in `Term` mode but break in `Json` mode.
 
 Trust in the system requires that we cannot rely on manual verification. We must design for mathematical correctness.
 
@@ -35,7 +34,6 @@ To manage this complexity, we adhere to three core pillars:
 
 **Principle**: Logic should be defined once, generically.
 
-- **Rule**: Avoid `App` vs `LocalApp` code duplication. Use `App<M: HandlerMode>`.
 - **Rule**: If you find yourself copying a method "just to change one type", refactor into a trait or generic struct.
 - **Rule**: The rendering core (`standout` without `clap`) must remain pure and oblivious to CLI concerns.
 
@@ -49,19 +47,19 @@ To manage this complexity, we adhere to three core pillars:
 
 ## 3. Architecture Guide
 
-### The Generic App Pattern
+### The App Pattern
 
 The core abstraction of the CLI layer is:
 
 ```rust
-pub struct App<M: HandlerMode> {
-    builder: AppBuilder<M>,
+pub struct App {
+    builder: AppBuilder,
     // ... shared state
 }
 ```
 
-- `M: HandlerMode` allows us to abstract over `Send + Sync` (ThreadSafe) vs `!Send` (Local) handlers without duplicating the dispatch logic.
-- Dispatch logic lives in `core` or generic `impl` blocks.
+- `App` uses single-threaded dispatch with `FnMut` handlers and `Rc<RefCell<...>>` storage.
+- CLI apps are fundamentally single-threaded (parse → run one handler → output → exit), so thread-safety bounds are unnecessary.
 
 ### Error Handling
 
@@ -78,8 +76,8 @@ When proposing changes, evaluate against this checklist:
     - If yes: Have you added it to the `proptest` strategy?
 - [ ] **Safety**: Does this introduce any `unwrap()` or `expect()`?
     - If yes: Can it be replaced by `Result` propagation?
-- [ ] **Duplication**: Did you copy logic from `App` to `LocalApp` (or vice versa)?
-    - If yes: Stop. Refactor to a shared generic implementation.
+- [ ] **Duplication**: Did you copy logic unnecessarily?
+    - If yes: Stop. Refactor to a shared implementation.
 - [ ] **Verification**: Did you include a snapshot test for the UI output?
 
 ## 5. Development Workflow

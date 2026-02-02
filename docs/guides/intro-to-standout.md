@@ -695,12 +695,12 @@ See [Output Piping](../crates/standout-pipe/docs/topics/piping.md) for the full 
 
 Aside from exposing the library primitives, Standout leverages best-in-breed crates like MiniJinja and console::Style under the hood. The lock-in is really negligible: you can use Standout's BB parser or swap it, manually dispatch handlers, and use the renderers directly in your clap dispatch.
 
-## Mutable Handlers (LocalApp)
+## Mutable Handlers
 
-If your application logic uses `&mut self` methods—common with database connections, file caches, or in-memory indices—you can use `LocalApp` instead of `App`:
+`App` supports `FnMut` closures and mutable handler state directly—no wrappers needed. This is common with database connections, file caches, or in-memory indices:
 
 ```rust
-use standout::cli::{LocalApp, Output};
+use standout::cli::{App, Output};
 use standout::embed_templates;
 
 struct PadStore {
@@ -718,37 +718,29 @@ impl PadStore {
 fn main() -> anyhow::Result<()> {
     let mut store = PadStore::load()?;
 
-    LocalApp::builder()
-        .app_state(Config::load()?)  // app_state works with LocalApp too
+    App::builder()
+        .app_state(Config::load()?)
         .templates(embed_templates!("src/templates"))
         .command("complete", |m, ctx| {
             let id = m.get_one::<Uuid>("id").unwrap();
             store.complete(*id)?;  // &mut store works!
             Ok(Output::Silent)
-        }, "")
+        }, "")?
         .command("list", |m, ctx| {
-            // Even read-only handlers work with LocalApp
             Ok(Output::Render(store.list()))
-        }, "{{ items }}")
+        }, "{{ items }}")?
         .build()?
         .run(Cli::command(), std::env::args());
     Ok(())
 }
 ```
 
-**Key differences from `App`:**
+**Handler capabilities:**
 
-- `LocalApp::builder()` accepts `FnMut` closures (not just `Fn`)
+- `App::builder()` accepts `FnMut` closures
 - Handlers can capture `&mut` references to state
-- No `Send + Sync` requirement on handlers
-- `app.run()` takes `&mut self` instead of `&self`
-
-Use `LocalApp` when:
-- Your API has `&mut self` methods
-- You want to avoid `Arc<Mutex<_>>` wrappers
-- Your CLI is single-threaded (the common case)
-
-See [Handler Contract](../crates/dispatch/topics/handler-contract.md) for the full comparison.
+- The `Handler` trait uses `&mut self` for struct-based handlers
+- No `Send + Sync` requirements—CLI apps are single-threaded
 
 ## Appendix: Common Errors and Troubleshooting
 

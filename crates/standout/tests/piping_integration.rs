@@ -3,7 +3,7 @@
 use clap::Command;
 use console::Style;
 use serde_json::json;
-use standout::cli::{App, Output, RunResult, ThreadSafe};
+use standout::cli::{App, Output, RunResult};
 use standout::Theme;
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,7 +11,7 @@ use std::time::Duration;
 /// Test basic pipe_to (passthrough mode) - output is preserved
 #[test]
 fn test_pipe_to_passthrough() {
-    let app = App::<ThreadSafe>::builder()
+    let app = App::builder()
         .commands(|g| {
             g.command_with(
                 "list",
@@ -41,7 +41,7 @@ fn test_pipe_to_passthrough() {
 /// Test pipe_through (capture mode) - uses command's stdout as new output
 #[test]
 fn test_pipe_through_capture() {
-    let app = App::<ThreadSafe>::builder()
+    let app = App::builder()
         .commands(|g| {
             g.command_with(
                 "filter",
@@ -75,7 +75,7 @@ fn test_pipe_through_capture() {
 /// Test chaining multiple pipes
 #[test]
 fn test_pipe_chaining() {
-    let app = App::<ThreadSafe>::builder()
+    let app = App::builder()
         .commands(|g| {
             g.command_with(
                 "chain",
@@ -110,7 +110,7 @@ fn test_pipe_chaining() {
 /// Test pipe_to_with_timeout
 #[test]
 fn test_pipe_with_custom_timeout() {
-    let app = App::<ThreadSafe>::builder()
+    let app = App::builder()
         .commands(|g| {
             g.command_with(
                 "slow",
@@ -140,7 +140,7 @@ fn test_pipe_with_custom_timeout() {
 /// Test pipe_through_with_timeout
 #[test]
 fn test_pipe_through_with_custom_timeout() {
-    let app = App::<ThreadSafe>::builder()
+    let app = App::builder()
         .commands(|g| {
             g.command_with(
                 "process",
@@ -184,7 +184,7 @@ fn test_pipe_with_custom_target() {
         }
     }
 
-    let app = App::<ThreadSafe>::builder()
+    let app = App::builder()
         .commands(|g| {
             g.command_with(
                 "upper",
@@ -209,7 +209,7 @@ fn test_pipe_with_custom_target() {
 /// Test that piping a failed command propagates the error
 #[test]
 fn test_pipe_command_failure() {
-    let app = App::<ThreadSafe>::builder()
+    let app = App::builder()
         .commands(|g| {
             g.command_with(
                 "fail",
@@ -263,7 +263,7 @@ fn test_pipe_strips_ansi_codes() {
     // Use a theme with forced styling to ensure ANSI codes would be generated
     let theme = Theme::new().add("highlight", Style::new().green().force_styling(true));
 
-    let app = App::<ThreadSafe>::builder()
+    let app = App::builder()
         .theme(theme)
         .commands(|g| {
             g.command_with(
@@ -302,7 +302,7 @@ fn test_pipe_preserves_terminal_formatting_in_passthrough() {
     // Use a theme with forced styling
     let theme = Theme::new().add("bold", Style::new().bold().force_styling(true));
 
-    let app = App::<ThreadSafe>::builder()
+    let app = App::builder()
         .theme(theme)
         .commands(|g| {
             g.command_with(
@@ -354,7 +354,7 @@ fn test_clipboard_receives_plain_text() {
 
     let theme = Theme::new().add("red", Style::new().red().force_styling(true));
 
-    let app = App::<ThreadSafe>::builder()
+    let app = App::builder()
         .theme(theme)
         .commands(|g| {
             g.command_with(

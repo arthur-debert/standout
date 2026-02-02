@@ -7,8 +7,7 @@
 //! - [`Output`]: What a handler produces (render data, silent, or binary)
 //! - [`HandlerResult`]: The result type for handlers (`Result<Output<T>, Error>`)
 //! - [`RunResult`]: The result of running the CLI dispatcher
-//! - [`Handler`]: Trait for thread-safe command handlers (`Send + Sync`, `&self`)
-//! - [`LocalHandler`]: Trait for local command handlers (no `Send + Sync`, `&mut self`)
+//! - [`Handler`]: Trait for command handlers (`&mut self`)
 //!
 //! # Design Note
 //!
@@ -21,14 +20,11 @@
 //! and produce data, not make format decisions. If a handler truly needs to know
 //! the output format, it can check the `--output` flag in ArgMatches directly.
 //!
-//! # Handler Modes
+//! # Single-Threaded Design
 //!
-//! Standout supports two handler modes:
-//!
-//! ## Thread-safe handlers (default)
-//!
-//! Use [`Handler`] and [`FnHandler`] for the default `App`. These require
-//! `Send + Sync` and immutable `&self`:
+//! CLI applications are single-threaded: parse args → run one handler → output → exit.
+//! Handlers use `&mut self` and `FnMut`, allowing natural Rust patterns without
+//! forcing interior mutability wrappers (`Arc<Mutex<_>>`).
 //!
 //! ```rust,ignore
 //! use standout::cli::{App, Handler, Output, HandlerResult, CommandContext};
@@ -39,57 +35,27 @@
 //!         Ok(Output::Render(get_items()?))
 //!     }, "{{ items }}")
 //!
-//! // Struct handler with interior mutability
-//! struct CachedHandler {
-//!     cache: Arc<Mutex<HashMap<String, Data>>>,
-//! }
-//!
-//! impl Handler for CachedHandler {
-//!     type Output = Data;
-//!     fn handle(&self, m: &ArgMatches, ctx: &CommandContext) -> HandlerResult<Data> {
-//!         let mut cache = self.cache.lock().unwrap();
-//!         // ...
-//!     }
-//! }
-//! ```
-//!
-//! ## Local handlers (mutable state)
-//!
-//! Use [`LocalHandler`] and [`LocalFnHandler`] with `LocalApp`. These allow
-//! `&mut self` without `Send + Sync`:
-//!
-//! ```rust,ignore
-//! use standout::cli::{LocalApp, LocalHandler, Output, HandlerResult, CommandContext};
-//!
-//! struct MyDatabase {
+//! // Struct handler with mutable state
+//! struct Database {
 //!     connection: Connection,
 //! }
 //!
-//! impl MyDatabase {
-//!     fn query_mut(&mut self) -> Vec<Row> { ... }
+//! impl Database {
+//!     fn query(&mut self) -> Vec<Row> { ... }
 //! }
 //!
-//! // LocalHandler allows &mut self
-//! impl LocalHandler for MyDatabase {
+//! impl Handler for Database {
 //!     type Output = Vec<Row>;
 //!     fn handle(&mut self, m: &ArgMatches, ctx: &CommandContext) -> HandlerResult<Vec<Row>> {
-//!         Ok(Output::Render(self.query_mut()))
+//!         Ok(Output::Render(self.query()))
 //!     }
 //! }
-//!
-//! // Or use FnMut closures
-//! let mut db = MyDatabase::connect()?;
-//! LocalApp::builder()
-//!     .command("query", move |m, ctx| {
-//!         Ok(Output::Render(db.query_mut()))
-//!     }, "{{ rows }}")
 //! ```
 
 // Re-export all handler types from standout-dispatch.
 // These types are render-agnostic and focus on handler execution.
 pub use standout_dispatch::{
-    CommandContext, Extensions, FnHandler, Handler, HandlerResult, LocalFnHandler, LocalHandler,
-    Output, RunResult,
+    CommandContext, Extensions, FnHandler, Handler, HandlerResult, Output, RunResult,
 };
 
 // Tests for these types are in the standout-dispatch crate.
