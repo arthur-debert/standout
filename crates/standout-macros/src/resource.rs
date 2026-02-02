@@ -776,10 +776,11 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
 
     if operations.contains(&ResourceOperation::View) {
         command_variants.push(quote! {
-            /// View a single item
+            /// View one or more items
             View {
-                /// The ID of the item to view
-                id: String,
+                /// The ID(s) of the item(s) to view
+                #[arg(num_args = 1..)]
+                ids: Vec<String>,
             },
         });
         dispatch_commands.push(quote! {
@@ -831,10 +832,11 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
 
     if operations.contains(&ResourceOperation::Delete) {
         command_variants.push(quote! {
-            /// Delete an item
+            /// Delete one or more items
             Delete {
-                /// The ID of the item to delete
-                id: String,
+                /// The ID(s) of the item(s) to delete
+                #[arg(num_args = 1..)]
+                ids: Vec<String>,
                 #[arg(long)]
                 confirm: bool,
                 #[arg(long)]
@@ -904,33 +906,67 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
             pub fn view(
                 matches: &::clap::ArgMatches,
                 ctx: &::standout::cli::CommandContext,
-            ) -> ::standout::cli::HandlerResult<::standout::views::DetailViewResult<#struct_name>> {
+            ) -> ::standout::cli::HandlerResult<::serde_json::Value> {
                 let store = ctx.app_state.get_required::<#store_type>()?;
 
-                // ── Stage 1: ID Resolution ──
-                let id_str = matches.get_one::<String>("id").unwrap();
-                let id = store.parse_id(id_str)
-                    .map_err(|e| ::standout::cli::IdResolutionError::parse_failed(id_str, e.to_string()))?;
+                // ── Stage 1: Get IDs ──
+                let id_strs: Vec<String> = matches.get_many::<String>("ids")
+                    .map(|v| v.cloned().collect())
+                    .unwrap_or_default();
 
-                // ── Stage 2: Data Fetch ──
-                let item = store.resolve(&id)
-                    .map_err(|_| ::standout::cli::IdResolutionError::not_found(id_str))?;
+                if id_strs.len() == 1 {
+                    // Single ID - use DetailViewResult for backwards compatibility
+                    let id_str = &id_strs[0];
+                    let id = store.parse_id(id_str)
+                        .map_err(|e| ::standout::cli::IdResolutionError::parse_failed(id_str, e.to_string()))?;
 
-                // ── Stage 3: Validation (identity) ──
-                let item = ::standout::cli::validate_identity(item)?;
+                    let item = store.resolve(&id)
+                        .map_err(|_| ::standout::cli::IdResolutionError::not_found(id_str))?;
 
-                // ── Stage 4: App Logic (identity) ──
-                let item = ::standout::cli::app_logic_identity(item)?;
+                    let item = ::standout::cli::validate_identity(item)?;
+                    let item = ::standout::cli::app_logic_identity(item)?;
 
-                // ── Stage 5: View Building ──
-                Ok(::standout::cli::Output::Render(
-                    ::standout::views::detail_view(item)
+                    let result = ::standout::views::detail_view(item)
                         .title(#object_name_upper)
                         .subtitle(id_str)
                         .action("Update", format!("{} update {}", #object_name, id_str))
                         .action("Delete", format!("{} delete {}", #object_name, id_str))
-                        .build()
-                ))
+                        .build();
+                    Ok(::standout::cli::Output::Render(
+                        ::serde_json::to_value(result).unwrap_or_default()
+                    ))
+                } else {
+                    // Multiple IDs - collect items and use ListViewResult
+                    let mut items: Vec<#struct_name> = Vec::new();
+                    let mut errors: Vec<String> = Vec::new();
+
+                    for id_str in &id_strs {
+                        match store.parse_id(id_str) {
+                            Ok(id) => {
+                                match store.resolve(&id) {
+                                    Ok(item) => items.push(item),
+                                    Err(_) => errors.push(format!("'{}' not found", id_str)),
+                                }
+                            }
+                            Err(e) => errors.push(format!("Invalid ID '{}': {}", id_str, e)),
+                        }
+                    }
+
+                    let total = items.len();
+                    let mut result = ::standout::views::list_view(items)
+                        .total_count(total)
+                        .tabular_spec(<#struct_name as ::standout::tabular::Tabular>::tabular_spec())
+                        .build();
+
+                    // Add errors as warnings if any
+                    for err in errors {
+                        result = result.warning(err);
+                    }
+
+                    Ok(::standout::cli::Output::Render(
+                        ::serde_json::to_value(result).unwrap_or_default()
+                    ))
+                }
             }
         }
     } else {
@@ -1113,47 +1149,122 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
             pub fn delete(
                 matches: &::clap::ArgMatches,
                 ctx: &::standout::cli::CommandContext,
-            ) -> ::standout::cli::HandlerResult<::standout::views::DeleteViewResult<#struct_name>> {
+            ) -> ::standout::cli::HandlerResult<::serde_json::Value> {
                 let store = ctx.app_state.get_required::<#store_type>()?;
                 let confirm = matches.get_flag("confirm");
                 let force = matches.get_flag("force");
 
-                // ── Stage 1: ID Resolution ──
-                let id_str = matches.get_one::<String>("id").unwrap();
-                let id = store.parse_id(id_str)
-                    .map_err(|e| ::standout::cli::IdResolutionError::parse_failed(id_str, e.to_string()))?;
+                // ── Stage 1: Get IDs ──
+                let id_strs: Vec<String> = matches.get_many::<String>("ids")
+                    .map(|v| v.cloned().collect())
+                    .unwrap_or_default();
 
-                // ── Stage 2: Data Fetch ──
-                let item = store.resolve(&id)
-                    .map_err(|_| ::standout::cli::IdResolutionError::not_found(id_str))?;
+                if id_strs.len() == 1 {
+                    // Single ID - backwards compatible behavior
+                    let id_str = &id_strs[0];
+                    let id = store.parse_id(id_str)
+                        .map_err(|e| ::standout::cli::IdResolutionError::parse_failed(id_str, e.to_string()))?;
 
-                // ── Stage 3: Validation (identity) ──
-                let item = ::standout::cli::validate_identity(item)?;
+                    let item = store.resolve(&id)
+                        .map_err(|_| ::standout::cli::IdResolutionError::not_found(id_str))?;
 
-                if !confirm && !force {
-                    // ── Stage 4: App Logic (identity) ──
-                    let item = ::standout::cli::app_logic_identity(item)?;
+                    let item = ::standout::cli::validate_identity(item)?;
 
-                    // ── Stage 5: View Building (confirmation required) ──
-                    Ok(::standout::cli::Output::Render(
-                        ::standout::views::delete_view(item)
+                    if !confirm && !force {
+                        let item = ::standout::cli::app_logic_identity(item)?;
+                        let result = ::standout::views::delete_view(item)
                             .warning(format!("Use --confirm to delete this {}", #object_name))
-                            .build()
-                    ))
-                } else {
-                    // ── Stage 4: Store Delete ──
-                    store.delete(&id)?;
-
-                    // ── Stage 5: App Logic (identity) ──
-                    let item = ::standout::cli::app_logic_identity(item)?;
-
-                    // ── Stage 6: View Building ──
-                    Ok(::standout::cli::Output::Render(
-                        ::standout::views::delete_view(item)
+                            .build();
+                        Ok(::standout::cli::Output::Render(
+                            ::serde_json::to_value(result).unwrap_or_default()
+                        ))
+                    } else {
+                        store.delete(&id)?;
+                        let item = ::standout::cli::app_logic_identity(item)?;
+                        let result = ::standout::views::delete_view(item)
                             .confirmed()
                             .success(format!("{} deleted", #object_name_upper))
-                            .build()
-                    ))
+                            .build();
+                        Ok(::standout::cli::Output::Render(
+                            ::serde_json::to_value(result).unwrap_or_default()
+                        ))
+                    }
+                } else {
+                    // Multiple IDs - batch operation
+                    if !confirm && !force {
+                        // Show what would be deleted
+                        let mut items: Vec<#struct_name> = Vec::new();
+                        let mut errors: Vec<String> = Vec::new();
+
+                        for id_str in &id_strs {
+                            match store.parse_id(id_str) {
+                                Ok(id) => {
+                                    match store.resolve(&id) {
+                                        Ok(item) => items.push(item),
+                                        Err(_) => errors.push(format!("'{}' not found", id_str)),
+                                    }
+                                }
+                                Err(e) => errors.push(format!("Invalid ID '{}': {}", id_str, e)),
+                            }
+                        }
+
+                        let count = items.len();
+                        let mut result = ::standout::views::list_view(items)
+                            .total_count(count)
+                            .tabular_spec(<#struct_name as ::standout::tabular::Tabular>::tabular_spec())
+                            .build();
+
+                        result = result.warning(format!("Use --confirm to delete {} {}(s)", count, #object_name));
+                        for err in errors {
+                            result = result.warning(err);
+                        }
+
+                        Ok(::standout::cli::Output::Render(
+                            ::serde_json::to_value(result).unwrap_or_default()
+                        ))
+                    } else {
+                        // Actually delete
+                        let mut deleted: Vec<#struct_name> = Vec::new();
+                        let mut errors: Vec<String> = Vec::new();
+
+                        for id_str in &id_strs {
+                            match store.parse_id(id_str) {
+                                Ok(id) => {
+                                    match store.resolve(&id) {
+                                        Ok(item) => {
+                                            match store.delete(&id) {
+                                                Ok(()) => deleted.push(item),
+                                                Err(e) => errors.push(format!("Failed to delete '{}': {}", id_str, e)),
+                                            }
+                                        }
+                                        Err(_) => errors.push(format!("'{}' not found", id_str)),
+                                    }
+                                }
+                                Err(e) => errors.push(format!("Invalid ID '{}': {}", id_str, e)),
+                            }
+                        }
+
+                        let deleted_count = deleted.len();
+                        let error_count = errors.len();
+
+                        let mut result = ::standout::views::list_view(deleted)
+                            .total_count(deleted_count)
+                            .tabular_spec(<#struct_name as ::standout::tabular::Tabular>::tabular_spec())
+                            .build();
+
+                        if error_count == 0 {
+                            result = result.success(format!("{} {}(s) deleted", deleted_count, #object_name));
+                        } else {
+                            result = result.info(format!("{} deleted, {} failed", deleted_count, error_count));
+                        }
+                        for err in errors {
+                            result = result.warning(err);
+                        }
+
+                        Ok(::standout::cli::Output::Render(
+                            ::serde_json::to_value(result).unwrap_or_default()
+                        ))
+                    }
                 }
             }
         }
