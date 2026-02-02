@@ -14,10 +14,10 @@
 //!     #[resource(id)]
 //!     pub id: String,
 //!
-//!     #[resource(arg(short, long), form(required))]
+//!     #[resource(arg(long), form(required))]
 //!     pub title: String,
 //!
-//!     #[resource(arg(short, long), choices = ["pending", "done"])]
+//!     #[resource(arg(long), choices = ["pending", "done"])]
 //!     pub status: String,
 //!
 //!     #[resource(readonly)]
@@ -122,8 +122,6 @@ struct ResourceFieldAttrs {
     value_enum: bool,
     /// Help text extracted from doc comments
     doc: Option<String>,
-    /// Short option character (e.g., 't' for -t)
-    short: Option<char>,
     /// Custom long option name (overrides field name)
     long: Option<String>,
 }
@@ -466,18 +464,12 @@ fn parse_field_attrs(attrs: &[syn::Attribute]) -> Result<ResourceFieldAttrs> {
                         field_attrs.choices = Some(choices);
                     }
                     Meta::List(list) if list.path.is_ident("arg") => {
-                        // Parse arg(short = 'x', long = "name")
+                        // Parse arg(long = "name")
                         let inner: Punctuated<Meta, Token![,]> =
                             list.parse_args_with(Punctuated::parse_terminated)?;
                         for arg_meta in inner {
                             if let Meta::NameValue(nv) = arg_meta {
-                                if nv.path.is_ident("short") {
-                                    if let Expr::Lit(expr_lit) = &nv.value {
-                                        if let syn::Lit::Char(lit_char) = &expr_lit.lit {
-                                            field_attrs.short = Some(lit_char.value());
-                                        }
-                                    }
-                                } else if nv.path.is_ident("long") {
+                                if nv.path.is_ident("long") {
                                     if let Expr::Lit(expr_lit) = &nv.value {
                                         if let syn::Lit::Str(lit_str) = &expr_lit.lit {
                                             field_attrs.long = Some(lit_str.value());
@@ -641,28 +633,7 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         .filter(|f| !f.attrs.id && !f.attrs.readonly && !f.attrs.skip)
         .collect();
 
-    // Validate no duplicate short options
-    {
-        let mut seen_shorts: std::collections::HashMap<char, &Ident> =
-            std::collections::HashMap::new();
-        for field in &mutable_fields {
-            if let Some(short) = field.attrs.short {
-                if let Some(other_field) = seen_shorts.get(&short) {
-                    return Err(Error::new(
-                        field.ident.span(),
-                        format!(
-                            "duplicate short option '-{}': already used by field '{}'",
-                            short, other_field
-                        ),
-                    ));
-                }
-                seen_shorts.insert(short, &field.ident);
-            }
-        }
-    }
-
     // Helper function to generate clap args based on type
-    #[allow(clippy::too_many_arguments)]
     fn generate_arg(
         name: &Ident,
         ty: &Type,
@@ -671,7 +642,6 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         is_value_enum: bool,
         doc: &Option<String>,
         default_expr: &Option<String>,
-        short: &Option<char>,
     ) -> TokenStream {
         let type_kind = TypeKind::from_type(ty);
 
@@ -687,17 +657,11 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
             .map(|d| quote! { default_value = #d, })
             .unwrap_or_default();
 
-        // Generate short option attribute
-        let short_attr = short
-            .as_ref()
-            .map(|s| quote! { short = #s, })
-            .unwrap_or_default();
-
         // Handle explicit choices (string-based)
         if let Some(choice_values) = choices {
             let choice_values: Vec<&String> = choice_values.iter().collect();
             return quote! {
-                #[arg(long = #long_name, #short_attr #help_attr #default_attr value_parser = clap::builder::PossibleValuesParser::new([#(#choice_values),*]))]
+                #[arg(long = #long_name, #help_attr #default_attr value_parser = clap::builder::PossibleValuesParser::new([#(#choice_values),*]))]
                 #name: Option<String>,
             };
         }
@@ -706,7 +670,7 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         if is_value_enum {
             let inner = type_kind.inner_type();
             return quote! {
-                #[arg(long = #long_name, #short_attr #help_attr #default_attr value_enum)]
+                #[arg(long = #long_name, #help_attr #default_attr value_enum)]
                 #name: Option<#inner>,
             };
         }
@@ -715,21 +679,21 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
             TypeKind::Vec(inner_ty) => {
                 // Vec<T> -> multi-value arg
                 quote! {
-                    #[arg(long = #long_name, #short_attr #help_attr num_args = 0..)]
+                    #[arg(long = #long_name, #help_attr num_args = 0..)]
                     #name: Vec<#inner_ty>,
                 }
             }
             TypeKind::Option(inner_ty) => {
                 // Option<T> -> optional arg (already optional)
                 quote! {
-                    #[arg(long = #long_name, #short_attr #help_attr #default_attr)]
+                    #[arg(long = #long_name, #help_attr #default_attr)]
                     #name: Option<#inner_ty>,
                 }
             }
             TypeKind::Scalar(scalar_ty) => {
                 // Scalar -> wrap in Option for CLI
                 quote! {
-                    #[arg(long = #long_name, #short_attr #help_attr #default_attr)]
+                    #[arg(long = #long_name, #help_attr #default_attr)]
                     #name: Option<#scalar_ty>,
                 }
             }
@@ -867,7 +831,6 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                 f.attrs.value_enum,
                 &f.attrs.doc,
                 &f.attrs.default_expr,
-                &f.attrs.short,
             )
         })
         .collect();
@@ -893,7 +856,6 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                 f.attrs.value_enum,
                 &f.attrs.doc,
                 &None, // No defaults for update - user is changing existing values
-                &f.attrs.short,
             )
         })
         .collect();

@@ -17,11 +17,11 @@ struct Task {
     #[tabular(name = "ID")]
     pub id: String,
 
-    #[resource(arg(short, long))]
+    #[resource(arg(long))]
     #[tabular(name = "TITLE")]
     pub title: String,
 
-    #[resource(arg(short, long), default = "pending")]
+    #[resource(arg(long), default = "pending")]
     #[tabular(name = "STATUS")]
     pub status: String,
 }
@@ -261,99 +261,6 @@ fn test_default_command_method() {
 
     // Task doesn't have a default configured
     assert_eq!(TaskCommands::default_command(), None);
-}
-
-// ============================================================================
-// Short Option Tests
-// ============================================================================
-
-/// This struct tests that unique short options work correctly.
-/// Note: Duplicate short options (e.g., two fields with `short = 't'`)
-/// will produce a compile-time error: "duplicate short option '-t': already used by field 'x'"
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Resource, Tabular)]
-#[resource(object = "widget", store = InMemoryWidgetStore)]
-struct Widget {
-    #[resource(id)]
-    #[tabular(name = "ID")]
-    pub id: String,
-
-    #[resource(arg(short = 'n'))]
-    #[tabular(name = "NAME")]
-    pub name: String,
-
-    #[resource(arg(short = 'd'))]
-    #[tabular(name = "DESC")]
-    pub description: String,
-
-    #[resource(arg(short = 'c'))]
-    #[tabular(name = "COUNT")]
-    pub count: Option<u32>,
-}
-
-struct InMemoryWidgetStore;
-
-impl ResourceStore for InMemoryWidgetStore {
-    type Item = Widget;
-    type Id = String;
-    type Error = TestError;
-
-    fn parse_id(&self, id_str: &str) -> Result<Self::Id, Self::Error> {
-        Ok(id_str.to_string())
-    }
-
-    fn get(&self, _id: &Self::Id) -> Result<Option<Self::Item>, Self::Error> {
-        Ok(None)
-    }
-
-    fn not_found_error(id: &Self::Id) -> Self::Error {
-        TestError(format!("Widget '{}' not found", id))
-    }
-
-    fn list(&self, _query: Option<&ResourceQuery>) -> Result<Vec<Self::Item>, Self::Error> {
-        Ok(vec![])
-    }
-
-    fn create(&self, data: serde_json::Value) -> Result<Self::Item, Self::Error> {
-        serde_json::from_value(data).map_err(|e| TestError(e.to_string()))
-    }
-
-    fn update(&self, id: &Self::Id, _data: serde_json::Value) -> Result<Self::Item, Self::Error> {
-        Err(Self::not_found_error(id))
-    }
-
-    fn delete(&self, id: &Self::Id) -> Result<(), Self::Error> {
-        Err(Self::not_found_error(id))
-    }
-}
-
-#[test]
-fn test_unique_short_options_compile() {
-    // This test verifies that the Widget struct with unique short options compiles.
-    // If there were duplicate short options, this would fail at compile time.
-    let cmd = WidgetCommands::augment_subcommands(Command::new("widget"));
-
-    // Get the create subcommand's help (where short options are defined)
-    let create_cmd = cmd
-        .find_subcommand("create")
-        .expect("create subcommand exists");
-    let help = create_cmd.clone().render_help().to_string();
-
-    // Verify short options appear in help
-    assert!(
-        help.contains("-n"),
-        "Help should show -n short option. Got:\n{}",
-        help
-    );
-    assert!(
-        help.contains("-d"),
-        "Help should show -d short option. Got:\n{}",
-        help
-    );
-    assert!(
-        help.contains("-c"),
-        "Help should show -c short option. Got:\n{}",
-        help
-    );
 }
 
 // ============================================================================
