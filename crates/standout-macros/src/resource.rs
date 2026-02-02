@@ -99,6 +99,8 @@ struct ResourceFieldAttrs {
     default_expr: Option<String>,
     /// Constrained values for this field
     choices: Option<Vec<String>>,
+    /// Field type is an enum that implements ValueEnum
+    value_enum: bool,
 }
 
 /// Information about a field for Resource operations
@@ -106,6 +108,62 @@ struct ResourceFieldInfo {
     ident: Ident,
     ty: Type,
     attrs: ResourceFieldAttrs,
+}
+
+/// Categorizes field types for code generation
+#[derive(Clone)]
+#[allow(dead_code)] // Enum variant reserved for future use
+enum TypeKind {
+    /// Simple scalar type (String, i32, etc.)
+    Scalar(Type),
+    /// Optional type (Option<T>)
+    Option(Type),
+    /// Collection type (Vec<T>)
+    Vec(Type),
+    /// Enum type that should use ValueEnum
+    Enum(Type),
+}
+
+impl TypeKind {
+    /// Analyzes a type and returns its kind
+    fn from_type(ty: &Type) -> Self {
+        if let Type::Path(type_path) = ty {
+            if let Some(segment) = type_path.path.segments.last() {
+                let ident_str = segment.ident.to_string();
+
+                // Check for Vec<T>
+                if ident_str == "Vec" {
+                    if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
+                        if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
+                            return TypeKind::Vec(inner_ty.clone());
+                        }
+                    }
+                }
+
+                // Check for Option<T>
+                if ident_str == "Option" {
+                    if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
+                        if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
+                            return TypeKind::Option(inner_ty.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        // Default to scalar
+        TypeKind::Scalar(ty.clone())
+    }
+
+    /// Returns the inner type (for display and extraction)
+    fn inner_type(&self) -> &Type {
+        match self {
+            TypeKind::Scalar(ty) => ty,
+            TypeKind::Option(ty) => ty,
+            TypeKind::Vec(ty) => ty,
+            TypeKind::Enum(ty) => ty,
+        }
+    }
 }
 
 impl Parse for ResourceContainerAttrs {
@@ -197,6 +255,9 @@ fn parse_field_attrs(attrs: &[syn::Attribute]) -> Result<ResourceFieldAttrs> {
                     }
                     Meta::Path(p) if p.is_ident("skip") => {
                         field_attrs.skip = true;
+                    }
+                    Meta::Path(p) if p.is_ident("value_enum") => {
+                        field_attrs.value_enum = true;
                     }
                     Meta::NameValue(nv) if nv.path.is_ident("default") => {
                         if let Expr::Lit(expr_lit) = &nv.value {
@@ -331,6 +392,169 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         .filter(|f| !f.attrs.id && !f.attrs.readonly && !f.attrs.skip)
         .collect();
 
+    // Helper function to generate clap args based on type
+    fn generate_arg(
+        name: &Ident,
+        ty: &Type,
+        long_name: &str,
+        choices: &Option<Vec<String>>,
+        is_value_enum: bool,
+    ) -> TokenStream {
+        let type_kind = TypeKind::from_type(ty);
+
+        // Handle explicit choices (string-based)
+        if let Some(choice_values) = choices {
+            let choice_values: Vec<&String> = choice_values.iter().collect();
+            return quote! {
+                #[arg(long = #long_name, value_parser = clap::builder::PossibleValuesParser::new([#(#choice_values),*]))]
+                pub #name: Option<String>,
+            };
+        }
+
+        // Handle value_enum types
+        if is_value_enum {
+            let inner = type_kind.inner_type();
+            return quote! {
+                #[arg(long = #long_name, value_enum)]
+                pub #name: Option<#inner>,
+            };
+        }
+
+        match type_kind {
+            TypeKind::Vec(inner_ty) => {
+                // Vec<T> -> multi-value arg
+                quote! {
+                    #[arg(long = #long_name, num_args = 0..)]
+                    pub #name: Vec<#inner_ty>,
+                }
+            }
+            TypeKind::Option(inner_ty) => {
+                // Option<T> -> optional arg (already optional)
+                quote! {
+                    #[arg(long = #long_name)]
+                    pub #name: Option<#inner_ty>,
+                }
+            }
+            TypeKind::Scalar(scalar_ty) | TypeKind::Enum(scalar_ty) => {
+                // Scalar -> wrap in Option for CLI
+                quote! {
+                    #[arg(long = #long_name)]
+                    pub #name: Option<#scalar_ty>,
+                }
+            }
+        }
+    }
+
+    // Helper function to generate JSON extraction based on type
+    fn generate_json_extraction(
+        name: &Ident,
+        ty: &Type,
+        long_name: &str,
+        choices: &Option<Vec<String>>,
+        is_value_enum: bool,
+        include_changed: bool,
+    ) -> TokenStream {
+        let name_str = name.to_string();
+        let type_kind = TypeKind::from_type(ty);
+
+        // Handle explicit choices (always String)
+        if choices.is_some() {
+            return if include_changed {
+                quote! {
+                    if let Some(val) = matches.get_one::<String>(#long_name) {
+                        __data[#name_str] = ::serde_json::json!(val);
+                        __changed.push(#name_str.to_string());
+                    }
+                }
+            } else {
+                quote! {
+                    if let Some(val) = matches.get_one::<String>(#long_name) {
+                        __data[#name_str] = ::serde_json::json!(val);
+                    }
+                }
+            };
+        }
+
+        // Handle value_enum types
+        if is_value_enum {
+            let inner = type_kind.inner_type();
+            return if include_changed {
+                quote! {
+                    if let Some(val) = matches.get_one::<#inner>(#long_name) {
+                        __data[#name_str] = ::serde_json::json!(val);
+                        __changed.push(#name_str.to_string());
+                    }
+                }
+            } else {
+                quote! {
+                    if let Some(val) = matches.get_one::<#inner>(#long_name) {
+                        __data[#name_str] = ::serde_json::json!(val);
+                    }
+                }
+            };
+        }
+
+        match type_kind {
+            TypeKind::Vec(inner_ty) => {
+                // Vec<T> -> get_many
+                if include_changed {
+                    quote! {
+                        let __vec_vals: Vec<#inner_ty> = matches.get_many::<#inner_ty>(#long_name)
+                            .map(|v| v.cloned().collect())
+                            .unwrap_or_default();
+                        if !__vec_vals.is_empty() {
+                            __data[#name_str] = ::serde_json::json!(__vec_vals);
+                            __changed.push(#name_str.to_string());
+                        }
+                    }
+                } else {
+                    quote! {
+                        let __vec_vals: Vec<#inner_ty> = matches.get_many::<#inner_ty>(#long_name)
+                            .map(|v| v.cloned().collect())
+                            .unwrap_or_default();
+                        if !__vec_vals.is_empty() {
+                            __data[#name_str] = ::serde_json::json!(__vec_vals);
+                        }
+                    }
+                }
+            }
+            TypeKind::Option(inner_ty) => {
+                // Option<T> -> get_one
+                if include_changed {
+                    quote! {
+                        if let Some(val) = matches.get_one::<#inner_ty>(#long_name) {
+                            __data[#name_str] = ::serde_json::json!(val);
+                            __changed.push(#name_str.to_string());
+                        }
+                    }
+                } else {
+                    quote! {
+                        if let Some(val) = matches.get_one::<#inner_ty>(#long_name) {
+                            __data[#name_str] = ::serde_json::json!(val);
+                        }
+                    }
+                }
+            }
+            TypeKind::Scalar(scalar_ty) | TypeKind::Enum(scalar_ty) => {
+                // Scalar -> get_one
+                if include_changed {
+                    quote! {
+                        if let Some(val) = matches.get_one::<#scalar_ty>(#long_name) {
+                            __data[#name_str] = ::serde_json::json!(val);
+                            __changed.push(#name_str.to_string());
+                        }
+                    }
+                } else {
+                    quote! {
+                        if let Some(val) = matches.get_one::<#scalar_ty>(#long_name) {
+                            __data[#name_str] = ::serde_json::json!(val);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Generate clap args for create command
     let create_args: Vec<TokenStream> = mutable_fields
         .iter()
@@ -339,19 +563,7 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
             let ty = &f.ty;
             let name_str = name.to_string();
             let long_name = name_str.replace('_', "-");
-
-            if let Some(choices) = &f.attrs.choices {
-                let choice_values: Vec<&String> = choices.iter().collect();
-                quote! {
-                    #[arg(long = #long_name, value_parser = clap::builder::PossibleValuesParser::new([#(#choice_values),*]))]
-                    pub #name: Option<String>,
-                }
-            } else {
-                quote! {
-                    #[arg(long = #long_name)]
-                    pub #name: Option<#ty>,
-                }
-            }
+            generate_arg(name, ty, &long_name, &f.attrs.choices, f.attrs.value_enum)
         })
         .collect();
 
@@ -363,19 +575,7 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
             let ty = &f.ty;
             let name_str = name.to_string();
             let long_name = name_str.replace('_', "-");
-
-            if let Some(choices) = &f.attrs.choices {
-                let choice_values: Vec<&String> = choices.iter().collect();
-                quote! {
-                    #[arg(long = #long_name, value_parser = clap::builder::PossibleValuesParser::new([#(#choice_values),*]))]
-                    pub #name: Option<String>,
-                }
-            } else {
-                quote! {
-                    #[arg(long = #long_name)]
-                    pub #name: Option<#ty>,
-                }
-            }
+            generate_arg(name, ty, &long_name, &f.attrs.choices, f.attrs.value_enum)
         })
         .collect();
 
@@ -384,13 +584,17 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         .iter()
         .map(|f| {
             let name = &f.ident;
+            let ty = &f.ty;
             let name_str = name.to_string();
             let long_name = name_str.replace('_', "-");
-            quote! {
-                if let Some(val) = matches.get_one::<String>(#long_name) {
-                    __data[#name_str] = ::serde_json::json!(val);
-                }
-            }
+            generate_json_extraction(
+                name,
+                ty,
+                &long_name,
+                &f.attrs.choices,
+                f.attrs.value_enum,
+                false,
+            )
         })
         .collect();
 
@@ -399,14 +603,17 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         .iter()
         .map(|f| {
             let name = &f.ident;
+            let ty = &f.ty;
             let name_str = name.to_string();
             let long_name = name_str.replace('_', "-");
-            quote! {
-                if let Some(val) = matches.get_one::<String>(#long_name) {
-                    __data[#name_str] = ::serde_json::json!(val);
-                    __changed.push(#name_str.to_string());
-                }
-            }
+            generate_json_extraction(
+                name,
+                ty,
+                &long_name,
+                &f.attrs.choices,
+                f.attrs.value_enum,
+                true,
+            )
         })
         .collect();
 
