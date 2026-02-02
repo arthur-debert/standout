@@ -65,6 +65,8 @@ struct ResourceContainerAttrs {
     default_command: Option<String>,
     /// Optional: command name aliases (e.g., view -> show, delete -> rm)
     aliases: std::collections::HashMap<String, String>,
+    /// Optional: keep original command names as hidden aliases when aliasing
+    keep_aliases: bool,
     /// Optional: shortcut commands for common update patterns
     shortcuts: Vec<ResourceShortcut>,
     /// Optional: overrides the default `standout` crate name
@@ -399,10 +401,13 @@ impl Parse for ResourceContainerAttrs {
                         sets: shortcut_sets,
                     });
                 }
+                Meta::Path(path) if path.is_ident("keep_aliases") => {
+                    attrs.keep_aliases = true;
+                }
                 _ => {
                     return Err(Error::new(
                         meta.span(),
-                        "unknown attribute, expected one of: object, store, plural, operations, validify, default, aliases, shortcut, crate",
+                        "unknown attribute, expected one of: object, store, plural, operations, validify, default, aliases, keep_aliases, shortcut, crate",
                     ));
                 }
             }
@@ -569,6 +574,7 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
     let use_validify = container_attrs.validify;
     let default_command = container_attrs.default_command;
     let aliases = container_attrs.aliases;
+    let keep_aliases = container_attrs.keep_aliases;
     let shortcuts = container_attrs.shortcuts;
 
     // Helper to get command name (alias or default)
@@ -577,6 +583,17 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
             .get(default)
             .cloned()
             .unwrap_or_else(|| default.to_string())
+    };
+
+    // Helper to generate command attribute with optional hidden alias for the original name
+    let get_cmd_attr = |default: &str| -> proc_macro2::TokenStream {
+        let cmd_name = get_cmd_name(default);
+        if keep_aliases && aliases.contains_key(default) {
+            // Command was aliased and we want to keep the original as a hidden alias
+            quote! { #[command(name = #cmd_name, alias = #default)] }
+        } else {
+            quote! { #[command(name = #cmd_name)] }
+        }
     };
 
     let struct_name = &input.ident;
@@ -931,9 +948,10 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
 
     if operations.contains(&ResourceOperation::List) {
         let cmd_name = get_cmd_name("list");
+        let cmd_attr = get_cmd_attr("list");
         command_variants.push(quote! {
             /// List all items
-            #[command(name = #cmd_name)]
+            #cmd_attr
             List {
                 #[arg(long)]
                 filter: Option<String>,
@@ -954,9 +972,10 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
 
     if operations.contains(&ResourceOperation::View) {
         let cmd_name = get_cmd_name("view");
+        let cmd_attr = get_cmd_attr("view");
         command_variants.push(quote! {
             /// View one or more items
-            #[command(name = #cmd_name)]
+            #cmd_attr
             View {
                 /// The ID(s) of the item(s) to view
                 #[arg(num_args = 1..)]
@@ -974,9 +993,10 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
 
     if operations.contains(&ResourceOperation::Create) {
         let cmd_name = get_cmd_name("create");
+        let cmd_attr = get_cmd_attr("create");
         command_variants.push(quote! {
             /// Create a new item
-            #[command(name = #cmd_name)]
+            #cmd_attr
             Create {
                 #(#create_args)*
                 #[arg(long)]
@@ -994,9 +1014,10 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
 
     if operations.contains(&ResourceOperation::Update) {
         let cmd_name = get_cmd_name("update");
+        let cmd_attr = get_cmd_attr("update");
         command_variants.push(quote! {
             /// Update an existing item
-            #[command(name = #cmd_name)]
+            #cmd_attr
             Update {
                 /// The ID of the item to update
                 id: String,
@@ -1016,9 +1037,10 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
 
     if operations.contains(&ResourceOperation::Delete) {
         let cmd_name = get_cmd_name("delete");
+        let cmd_attr = get_cmd_attr("delete");
         command_variants.push(quote! {
             /// Delete one or more items
-            #[command(name = #cmd_name)]
+            #cmd_attr
             Delete {
                 /// The ID(s) of the item(s) to delete
                 #[arg(num_args = 1..)]

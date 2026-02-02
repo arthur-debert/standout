@@ -355,3 +355,91 @@ fn test_unique_short_options_compile() {
         help
     );
 }
+
+// ============================================================================
+// Keep Aliases Tests
+// ============================================================================
+
+/// This struct tests that keep_aliases preserves original command names as hidden aliases.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Resource, Tabular)]
+#[resource(
+    object = "project",
+    store = InMemoryProjectStore,
+    aliases(view = "show", delete = "rm"),
+    keep_aliases
+)]
+struct Project {
+    #[resource(id)]
+    #[tabular(name = "ID")]
+    pub id: String,
+
+    #[tabular(name = "NAME")]
+    pub name: String,
+}
+
+struct InMemoryProjectStore;
+
+impl ResourceStore for InMemoryProjectStore {
+    type Item = Project;
+    type Id = String;
+    type Error = TestError;
+
+    fn parse_id(&self, id_str: &str) -> Result<Self::Id, Self::Error> {
+        Ok(id_str.to_string())
+    }
+
+    fn get(&self, _id: &Self::Id) -> Result<Option<Self::Item>, Self::Error> {
+        Ok(None)
+    }
+
+    fn not_found_error(id: &Self::Id) -> Self::Error {
+        TestError(format!("Project '{}' not found", id))
+    }
+
+    fn list(&self, _query: Option<&ResourceQuery>) -> Result<Vec<Self::Item>, Self::Error> {
+        Ok(vec![])
+    }
+
+    fn create(&self, data: serde_json::Value) -> Result<Self::Item, Self::Error> {
+        serde_json::from_value(data).map_err(|e| TestError(e.to_string()))
+    }
+
+    fn update(&self, id: &Self::Id, _data: serde_json::Value) -> Result<Self::Item, Self::Error> {
+        Err(Self::not_found_error(id))
+    }
+
+    fn delete(&self, id: &Self::Id) -> Result<(), Self::Error> {
+        Err(Self::not_found_error(id))
+    }
+}
+
+#[test]
+fn test_keep_aliases_preserves_original_names() {
+    let cmd = ProjectCommands::augment_subcommands(Command::new("project"));
+
+    // Verify aliased commands exist with new names
+    assert!(
+        cmd.find_subcommand("show").is_some(),
+        "Should have 'show' command (aliased from 'view')"
+    );
+    assert!(
+        cmd.find_subcommand("rm").is_some(),
+        "Should have 'rm' command (aliased from 'delete')"
+    );
+
+    // Verify original names work as aliases (they're hidden but still functional)
+    // We can test this by trying to get matches with the original name
+    let test_cmd = ProjectCommands::augment_subcommands(Command::new("project"));
+    let result = test_cmd.try_get_matches_from(vec!["project", "view", "123"]);
+    assert!(
+        result.is_ok(),
+        "Original 'view' name should work as hidden alias"
+    );
+
+    let test_cmd = ProjectCommands::augment_subcommands(Command::new("project"));
+    let result = test_cmd.try_get_matches_from(vec!["project", "delete", "123"]);
+    assert!(
+        result.is_ok(),
+        "Original 'delete' name should work as hidden alias"
+    );
+}
