@@ -105,6 +105,10 @@ struct ResourceFieldAttrs {
     value_enum: bool,
     /// Help text extracted from doc comments
     doc: Option<String>,
+    /// Short option character (e.g., 't' for -t)
+    short: Option<char>,
+    /// Custom long option name (overrides field name)
+    long: Option<String>,
 }
 
 /// Information about a field for Resource operations
@@ -299,8 +303,28 @@ fn parse_field_attrs(attrs: &[syn::Attribute]) -> Result<ResourceFieldAttrs> {
                         let choices: Vec<String> = inner.iter().map(|l| l.value()).collect();
                         field_attrs.choices = Some(choices);
                     }
-                    // Ignore arg, form, validate - they're for future expansion
-                    Meta::List(list) if list.path.is_ident("arg") => {}
+                    Meta::List(list) if list.path.is_ident("arg") => {
+                        // Parse arg(short = 'x', long = "name")
+                        let inner: Punctuated<Meta, Token![,]> =
+                            list.parse_args_with(Punctuated::parse_terminated)?;
+                        for arg_meta in inner {
+                            if let Meta::NameValue(nv) = arg_meta {
+                                if nv.path.is_ident("short") {
+                                    if let Expr::Lit(expr_lit) = &nv.value {
+                                        if let syn::Lit::Char(lit_char) = &expr_lit.lit {
+                                            field_attrs.short = Some(lit_char.value());
+                                        }
+                                    }
+                                } else if nv.path.is_ident("long") {
+                                    if let Expr::Lit(expr_lit) = &nv.value {
+                                        if let syn::Lit::Str(lit_str) = &expr_lit.lit {
+                                            field_attrs.long = Some(lit_str.value());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     Meta::List(list) if list.path.is_ident("form") => {}
                     Meta::List(list) if list.path.is_ident("validate") => {}
                     _ => {
@@ -426,6 +450,7 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         .collect();
 
     // Helper function to generate clap args based on type
+    #[allow(clippy::too_many_arguments)]
     fn generate_arg(
         name: &Ident,
         ty: &Type,
@@ -434,6 +459,7 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         is_value_enum: bool,
         doc: &Option<String>,
         default_expr: &Option<String>,
+        short: &Option<char>,
     ) -> TokenStream {
         let type_kind = TypeKind::from_type(ty);
 
@@ -449,11 +475,17 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
             .map(|d| quote! { default_value = #d, })
             .unwrap_or_default();
 
+        // Generate short option attribute
+        let short_attr = short
+            .as_ref()
+            .map(|s| quote! { short = #s, })
+            .unwrap_or_default();
+
         // Handle explicit choices (string-based)
         if let Some(choice_values) = choices {
             let choice_values: Vec<&String> = choice_values.iter().collect();
             return quote! {
-                #[arg(long = #long_name, #help_attr #default_attr value_parser = clap::builder::PossibleValuesParser::new([#(#choice_values),*]))]
+                #[arg(long = #long_name, #short_attr #help_attr #default_attr value_parser = clap::builder::PossibleValuesParser::new([#(#choice_values),*]))]
                 pub #name: Option<String>,
             };
         }
@@ -462,7 +494,7 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         if is_value_enum {
             let inner = type_kind.inner_type();
             return quote! {
-                #[arg(long = #long_name, #help_attr #default_attr value_enum)]
+                #[arg(long = #long_name, #short_attr #help_attr #default_attr value_enum)]
                 pub #name: Option<#inner>,
             };
         }
@@ -471,21 +503,21 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
             TypeKind::Vec(inner_ty) => {
                 // Vec<T> -> multi-value arg
                 quote! {
-                    #[arg(long = #long_name, #help_attr num_args = 0..)]
+                    #[arg(long = #long_name, #short_attr #help_attr num_args = 0..)]
                     pub #name: Vec<#inner_ty>,
                 }
             }
             TypeKind::Option(inner_ty) => {
                 // Option<T> -> optional arg (already optional)
                 quote! {
-                    #[arg(long = #long_name, #help_attr #default_attr)]
+                    #[arg(long = #long_name, #short_attr #help_attr #default_attr)]
                     pub #name: Option<#inner_ty>,
                 }
             }
             TypeKind::Scalar(scalar_ty) | TypeKind::Enum(scalar_ty) => {
                 // Scalar -> wrap in Option for CLI
                 quote! {
-                    #[arg(long = #long_name, #help_attr #default_attr)]
+                    #[arg(long = #long_name, #short_attr #help_attr #default_attr)]
                     pub #name: Option<#scalar_ty>,
                 }
             }
@@ -609,7 +641,12 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
             let name = &f.ident;
             let ty = &f.ty;
             let name_str = name.to_string();
-            let long_name = name_str.replace('_', "-");
+            // Use custom long name if provided, otherwise derive from field name
+            let long_name = f
+                .attrs
+                .long
+                .clone()
+                .unwrap_or_else(|| name_str.replace('_', "-"));
             generate_arg(
                 name,
                 ty,
@@ -618,6 +655,7 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                 f.attrs.value_enum,
                 &f.attrs.doc,
                 &f.attrs.default_expr,
+                &f.attrs.short,
             )
         })
         .collect();
@@ -629,7 +667,12 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
             let name = &f.ident;
             let ty = &f.ty;
             let name_str = name.to_string();
-            let long_name = name_str.replace('_', "-");
+            // Use custom long name if provided, otherwise derive from field name
+            let long_name = f
+                .attrs
+                .long
+                .clone()
+                .unwrap_or_else(|| name_str.replace('_', "-"));
             generate_arg(
                 name,
                 ty,
@@ -638,6 +681,7 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                 f.attrs.value_enum,
                 &f.attrs.doc,
                 &None, // No defaults for update - user is changing existing values
+                &f.attrs.short,
             )
         })
         .collect();
@@ -649,7 +693,12 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
             let name = &f.ident;
             let ty = &f.ty;
             let name_str = name.to_string();
-            let long_name = name_str.replace('_', "-");
+            // Use custom long name if provided for CLI arg matching
+            let long_name = f
+                .attrs
+                .long
+                .clone()
+                .unwrap_or_else(|| name_str.replace('_', "-"));
             generate_json_extraction(
                 name,
                 ty,
@@ -668,7 +717,12 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
             let name = &f.ident;
             let ty = &f.ty;
             let name_str = name.to_string();
-            let long_name = name_str.replace('_', "-");
+            // Use custom long name if provided for CLI arg matching
+            let long_name = f
+                .attrs
+                .long
+                .clone()
+                .unwrap_or_else(|| name_str.replace('_', "-"));
             generate_json_extraction(
                 name,
                 ty,
