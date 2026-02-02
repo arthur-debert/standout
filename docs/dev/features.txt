@@ -1,0 +1,365 @@
+Standout Feature List
+=====================
+
+OUTPUT FORMATTING
+-----------------
+
+Output Modes:
+  - Auto: Auto-detect terminal capabilities
+  - Term: Force ANSI escape codes (terminal output)
+  - Text: Plain text (no ANSI codes)
+  - TermDebug: Debug mode with visible style tags [name]text[/name]
+  - Json: Structured JSON output (skips templating)
+  - Yaml: Structured YAML output
+  - Xml: Structured XML output
+  - Csv: Flat CSV output
+
+Color Mode:
+  - Light/Dark mode adaptation
+  - Automatic OS detection via detect_color_mode()
+  - Customizable detection via set_theme_detector()
+
+Styling System:
+  - CSS-like style definitions
+  - Adaptive properties (light/dark variants)
+  - Theme collections with named styles
+  - Auto dark/light mode detection
+  - Base themes / merging via YAML
+  - Style aliasing support
+  - Tag-based styling: [tagname]content[/tagname]
+  - Unknown tag handling (passthrough with ? marker or strip)
+  - Nested tag support
+  - Tag validation via validate_template()
+
+Style Definitions:
+  - StyleDefinition with attributes
+  - StyleAttributes: color, formatting, effects
+  - StyleValue: style or alias reference
+  - ColorDef: named, 256-color, RGB
+  - YAML stylesheet parsing: parse_stylesheet()
+  - CSS parser: parse_css()
+
+Color Formats:
+  - Named ANSI colors (16 colors + bright variants)
+  - 256-color palette
+  - RGB hex (#ff6b35)
+  - RGB tuples [255, 107, 53]
+  - RGB to ANSI conversion utilities
+
+Templates:
+  - Swappable engine: MiniJinja (full-featured), Simple (lightweight)
+  - Special styling syntax: [title]{{post.title}}[/title]
+  - Double-pass render (template then style)
+  - Auto detection and handling of plain text degradation
+  - Debug mode for verbatim styling
+  - Structured output (json, csv, yaml, xml)
+
+MiniJinja Engine:
+  - {{ variable }} syntax
+  - {% for %}, {% if %}, {% while %} control flow
+  - {{ value | filter }} filter expressions
+  - Template inheritance
+  - File extensions: .jinja, .jinja2, .j2
+
+Simple Engine:
+  - {variable} substitution syntax
+  - Format-string style (no loops/conditions)
+  - File extension: .stpl
+
+Template Engine Abstraction:
+  - TemplateEngine trait for pluggable backends
+  - Custom engines implementable via trait
+
+Template Registry & Management:
+  - TemplateRegistry: file-based template resolution
+  - Template discovery with walk_template_dir()
+  - Multi-source resolution (inline -> embedded -> file-based)
+  - Extension priority system
+  - ResolvedTemplate: compiled template with metadata
+
+Rendering Functions:
+  - render(): simple ad-hoc rendering
+  - render_with_output(): explicit output mode
+  - render_with_mode(): full control over output and color modes
+  - render_auto(): smart dispatch between templating and structured output
+  - render_auto_with_context(): auto-dispatch with context injection
+  - render_auto_with_spec(): auto-dispatch with render specification
+  - render_with_vars(): rendering with variable overrides
+  - render_with_context(): rendering with context objects
+  - validate_template(): compile-time template validation
+
+
+TABULAR OUTPUT
+--------------
+
+Column Formatting:
+  - TabularFormatter: Unicode-aware terminal table formatting
+  - FlatDataSpec / TabularSpec: column specification builders
+  - Column: individual column definition
+  - Width strategies: Fixed, Bounded, Fill
+  - Align: Left, Right, Center
+  - TruncateAt: End, Start, Middle
+  - BorderStyle: table border decoration
+  - Overflow modes: Truncate, Wrap, Clip, Expand
+
+Template Filters for Tables:
+  - col(width, align='', truncate=''): multi-option column formatting
+  - pad_left(width), pad_right(width), pad_center(width): padding
+  - truncate_at(width, position, suffix): truncate with indicator
+  - display_width: calculate display width of Unicode strings
+
+Table Utilities:
+  - display_width(): Unicode-aware width calculation
+  - truncate_start(), truncate_end(), truncate_middle()
+  - pad_left(), pad_right(), pad_center()
+  - wrap(), wrap_indent(): word-wrap utilities
+
+Derive Macros:
+  - #[derive(Tabular)]: generate TabularSpec from struct
+  - #[derive(TabularRow)]: optimized row extraction without JSON
+
+Field Annotations for Tabular:
+  - #[col(width = ...)]: column width (fixed, bounded, fill)
+  - #[col(align = "...")]: text alignment
+  - #[col(anchor = "...")]: column position (left, right)
+  - #[col(overflow = "...")]: overflow handling
+  - #[col(truncate_at = "...")]: truncation position
+  - #[col(style = "...")]: style name
+  - #[col(style_from_value)]: use value as style name
+  - #[col(header = "...")]: custom header
+  - #[col(null_repr = "...")]: null representation
+  - #[col(key = "...")]: data extraction key (dot notation)
+  - #[col(skip)]: exclude from spec
+
+Container Annotations:
+  - #[tabular(separator = "...")]: column separator
+  - #[tabular(prefix = "...")]: row prefix
+  - #[tabular(suffix = "...")]: row suffix
+
+
+DISPATCH
+--------
+
+Handler Modes:
+  - ThreadSafe (default): Handler trait (Send + Sync, &self)
+  - Local: LocalHandler trait (mutable state, &mut self)
+
+App Types:
+  - App<ThreadSafe>: default thread-safe dispatcher
+  - App<Local> / LocalApp: single-threaded with mutable state
+  - AppBuilder: thread-safe application builder
+  - LocalAppBuilder: local application builder
+
+Command Handler Types:
+  - Handler trait: thread-safe handler interface
+  - LocalHandler trait: local mutable handler interface
+  - FnHandler<F, T>: closure wrapper for Fn handlers
+  - LocalFnHandler<F, T>: closure wrapper for FnMut handlers
+  - SimpleFnHandler<F, T>: simplified closure variant
+  - LocalSimpleFnHandler<F, T>: local simplified variant
+
+Handler Output:
+  - Output::Render(data): data to render via template
+  - Output::Silent: no output
+  - Output::Binary(bytes, filename): binary file output
+  - HandlerResult<T>: Result<Output<T>, Error>
+
+Command Context:
+  - CommandContext: runtime environment for handlers
+  - Extensions: type-safe state injection container
+  - get_required::<T>(): retrieve typed extensions
+  - app_state: immutable app-lifetime state (Arc-wrapped)
+  - extensions: mutable request-scoped state
+
+Command Dispatch:
+  - extract_command_path(): parse command hierarchy
+  - get_deepest_matches(): navigate ArgMatches tree
+  - has_subcommand(): check for subcommand
+  - insert_default_command(): add default subcommand
+  - path_to_string() / string_to_path(): path conversion
+
+Dispatch Derive Macro:
+  - #[derive(Dispatch)]: generate dispatch from clap Subcommand enums
+  - #[dispatch(handlers = path)]: module containing handlers
+  - #[dispatch(handler = path::fn)]: custom handler override
+  - #[dispatch(template = "path")]: custom template override
+  - #[dispatch(nested)]: treat as nested subcommand
+  - #[dispatch(skip)]: skip variant
+
+Handler Attribute Macro:
+  - #[handler]: transform pure functions into CLI handlers
+  - #[flag]: boolean flag
+  - #[arg]: CLI argument
+  - #[ctx]: CommandContext injection
+  - #[matches]: raw ArgMatches (escape hatch)
+
+
+HOOKS SYSTEM
+------------
+
+Hook Points:
+  - Pre-dispatch hooks: validation, auth, setup (can abort)
+  - Post-dispatch hooks: data transformation, enrichment
+  - Post-output hooks: output transformation, logging
+
+Hook Types:
+  - Hooks: container for all hook callbacks
+  - HookPhase: phase enum (PreDispatch, PostDispatch, PostOutput)
+  - HookError: hook-specific errors
+  - RenderedOutput: output from hooks (Text, Binary, Silent)
+
+Hook Callbacks:
+  - PreDispatchFn: before handler execution
+  - PostDispatchFn: after handler, before rendering
+  - PostOutputFn: after rendering complete
+
+
+FILE LOADING & EMBEDDING
+------------------------
+
+Runtime File Loading:
+  - FileRegistry: load files from disk with hot-reload
+  - FileRegistryConfig: configuration for file loading
+  - LoadedFile / LoadedEntry: file metadata
+  - extension_priority(): resolve extension conflicts
+  - walk_dir(): directory traversal
+  - strip_extension(): remove file extensions
+
+Compile-Time Embedding:
+  - embed_templates!("./templates"): embed template directory
+  - embed_styles!("./styles"): embed stylesheet directory
+  - EmbeddedSource: embedded resource container
+  - EmbeddedTemplates, EmbeddedStyles: typed resources
+  - Hot-reload in debug builds, embedded in release
+
+Template Extensions Supported:
+  - .jinja, .jinja2, .j2: MiniJinja templates (priority order)
+  - .txt: simple text templates
+  - .stpl: simple engine templates
+
+Stylesheet Extensions:
+  - .yaml, .yml: YAML stylesheets (priority order)
+
+
+HELP SYSTEM
+-----------
+
+Help Rendering:
+  - render_help(): render styled help for clap command
+  - render_help_with_topics(): help with "Learn More" section
+  - HelpConfig: help rendering configuration
+  - default_help_theme(): built-in help theme
+
+Help Topics:
+  - Topic: single help topic with title, content, type
+  - TopicRegistry: collection of topics with lookup
+  - TopicType: Text or Markdown (affects rendering)
+  - render_topic() / render_topics_list(): topic rendering
+  - display_with_pager(): show long content through pager
+  - Load from files: add_from_directory(), add_from_directory_if_exists()
+
+
+VIEW HELPERS
+------------
+
+ListView:
+  - list_view(): builder for standardized list output
+  - ListViewBuilder: fluent builder for list views
+  - ListViewResult<T>: serializable list result type
+  - Intro text, ending text, status messages
+  - Total count, filter summary, tabular spec
+  - Three rendering modes: tabular, item template, full override
+
+Message System:
+  - Message: individual status message
+  - MessageLevel: Info, Warning, Error
+
+Group Builder:
+  - GroupBuilder: fluent builder for nested command hierarchies
+  - CommandConfig: inline command configuration
+  - Nested subcommand support
+  - Convention-based handler/template resolution
+
+
+PIPING (standout-pipe)
+----------------------
+
+Piping Features:
+  - SimplePipe: execute shell commands with piped input
+  - PipeTarget trait: pluggable pipe targets
+  - PipeMode::Passthrough: side-effect piping, return original
+  - PipeMode::Capture: use command output as new result
+  - PipeMode::Consume: suppress output
+  - Configurable timeout (default 30s)
+
+Platform Support:
+  - clipboard(): macOS (pbcopy), Linux (xclip)
+  - Windows support via cmd.exe
+  - Unix support via sh -c
+
+Shell Execution:
+  - run_piped(): execute with stdin/stdout
+  - Timeout support with forced kill
+  - Cross-platform shell handling
+
+
+QUERY ENGINE (standout-seeker)
+------------------------------
+
+Query Building:
+  - Query: fluent query builder
+  - Clause / ClauseValue: individual query clauses
+  - ClauseGroup: AND, OR, NOT grouping
+
+Query Operators:
+  - Op::Eq, Op::Ne: equality
+  - Op::Gt, Op::Gte, Op::Lt, Op::Lte: comparisons
+  - Op::StartsWith, Op::EndsWith, Op::Contains: string matching
+  - Op::Regex: regex pattern matching
+  - Op::Before, Op::After: timestamp comparisons
+  - Op::In: enum membership
+
+Field Types:
+  - Value::String, Value::Number, Value::Bool: basic types
+  - Value::Timestamp: datetime values
+  - Number::I64, Number::U64, Number::F64: numeric variants
+  - Timestamp: millisecond-based timestamps
+  - Value::None: null/missing values
+
+Execution:
+  - Query::filter(): filter collections with accessor function
+  - OrderBy / Dir: multi-field ordering (Asc, Desc)
+  - Pagination with limit() and offset()
+  - compare_values(): comparison utility
+
+Trait Integration:
+  - Seekable: query-enabled struct trait
+  - SeekerEnum: custom enum field support
+  - SeekerTimestamp: custom timestamp type support
+  - SeekerSchema: type information registry
+
+Derive Support:
+  - #[derive(Seekable)]: auto-generate field accessors
+  - #[seek(String)], #[seek(Number)], etc.: field type annotations
+  - #[seek(skip)]: exclude fields
+  - #[seek(rename = "...")]: custom field names
+
+
+TAG PARSER (standout-bbparser)
+------------------------------
+
+Tag Parsing:
+  - BBParser: parse [tag]content[/tag] style markup
+  - TagTransform: how to transform tags (Apply, Remove, Keep)
+  - Nested tag support
+  - Tag validation before parsing
+
+Unknown Tag Handling:
+  - UnknownTagBehavior::Passthrough: keep with ? marker
+  - UnknownTagBehavior::Strip: remove tags, keep content
+  - UnknownTagKind: classification (Open, Close, Unbalanced, UnexpectedClose)
+
+Tag Validation:
+  - validate(): check for unknown tags
+  - UnknownTagError, UnknownTagErrors: error types
+  - CSS identifier syntax rules for tag names
