@@ -284,6 +284,30 @@ impl AppBuilder {
         self.pending_commands.borrow().contains_key(path)
     }
 
+    /// Returns subcommand names for a registered group.
+    fn get_subcommand_names(&self, group_path: &str) -> Vec<String> {
+        let prefix = format!("{}.", group_path);
+        self.pending_commands
+            .borrow()
+            .keys()
+            .filter_map(|key| {
+                key.strip_prefix(&prefix)
+                    .filter(|suffix| !suffix.contains('.'))
+                    .map(String::from)
+            })
+            .collect()
+    }
+
+    /// Returns all root-level command names.
+    fn get_root_names(&self) -> Vec<String> {
+        let mut names = std::collections::HashSet::new();
+        for key in self.pending_commands.borrow().keys() {
+            let root = key.split('.').next().unwrap_or(key);
+            names.insert(root.to_string());
+        }
+        names.into_iter().collect()
+    }
+
     /// Builds the App instance.
     ///
     /// # Errors
@@ -337,6 +361,23 @@ impl AppBuilder {
                 // If we can't get mut, it means the engine is already shared (e.g. via ensure_commands_finalized called early?)
                 // In that case, we can't add templates.
                 // This might be a warning condition?
+            }
+        }
+
+        // Check for default command conflicts
+        if let Some(ref default_name) = self.default_command {
+            let subcommands = self.get_subcommand_names(default_name);
+            if !subcommands.is_empty() {
+                let root_names = self.get_root_names();
+                for sub in &subcommands {
+                    if root_names.contains(sub) && sub != default_name {
+                        return Err(SetupError::CommandConflict {
+                            default_group: default_name.clone(),
+                            subcommand: sub.clone(),
+                            root_command: sub.clone(),
+                        });
+                    }
+                }
             }
         }
 

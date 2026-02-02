@@ -124,6 +124,7 @@ mod dispatch;
 mod handler;
 mod hooks;
 mod render;
+mod resource;
 
 // Re-export command routing utilities
 pub use dispatch::{
@@ -145,3 +146,9 @@ pub use hooks::{
 
 // Re-export render abstraction
 pub use render::{from_fn, from_fn_mut, LocalRenderFn, RenderError, RenderFn};
+
+// Re-export Resource types
+pub use resource::{
+    app_logic_identity, validate_identity, AppLogicError, IdResolutionError, ResourcePipelineError,
+    ResourceQuery, ResourceStore, ValidationError,
+};

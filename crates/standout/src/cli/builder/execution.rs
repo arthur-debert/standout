@@ -1422,18 +1422,18 @@ mod tests {
     // ============================================================================
 
     #[test]
-    fn test_default_command_builder() {
-        let builder = AppBuilder::new().default_command("list");
+    fn test_default_builder() {
+        let builder = AppBuilder::new().default("list");
 
         assert_eq!(builder.default_command, Some("list".to_string()));
     }
 
     #[test]
-    fn test_default_command_naked_invocation() {
+    fn test_default_naked_invocation() {
         use serde_json::json;
 
         let builder = AppBuilder::new()
-            .default_command("list")
+            .default("list")
             .command(
                 "list",
                 |_m, _ctx| Ok(HandlerOutput::Render(json!({"items": ["a", "b"]}))),
@@ -1458,11 +1458,11 @@ mod tests {
     }
 
     #[test]
-    fn test_default_command_with_options() {
+    fn test_default_with_options() {
         use serde_json::json;
 
         let builder = AppBuilder::new()
-            .default_command("list")
+            .default("list")
             .command(
                 "list",
                 |_m, _ctx| Ok(HandlerOutput::Render(json!({"count": 42}))),
@@ -1480,11 +1480,11 @@ mod tests {
     }
 
     #[test]
-    fn test_default_command_explicit_command_overrides() {
+    fn test_default_explicit_command_overrides() {
         use serde_json::json;
 
         let builder = AppBuilder::new()
-            .default_command("list")
+            .default("list")
             .command(
                 "list",
                 |_m, _ctx| Ok(HandlerOutput::Render(json!({"cmd": "list"}))),
@@ -1509,7 +1509,7 @@ mod tests {
     }
 
     #[test]
-    fn test_default_command_no_default_set() {
+    fn test_default_no_default_set() {
         use serde_json::json;
 
         let builder = AppBuilder::new()
@@ -1525,6 +1525,76 @@ mod tests {
         // Without default command, naked invocation should return NoMatch
         let result = builder.dispatch_from(cmd, ["app"]);
         assert!(!result.is_handled());
+    }
+
+    #[test]
+    fn test_conflict_detection_prevents_ambiguity() {
+        use serde_json::json;
+
+        // Create a builder with a group "todo" and a root command "view" that conflicts
+        let result = AppBuilder::new()
+            .default("todo")
+            .group("todo", |g| {
+                g.command("view", |_m, _ctx| Ok(HandlerOutput::Render(json!({}))))
+                    .command("list", |_m, _ctx| Ok(HandlerOutput::Render(json!({}))))
+            })
+            .unwrap()
+            .command(
+                "view", // Conflicts with todo.view!
+                |_m, _ctx| Ok(HandlerOutput::Render(json!({}))),
+                "",
+            )
+            .unwrap()
+            .build();
+
+        assert!(
+            matches!(result, Err(SetupError::CommandConflict { .. })),
+            "Expected CommandConflict error"
+        );
+    }
+
+    #[test]
+    fn test_no_conflict_when_names_differ() {
+        use serde_json::json;
+
+        // Create a builder with a group "todo" and a root command "version" that doesn't conflict
+        let result = AppBuilder::new()
+            .default("todo")
+            .group("todo", |g| {
+                g.command("view", |_m, _ctx| Ok(HandlerOutput::Render(json!({}))))
+                    .command("list", |_m, _ctx| Ok(HandlerOutput::Render(json!({}))))
+            })
+            .unwrap()
+            .command(
+                "version", // No conflict - different name
+                |_m, _ctx| Ok(HandlerOutput::Render(json!({}))),
+                "",
+            )
+            .unwrap()
+            .build();
+
+        assert!(result.is_ok(), "Expected Ok but got error");
+    }
+
+    #[test]
+    fn test_no_conflict_without_default() {
+        use serde_json::json;
+
+        // Without setting a default, there should be no conflict detection
+        let result = AppBuilder::new()
+            .group("todo", |g| {
+                g.command("view", |_m, _ctx| Ok(HandlerOutput::Render(json!({}))))
+            })
+            .unwrap()
+            .command(
+                "view", // Would conflict if todo was default, but it's not
+                |_m, _ctx| Ok(HandlerOutput::Render(json!({}))),
+                "",
+            )
+            .unwrap()
+            .build();
+
+        assert!(result.is_ok(), "Expected Ok but got error");
     }
 
     // ============================================================================
