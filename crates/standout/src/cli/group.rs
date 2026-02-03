@@ -23,9 +23,16 @@ use standout_pipe::PipeTarget;
 /// A recipe for creating a dispatch closure.
 ///
 /// Unlike `ErasedCommandConfig::register` which consumes self, this trait
-/// allows creating dispatch closures on demand without consuming the recipe.
-/// This enables deferred closure creation where the theme and context_registry
-/// are captured at dispatch time rather than at registration time.
+/// takes `&self` to allow deferred closure creation. This enables late binding
+/// where the theme is passed at dispatch time rather than captured at registration.
+///
+/// # Implementation Notes
+///
+/// Most implementations (`ClosureRecipe`, `StructRecipe`) can be called multiple
+/// times since they clone their Rc-wrapped handlers. However, `ErasedConfigRecipe`
+/// is single-use due to type erasure constraints - it will panic if called twice.
+/// This is acceptable because `ensure_commands_finalized()` is guarded to run
+/// only once per builder.
 pub(crate) trait CommandRecipe {
     /// Returns the template for this command, if explicitly set.
     #[allow(dead_code)]
@@ -41,7 +48,9 @@ pub(crate) trait CommandRecipe {
 
     /// Creates a dispatch closure with the given configuration.
     ///
-    /// This can be called multiple times (unlike ErasedCommandConfig::register).
+    /// # Panics
+    ///
+    /// `ErasedConfigRecipe` will panic if called more than once (see trait docs).
     fn create_dispatch(
         &self,
         template: &str,
@@ -237,6 +246,16 @@ where
 ///
 /// This allows group-registered commands to use the deferred closure pattern.
 /// The inner config is wrapped in RefCell to allow interior mutability.
+///
+/// # Single-Use Constraint
+///
+/// Unlike `ClosureRecipe` and `StructRecipe`, this implementation can only
+/// have `create_dispatch` called once. This is because `ErasedCommandConfig::register`
+/// consumes `Box<Self>`, so we must use `.take()` to extract it from the RefCell.
+///
+/// This constraint is safe because `ensure_commands_finalized()` in `AppBuilder`
+/// is guarded to run only once, so each recipe's `create_dispatch` is called
+/// exactly once during the builder's lifecycle.
 pub(crate) struct ErasedConfigRecipe {
     config: RefCell<Option<Box<dyn ErasedCommandConfig>>>,
     #[allow(dead_code)]
