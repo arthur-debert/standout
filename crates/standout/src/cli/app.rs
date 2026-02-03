@@ -21,6 +21,7 @@ use super::hooks::Hooks;
 use super::result::HelpResult;
 use crate::cli::handler::{CommandContext, HandlerResult, Output as HandlerOutput, RunResult};
 use crate::cli::hooks::{HookError, RenderedOutput, TextOutput};
+use standout_dispatch::verify::{verify_handler_args, ExpectedArg};
 use std::collections::HashMap;
 
 /// Gets the current terminal width, or None if not available.
@@ -62,6 +63,8 @@ pub struct App {
     pub(crate) registry: TopicRegistry,
     /// Registered command handlers.
     pub(crate) commands: HashMap<String, DispatchFn>,
+    /// Expected arguments for each command (for verification).
+    pub(crate) expected_args: HashMap<String, Vec<ExpectedArg>>,
 }
 
 impl App {
@@ -84,6 +87,7 @@ impl App {
             core: AppCore::new(),
             registry: TopicRegistry::new(),
             commands: HashMap::new(),
+            expected_args: HashMap::new(),
         }
     }
 
@@ -93,6 +97,7 @@ impl App {
             core: AppCore::new(),
             registry,
             commands: HashMap::new(),
+            expected_args: HashMap::new(),
         }
     }
 
@@ -642,6 +647,46 @@ impl App {
         );
         HelpResult::Error(err)
     }
+
+    /// Verifies that registered handlers match the CLI command definition.
+    ///
+    /// This checks that all required arguments expected by handlers are present
+    /// in the clap Command definition with compatible types and configurations.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use clap::{Arg, Command};
+    /// use standout::cli::App;
+    ///
+    /// #[handler]
+    /// fn list_handler(#[arg] filter: Option<String>) -> Result<Output<Data>, Error> {
+    ///     // ...
+    /// }
+    ///
+    /// // Build your app with handlers
+    /// let app = App::builder()
+    ///     .command_handler("list", list_handler_Handler, "list_template")
+    ///     .unwrap()
+    ///     .build()?;
+    ///
+    /// // Define your CLI structure
+    /// let cmd = Command::new("myapp")
+    ///     .subcommand(Command::new("list")
+    ///         .arg(Arg::new("filter").long("filter")));
+    ///
+    /// // Verify they match - fails fast with helpful error if not
+    /// app.verify_command(&cmd)?;
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns a `SetupError::VerificationFailed` if any mismatches are found.
+    /// The error contains detailed information about what doesn't match and
+    /// how to fix it.
+    pub fn verify_command(&self, cmd: &Command) -> Result<(), SetupError> {
+        verify_recursive(cmd, &self.expected_args, &[], true)
+    }
 }
 
 impl Default for App {
@@ -665,6 +710,31 @@ fn find_subcommand_recursive<'a>(cmd: &'a Command, keywords: &[&str]) -> Option<
 fn find_subcommand<'a>(cmd: &'a Command, name: &str) -> Option<&'a Command> {
     cmd.get_subcommands()
         .find(|s| s.get_name() == name || s.get_aliases().any(|a| a == name))
+}
+
+fn verify_recursive(
+    cmd: &Command,
+    expected_args: &HashMap<String, Vec<ExpectedArg>>,
+    parent_path: &[&str],
+    is_root: bool,
+) -> Result<(), SetupError> {
+    let mut current_path = parent_path.to_vec();
+    if !is_root && !cmd.get_name().is_empty() {
+        current_path.push(cmd.get_name());
+    }
+
+    // Check current command
+    let path_str = current_path.join(".");
+    if let Some(expected) = expected_args.get(&path_str) {
+        verify_handler_args(cmd, &path_str, expected)?;
+    }
+
+    // Check subcommands
+    for sub in cmd.get_subcommands() {
+        verify_recursive(sub, expected_args, &current_path, false)?;
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

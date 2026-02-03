@@ -124,6 +124,7 @@ mod dispatch;
 mod handler;
 mod hooks;
 mod render;
+pub mod verify;
 
 // Re-export command routing utilities
 pub use dispatch::{

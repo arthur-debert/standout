@@ -14,11 +14,37 @@
 //! }
 //!
 //! // Generates:
-//! // pub fn list__handler(m: &ArgMatches) -> Result<Vec<Item>, Error> {
+//! // 1. Handler wrapper for dispatch
+//! // pub fn list__handler(m: &ArgMatches, ctx: &CommandContext) -> Result<Vec<Item>, Error> {
 //! //     let all = m.get_flag("all");
 //! //     let limit = m.get_one::<usize>("limit").copied();
 //! //     list(all, limit)
 //! // }
+//! //
+//! // 2. Expected args metadata for verification
+//! // pub fn list__expected_args() -> Vec<ExpectedArg> {
+//! //     vec![
+//! //         ExpectedArg::flag("all", "all"),
+//! //         ExpectedArg::optional_arg("limit", "limit"),
+//! //     ]
+//! // }
+//! ```
+//!
+//! # Verification
+//!
+//! The generated `__expected_args()` function can be used with
+//! [`standout_dispatch::verify::verify_handler_args`] to check that a clap
+//! `Command` definition matches what the handler expects:
+//!
+//! ```rust,ignore
+//! use standout_dispatch::verify::verify_handler_args;
+//!
+//! let command = Command::new("list")
+//!     .arg(Arg::new("all").long("all").action(ArgAction::SetTrue))
+//!     .arg(Arg::new("limit").long("limit"));
+//!
+//! // This will return an error with helpful diagnostics if mismatched
+//! verify_handler_args(&command, "list", &list__expected_args())?;
 //! ```
 //!
 //! # Parameter Annotations
@@ -203,23 +229,54 @@ fn is_reference_type(ty: &Type) -> bool {
 
 /// Check if the return type is Result<(), E> (unit result)
 fn is_unit_result(fn_item: &ItemFn) -> bool {
+    matches!(extract_result_ok_type(fn_item), Some(Type::Tuple(t)) if t.elems.is_empty())
+}
+
+/// Extract the Ok type from a Result<T, E> return type
+fn extract_result_ok_type(fn_item: &ItemFn) -> Option<Type> {
     if let syn::ReturnType::Type(_, ty) = &fn_item.sig.output {
         if let Type::Path(type_path) = ty.as_ref() {
             if let Some(segment) = type_path.path.segments.last() {
                 if segment.ident == "Result" {
                     if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
-                        // Check if the Ok type is ()
-                        if let Some(syn::GenericArgument::Type(Type::Tuple(tuple))) =
-                            args.args.first()
-                        {
-                            return tuple.elems.is_empty();
+                        if let Some(syn::GenericArgument::Type(ok_type)) = args.args.first() {
+                            return Some(ok_type.clone());
                         }
                     }
                 }
             }
         }
     }
-    false
+    None
+}
+
+/// Generate the expected arg expression for verification
+fn generate_expected_arg(param: &ParamInfo) -> Option<TokenStream> {
+    let cli_name = &param.cli_name;
+    let rust_name = &param.rust_name;
+
+    match &param.kind {
+        ParamKind::Flag { .. } => Some(quote! {
+            ::standout_dispatch::verify::ExpectedArg::flag(#cli_name, #rust_name)
+        }),
+        ParamKind::Arg { .. } => {
+            let ty = &param.ty;
+            if is_option_type(ty) {
+                Some(quote! {
+                    ::standout_dispatch::verify::ExpectedArg::optional_arg(#cli_name, #rust_name)
+                })
+            } else if is_vec_type(ty) {
+                Some(quote! {
+                    ::standout_dispatch::verify::ExpectedArg::vec_arg(#cli_name, #rust_name)
+                })
+            } else {
+                Some(quote! {
+                    ::standout_dispatch::verify::ExpectedArg::required_arg(#cli_name, #rust_name)
+                })
+            }
+        }
+        ParamKind::Ctx | ParamKind::Matches | ParamKind::None => None,
+    }
 }
 
 /// Generate extraction code for a parameter
@@ -285,6 +342,22 @@ fn generate_call_arg(param: &ParamInfo) -> TokenStream {
             quote! { #rust_name }
         }
     }
+}
+
+/// Extract the inner type from Output<T>
+fn extract_output_type(ty: &Type) -> Option<&Type> {
+    if let Type::Path(type_path) = ty {
+        if let Some(segment) = type_path.path.segments.last() {
+            if segment.ident == "Output" {
+                if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
+                    if let Some(syn::GenericArgument::Type(inner)) = args.args.first() {
+                        return Some(inner);
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Main implementation of the #[handler] macro
@@ -357,6 +430,10 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> Result<TokenStream>
     // Generate call arguments
     let call_args: Vec<TokenStream> = params.iter().map(generate_call_arg).collect();
 
+    // Generate expected args for verification
+    let expected_args: Vec<TokenStream> = params.iter().filter_map(generate_expected_arg).collect();
+    let expected_args_name = format_ident!("{}__expected_args", fn_name);
+
     // Determine wrapper signature
     let _wrapper_params = if has_ctx {
         quote! { __matches: &::clap::ArgMatches, __ctx: &::standout_dispatch::CommandContext }
@@ -402,6 +479,24 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> Result<TokenStream>
     }
 
     // Generate the output
+    // Generate Handler struct
+    let handler_struct_name = format_ident!("{}_Handler", fn_name);
+    let ok_type = extract_result_ok_type(&fn_item).ok_or_else(|| {
+        Error::new(
+            fn_item.sig.output.span(),
+            "handler must return Result<T, E>",
+        )
+    })?;
+
+    // If unit result, Output is ()
+    let output_type = if is_unit_result(&fn_item) {
+        quote! { () }
+    } else if let Some(inner) = extract_output_type(&ok_type) {
+        quote! { #inner }
+    } else {
+        quote! { #ok_type }
+    };
+
     Ok(quote! {
         // Original function (with annotations stripped)
         #clean_fn
@@ -410,6 +505,30 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> Result<TokenStream>
         #fn_vis fn #wrapper_name(__matches: &::clap::ArgMatches, __ctx: &::standout_dispatch::CommandContext) #wrapper_return_type {
             #(#extractions)*
             #call_and_return
+        }
+
+        // Generated expected args for verification
+        #fn_vis fn #expected_args_name() -> ::std::vec::Vec<::standout_dispatch::verify::ExpectedArg> {
+            vec![#(#expected_args),*]
+        }
+
+        // Generated Handler struct integration
+        #[allow(non_camel_case_types)]
+        #[derive(Clone, Copy)]
+        #fn_vis struct #handler_struct_name;
+
+        impl ::standout_dispatch::Handler for #handler_struct_name {
+            type Output = #output_type;
+
+            fn handle(&mut self, matches: &::clap::ArgMatches, ctx: &::standout_dispatch::CommandContext)
+                -> ::standout_dispatch::HandlerResult<Self::Output>
+            {
+                ::standout_dispatch::IntoHandlerResult::into_handler_result(#wrapper_name(matches, ctx))
+            }
+
+            fn expected_args(&self) -> ::std::vec::Vec<::standout_dispatch::verify::ExpectedArg> {
+                #expected_args_name()
+            }
         }
     })
 }

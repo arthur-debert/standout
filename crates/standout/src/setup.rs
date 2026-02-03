@@ -1,5 +1,6 @@
 //! Error types for setup operations.
 
+use standout_dispatch::verify::HandlerMismatchError;
 use standout_render::{RegistryError, RenderError};
 
 /// Error type for setup operations.
@@ -17,6 +18,8 @@ pub enum SetupError {
     DuplicateCommand(String),
     /// I/O error during setup (e.g., loading templates/styles).
     Io(std::io::Error),
+    /// Verification failed (handler vs command mismatch).
+    VerificationFailed(HandlerMismatchError),
 }
 
 impl std::fmt::Display for SetupError {
@@ -28,6 +31,7 @@ impl std::fmt::Display for SetupError {
             SetupError::Config(msg) => write!(f, "configuration error: {}", msg),
             SetupError::DuplicateCommand(cmd) => write!(f, "duplicate command: {}", cmd),
             SetupError::Io(err) => write!(f, "setup I/O error: {}", err),
+            SetupError::VerificationFailed(err) => write!(f, "verification failed:\n{}", err),
         }
     }
 }
@@ -49,6 +53,12 @@ impl From<RenderError> for SetupError {
 impl From<RegistryError> for SetupError {
     fn from(e: RegistryError) -> Self {
         SetupError::Template(e.to_string())
+    }
+}
+
+impl From<HandlerMismatchError> for SetupError {
+    fn from(e: HandlerMismatchError) -> Self {
+        SetupError::VerificationFailed(e)
     }
 }
 
