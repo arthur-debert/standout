@@ -87,13 +87,16 @@ impl<R: ClipboardReader + 'static> InputCollector<String> for ClipboardSource<R>
 
     fn is_available(&self, _matches: &ArgMatches) -> bool {
         // Clipboard is available if it has content
-        // We don't want to fail here, so treat errors as "not available"
-        self.reader
-            .read()
-            .ok()
-            .flatten()
-            .map(|s| !s.trim().is_empty())
-            .unwrap_or(false)
+        match self.reader.read() {
+            Ok(Some(content)) => !content.trim().is_empty(),
+            Ok(None) => false,
+            Err(e) => {
+                // Log a warning for clipboard access errors (headless Linux, permission denied, etc.)
+                // This helps users diagnose why clipboard input isn't working
+                eprintln!("Warning: clipboard unavailable: {}", e);
+                false
+            }
+        }
     }
 
     fn collect(&self, _matches: &ArgMatches) -> Result<Option<String>, InputError> {
