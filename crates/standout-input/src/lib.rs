@@ -67,5 +67,8 @@ pub use sources::{
 #[cfg(feature = "editor")]
 pub use sources::{EditorRunner, EditorSource, MockEditorResult, MockEditorRunner};
 
+#[cfg(feature = "simple-prompts")]
+pub use sources::{ConfirmPromptSource, MockTerminal, TerminalIO, TextPromptSource};
+
 // Re-export mock types for testing
 pub use env::{MockClipboard, MockEnv, MockStdin};

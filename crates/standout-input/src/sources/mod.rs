@@ -19,6 +19,9 @@ mod stdin;
 #[cfg(feature = "editor")]
 mod editor;
 
+#[cfg(feature = "simple-prompts")]
+mod prompt;
+
 pub use arg::{ArgSource, FlagSource};
 pub use clipboard::ClipboardSource;
 pub use default::DefaultSource;
@@ -27,3 +30,6 @@ pub use stdin::{read_if_piped, StdinSource};
 
 #[cfg(feature = "editor")]
 pub use editor::{EditorRunner, EditorSource, MockEditorResult, MockEditorRunner};
+
+#[cfg(feature = "simple-prompts")]
+pub use prompt::{ConfirmPromptSource, MockTerminal, TerminalIO, TextPromptSource};
