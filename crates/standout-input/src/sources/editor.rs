@@ -68,7 +68,20 @@ impl EditorRunner for RealEditorRunner {
     }
 
     fn run(&self, editor: &str, path: &Path) -> io::Result<()> {
-        let status = Command::new(editor).arg(path).status()?;
+        // Parse the editor command to handle cases like "code --wait" or "vim -u NONE"
+        let parts = shell_words::split(editor).map_err(|e| {
+            io::Error::other(format!(
+                "Failed to parse editor command '{}': {}",
+                editor, e
+            ))
+        })?;
+
+        if parts.is_empty() {
+            return Err(io::Error::other("Editor command is empty"));
+        }
+
+        let (cmd, args) = parts.split_first().unwrap();
+        let status = Command::new(cmd).args(args).arg(path).status()?;
 
         if status.success() {
             Ok(())

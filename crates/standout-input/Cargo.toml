@@ -11,7 +11,7 @@ readme = "README.md"
 
 [features]
 default = ["editor", "simple-prompts"]
-editor = ["dep:tempfile", "dep:which"]
+editor = ["dep:tempfile", "dep:which", "dep:shell-words"]
 simple-prompts = []
 inquire = ["dep:inquire"]
 # dialoguer = ["dep:dialoguer"]  # Future
@@ -23,6 +23,7 @@ clap = { version = "4", default-features = false, features = ["std"] }
 # Optional: editor support
 tempfile = { version = "3", optional = true }
 which = { version = "7", optional = true }
+shell-words = { version = "1", optional = true }
 
 # Optional: inquire prompts
 inquire = { version = "0.7", optional = true, features = ["editor"] }
