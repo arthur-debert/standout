@@ -387,10 +387,19 @@ impl AppBuilder {
             template_engine: self.template_engine,
         };
 
+        // Collect expected arguments for verification
+        let expected_args = self
+            .pending_commands
+            .borrow()
+            .iter()
+            .map(|(path, cmd)| (path.clone(), cmd.recipe.expected_args()))
+            .collect();
+
         Ok(App {
             core,
             registry: self.registry,
             commands,
+            expected_args,
         })
     }
 

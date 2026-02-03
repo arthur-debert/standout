@@ -14,6 +14,7 @@ use std::rc::Rc;
 use super::dispatch::{render_handler_output, DispatchFn};
 use crate::cli::handler::{CommandContext, FnHandler, Handler, HandlerResult};
 use crate::cli::hooks::{Hooks, RenderedOutput, TextOutput};
+use standout_dispatch::verify::ExpectedArg;
 use standout_pipe::PipeTarget;
 
 // ============================================================================
@@ -57,6 +58,9 @@ pub(crate) trait CommandRecipe {
         context_registry: &ContextRegistry,
         template_engine: Rc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn;
+
+    /// Returns the arguments expected by this command handler.
+    fn expected_args(&self) -> Vec<ExpectedArg>;
 }
 
 /// Recipe for closure-based command handlers.
@@ -146,6 +150,10 @@ where
                 )
             },
         ))
+    }
+
+    fn expected_args(&self) -> Vec<ExpectedArg> {
+        self.handler.borrow().expected_args()
     }
 }
 
@@ -240,6 +248,10 @@ where
             },
         ))
     }
+
+    fn expected_args(&self) -> Vec<ExpectedArg> {
+        self.handler.borrow().expected_args()
+    }
 }
 
 /// Wrapper around ErasedCommandConfig that implements CommandRecipe.
@@ -308,6 +320,15 @@ impl CommandRecipe for ErasedConfigRecipe {
             context_registry.clone(),
             template_engine,
         )
+    }
+
+    fn expected_args(&self) -> Vec<ExpectedArg> {
+        // See implementation note in prev step thought: we check if config is present
+        if let Some(config) = self.config.borrow().as_ref() {
+            config.expected_args()
+        } else {
+            Vec::new()
+        }
     }
 }
 
@@ -574,6 +595,8 @@ pub(crate) trait ErasedCommandConfig {
         context_registry: ContextRegistry,
         template_engine: Rc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn;
+
+    fn expected_args(&self) -> Vec<ExpectedArg>;
 }
 
 /// Builder for a group of related commands.
@@ -818,6 +841,10 @@ where
             },
         ))
     }
+
+    fn expected_args(&self) -> Vec<ExpectedArg> {
+        self.handler.borrow().expected_args()
+    }
 }
 
 /// Internal: struct-based command config that implements ErasedCommandConfig
@@ -880,6 +907,10 @@ where
                 )
             },
         ))
+    }
+
+    fn expected_args(&self) -> Vec<ExpectedArg> {
+        self.handler.borrow().expected_args()
     }
 }
 

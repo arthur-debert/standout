@@ -229,23 +229,25 @@ fn is_reference_type(ty: &Type) -> bool {
 
 /// Check if the return type is Result<(), E> (unit result)
 fn is_unit_result(fn_item: &ItemFn) -> bool {
+    matches!(extract_result_ok_type(fn_item), Some(Type::Tuple(t)) if t.elems.is_empty())
+}
+
+/// Extract the Ok type from a Result<T, E> return type
+fn extract_result_ok_type(fn_item: &ItemFn) -> Option<Type> {
     if let syn::ReturnType::Type(_, ty) = &fn_item.sig.output {
         if let Type::Path(type_path) = ty.as_ref() {
             if let Some(segment) = type_path.path.segments.last() {
                 if segment.ident == "Result" {
                     if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
-                        // Check if the Ok type is ()
-                        if let Some(syn::GenericArgument::Type(Type::Tuple(tuple))) =
-                            args.args.first()
-                        {
-                            return tuple.elems.is_empty();
+                        if let Some(syn::GenericArgument::Type(ok_type)) = args.args.first() {
+                            return Some(ok_type.clone());
                         }
                     }
                 }
             }
         }
     }
-    false
+    None
 }
 
 /// Generate the expected arg expression for verification
@@ -340,6 +342,22 @@ fn generate_call_arg(param: &ParamInfo) -> TokenStream {
             quote! { #rust_name }
         }
     }
+}
+
+/// Extract the inner type from Output<T>
+fn extract_output_type(ty: &Type) -> Option<&Type> {
+    if let Type::Path(type_path) = ty {
+        if let Some(segment) = type_path.path.segments.last() {
+            if segment.ident == "Output" {
+                if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
+                    if let Some(syn::GenericArgument::Type(inner)) = args.args.first() {
+                        return Some(inner);
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Main implementation of the #[handler] macro
@@ -461,6 +479,24 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> Result<TokenStream>
     }
 
     // Generate the output
+    // Generate Handler struct
+    let handler_struct_name = format_ident!("{}_Handler", fn_name);
+    let ok_type = extract_result_ok_type(&fn_item).ok_or_else(|| {
+        Error::new(
+            fn_item.sig.output.span(),
+            "handler must return Result<T, E>",
+        )
+    })?;
+
+    // If unit result, Output is ()
+    let output_type = if is_unit_result(&fn_item) {
+        quote! { () }
+    } else if let Some(inner) = extract_output_type(&ok_type) {
+        quote! { #inner }
+    } else {
+        quote! { #ok_type }
+    };
+
     Ok(quote! {
         // Original function (with annotations stripped)
         #clean_fn
@@ -474,6 +510,25 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> Result<TokenStream>
         // Generated expected args for verification
         #fn_vis fn #expected_args_name() -> ::std::vec::Vec<::standout_dispatch::verify::ExpectedArg> {
             vec![#(#expected_args),*]
+        }
+
+        // Generated Handler struct integration
+        #[allow(non_camel_case_types)]
+        #[derive(Clone, Copy)]
+        #fn_vis struct #handler_struct_name;
+
+        impl ::standout_dispatch::Handler for #handler_struct_name {
+            type Output = #output_type;
+
+            fn handle(&mut self, matches: &::clap::ArgMatches, ctx: &::standout_dispatch::CommandContext)
+                -> ::standout_dispatch::HandlerResult<Self::Output>
+            {
+                ::standout_dispatch::IntoHandlerResult::into_handler_result(#wrapper_name(matches, ctx))
+            }
+
+            fn expected_args(&self) -> ::std::vec::Vec<::standout_dispatch::verify::ExpectedArg> {
+                #expected_args_name()
+            }
         }
     })
 }

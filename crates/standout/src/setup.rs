@@ -17,6 +17,8 @@ pub enum SetupError {
     DuplicateCommand(String),
     /// I/O error during setup (e.g., loading templates/styles).
     Io(std::io::Error),
+    /// Verification failed (handler vs command mismatch).
+    VerificationFailed(String),
 }
 
 impl std::fmt::Display for SetupError {
@@ -28,6 +30,7 @@ impl std::fmt::Display for SetupError {
             SetupError::Config(msg) => write!(f, "configuration error: {}", msg),
             SetupError::DuplicateCommand(cmd) => write!(f, "duplicate command: {}", cmd),
             SetupError::Io(err) => write!(f, "setup I/O error: {}", err),
+            SetupError::VerificationFailed(msg) => write!(f, "verification failed: {}", msg),
         }
     }
 }
