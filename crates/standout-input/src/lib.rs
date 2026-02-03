@@ -70,5 +70,10 @@ pub use sources::{EditorRunner, EditorSource, MockEditorResult, MockEditorRunner
 #[cfg(feature = "simple-prompts")]
 pub use sources::{ConfirmPromptSource, MockTerminal, TerminalIO, TextPromptSource};
 
+#[cfg(feature = "inquire")]
+pub use sources::{
+    InquireConfirm, InquireEditor, InquireMultiSelect, InquirePassword, InquireSelect, InquireText,
+};
+
 // Re-export mock types for testing
 pub use env::{MockClipboard, MockEnv, MockStdin};

@@ -25,7 +25,7 @@ tempfile = { version = "3", optional = true }
 which = { version = "7", optional = true }
 
 # Optional: inquire prompts
-inquire = { version = "0.7", optional = true }
+inquire = { version = "0.7", optional = true, features = ["editor"] }
 
 [dev-dependencies]
 tempfile = "3"
