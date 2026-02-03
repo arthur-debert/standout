@@ -1,0 +1,178 @@
+//! Clipboard input source.
+
+use std::sync::Arc;
+
+use clap::ArgMatches;
+
+use crate::collector::InputCollector;
+use crate::env::{ClipboardReader, RealClipboard};
+use crate::InputError;
+
+/// Collect input from the system clipboard.
+///
+/// This source reads text from the system clipboard. It is available when
+/// the clipboard contains non-empty text content.
+///
+/// # Platform Support
+///
+/// - **macOS**: Uses `pbpaste`
+/// - **Linux**: Uses `xclip -selection clipboard -o`
+/// - **Other**: Returns an error
+///
+/// # Example
+///
+/// ```ignore
+/// use standout_input::{InputChain, ArgSource, ClipboardSource};
+///
+/// let chain = InputChain::<String>::new()
+///     .try_source(ArgSource::new("content"))
+///     .try_source(ClipboardSource::new());
+/// ```
+///
+/// # Testing
+///
+/// Use [`ClipboardSource::with_reader`] to inject a mock for testing:
+///
+/// ```ignore
+/// use standout_input::{ClipboardSource, MockClipboard};
+///
+/// let source = ClipboardSource::with_reader(MockClipboard::with_content("clipboard text"));
+/// ```
+#[derive(Clone)]
+pub struct ClipboardSource<R: ClipboardReader = RealClipboard> {
+    reader: Arc<R>,
+    trim: bool,
+}
+
+impl ClipboardSource<RealClipboard> {
+    /// Create a new clipboard source using real system clipboard.
+    pub fn new() -> Self {
+        Self {
+            reader: Arc::new(RealClipboard),
+            trim: true,
+        }
+    }
+}
+
+impl Default for ClipboardSource<RealClipboard> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<R: ClipboardReader> ClipboardSource<R> {
+    /// Create a clipboard source with a custom reader.
+    ///
+    /// This is primarily used for testing to inject mock clipboard.
+    pub fn with_reader(reader: R) -> Self {
+        Self {
+            reader: Arc::new(reader),
+            trim: true,
+        }
+    }
+
+    /// Control whether to trim whitespace from the clipboard content.
+    ///
+    /// Default is `true`.
+    pub fn trim(mut self, trim: bool) -> Self {
+        self.trim = trim;
+        self
+    }
+}
+
+impl<R: ClipboardReader + 'static> InputCollector<String> for ClipboardSource<R> {
+    fn name(&self) -> &'static str {
+        "clipboard"
+    }
+
+    fn is_available(&self, _matches: &ArgMatches) -> bool {
+        // Clipboard is available if it has content
+        match self.reader.read() {
+            Ok(Some(content)) => !content.trim().is_empty(),
+            Ok(None) => false,
+            Err(e) => {
+                // Log a warning for clipboard access errors (headless Linux, permission denied, etc.)
+                // This helps users diagnose why clipboard input isn't working
+                eprintln!("Warning: clipboard unavailable: {}", e);
+                false
+            }
+        }
+    }
+
+    fn collect(&self, _matches: &ArgMatches) -> Result<Option<String>, InputError> {
+        match self.reader.read()? {
+            Some(content) => {
+                let result = if self.trim {
+                    content.trim().to_string()
+                } else {
+                    content
+                };
+
+                if result.is_empty() {
+                    Ok(None)
+                } else {
+                    Ok(Some(result))
+                }
+            }
+            None => Ok(None),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::env::MockClipboard;
+    use clap::Command;
+
+    fn empty_matches() -> ArgMatches {
+        Command::new("test").try_get_matches_from(["test"]).unwrap()
+    }
+
+    #[test]
+    fn clipboard_available_when_has_content() {
+        let source = ClipboardSource::with_reader(MockClipboard::with_content("content"));
+        assert!(source.is_available(&empty_matches()));
+    }
+
+    #[test]
+    fn clipboard_unavailable_when_empty() {
+        let source = ClipboardSource::with_reader(MockClipboard::empty());
+        assert!(!source.is_available(&empty_matches()));
+    }
+
+    #[test]
+    fn clipboard_unavailable_when_whitespace_only() {
+        let source = ClipboardSource::with_reader(MockClipboard::with_content("   \n\t  "));
+        assert!(!source.is_available(&empty_matches()));
+    }
+
+    #[test]
+    fn clipboard_collects_content() {
+        let source = ClipboardSource::with_reader(MockClipboard::with_content("hello"));
+        let result = source.collect(&empty_matches()).unwrap();
+        assert_eq!(result, Some("hello".to_string()));
+    }
+
+    #[test]
+    fn clipboard_trims_whitespace() {
+        let source = ClipboardSource::with_reader(MockClipboard::with_content("  hello  \n"));
+        let result = source.collect(&empty_matches()).unwrap();
+        assert_eq!(result, Some("hello".to_string()));
+    }
+
+    #[test]
+    fn clipboard_no_trim() {
+        let source =
+            ClipboardSource::with_reader(MockClipboard::with_content("  hello  ")).trim(false);
+        let result = source.collect(&empty_matches()).unwrap();
+        assert_eq!(result, Some("  hello  ".to_string()));
+    }
+
+    #[test]
+    fn clipboard_returns_none_when_empty() {
+        let source = ClipboardSource::with_reader(MockClipboard::empty());
+        let result = source.collect(&empty_matches()).unwrap();
+        assert_eq!(result, None);
+    }
+}

@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **New `standout-input` crate** - Declarative input collection from multiple sources with automatic fallback chains.
+
+  ```rust
+  use standout_input::{InputChain, ArgSource, StdinSource, EditorSource};
+
+  let message = InputChain::<String>::new()
+      .try_source(ArgSource::new("message"))
+      .try_source(StdinSource::new())
+      .try_source(EditorSource::new())
+      .resolve(&matches)?;
+  ```
+
+  **Core sources (always available):**
+  - `ArgSource`, `FlagSource` - CLI arguments and flags
+  - `StdinSource` - Piped stdin (skipped when terminal)
+  - `EnvSource` - Environment variables
+  - `ClipboardSource` - System clipboard (macOS/Linux)
+  - `DefaultSource<T>` - Fallback values
+
+  **Feature-gated sources:**
+  | Feature | Dependencies | Provides |
+  |---------|--------------|----------|
+  | `editor` (default) | tempfile, which | `EditorSource` - Opens $VISUAL/$EDITOR |
+  | `simple-prompts` (default) | none | `TextPromptSource`, `ConfirmPromptSource` |
+  | `inquire` | inquire (~29 deps) | Rich TUI: `InquireText`, `InquireConfirm`, `InquireSelect`, `InquireMultiSelect`, `InquirePassword`, `InquireEditor` |
+
+  **Features:**
+  - Chain-level validation with retry support for interactive sources
+  - Mock implementations for all sources (testable without real terminal/env)
+  - `resolve_with_source()` returns which source provided the input
+
+  See [Introduction to Input](crates/standout-input/docs/guides/intro-to-input.md) for the full guide.
+
 ## [4.0.0] - 2026-02-02
 
 ### Changed
