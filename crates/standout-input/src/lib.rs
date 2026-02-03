@@ -64,5 +64,8 @@ pub use sources::{
     read_if_piped, ArgSource, ClipboardSource, DefaultSource, EnvSource, FlagSource, StdinSource,
 };
 
+#[cfg(feature = "editor")]
+pub use sources::{EditorRunner, EditorSource, MockEditorResult, MockEditorRunner};
+
 // Re-export mock types for testing
 pub use env::{MockClipboard, MockEnv, MockStdin};
