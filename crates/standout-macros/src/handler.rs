@@ -14,11 +14,37 @@
 //! }
 //!
 //! // Generates:
-//! // pub fn list__handler(m: &ArgMatches) -> Result<Vec<Item>, Error> {
+//! // 1. Handler wrapper for dispatch
+//! // pub fn list__handler(m: &ArgMatches, ctx: &CommandContext) -> Result<Vec<Item>, Error> {
 //! //     let all = m.get_flag("all");
 //! //     let limit = m.get_one::<usize>("limit").copied();
 //! //     list(all, limit)
 //! // }
+//! //
+//! // 2. Expected args metadata for verification
+//! // pub fn list__expected_args() -> Vec<ExpectedArg> {
+//! //     vec![
+//! //         ExpectedArg::flag("all", "all"),
+//! //         ExpectedArg::optional_arg("limit", "limit"),
+//! //     ]
+//! // }
+//! ```
+//!
+//! # Verification
+//!
+//! The generated `__expected_args()` function can be used with
+//! [`standout_dispatch::verify::verify_handler_args`] to check that a clap
+//! `Command` definition matches what the handler expects:
+//!
+//! ```rust,ignore
+//! use standout_dispatch::verify::verify_handler_args;
+//!
+//! let command = Command::new("list")
+//!     .arg(Arg::new("all").long("all").action(ArgAction::SetTrue))
+//!     .arg(Arg::new("limit").long("limit"));
+//!
+//! // This will return an error with helpful diagnostics if mismatched
+//! verify_handler_args(&command, "list", &list__expected_args())?;
 //! ```
 //!
 //! # Parameter Annotations
@@ -222,6 +248,35 @@ fn is_unit_result(fn_item: &ItemFn) -> bool {
     false
 }
 
+/// Generate the expected arg expression for verification
+fn generate_expected_arg(param: &ParamInfo) -> Option<TokenStream> {
+    let cli_name = &param.cli_name;
+    let rust_name = &param.rust_name;
+
+    match &param.kind {
+        ParamKind::Flag { .. } => Some(quote! {
+            ::standout_dispatch::verify::ExpectedArg::flag(#cli_name, #rust_name)
+        }),
+        ParamKind::Arg { .. } => {
+            let ty = &param.ty;
+            if is_option_type(ty) {
+                Some(quote! {
+                    ::standout_dispatch::verify::ExpectedArg::optional_arg(#cli_name, #rust_name)
+                })
+            } else if is_vec_type(ty) {
+                Some(quote! {
+                    ::standout_dispatch::verify::ExpectedArg::vec_arg(#cli_name, #rust_name)
+                })
+            } else {
+                Some(quote! {
+                    ::standout_dispatch::verify::ExpectedArg::required_arg(#cli_name, #rust_name)
+                })
+            }
+        }
+        ParamKind::Ctx | ParamKind::Matches | ParamKind::None => None,
+    }
+}
+
 /// Generate extraction code for a parameter
 fn generate_extraction(param: &ParamInfo) -> TokenStream {
     let rust_name = format_ident!("{}", param.rust_name);
@@ -357,6 +412,10 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> Result<TokenStream>
     // Generate call arguments
     let call_args: Vec<TokenStream> = params.iter().map(generate_call_arg).collect();
 
+    // Generate expected args for verification
+    let expected_args: Vec<TokenStream> = params.iter().filter_map(generate_expected_arg).collect();
+    let expected_args_name = format_ident!("{}__expected_args", fn_name);
+
     // Determine wrapper signature
     let _wrapper_params = if has_ctx {
         quote! { __matches: &::clap::ArgMatches, __ctx: &::standout_dispatch::CommandContext }
@@ -410,6 +469,11 @@ pub fn handler_impl(attr: TokenStream, item: TokenStream) -> Result<TokenStream>
         #fn_vis fn #wrapper_name(__matches: &::clap::ArgMatches, __ctx: &::standout_dispatch::CommandContext) #wrapper_return_type {
             #(#extractions)*
             #call_and_return
+        }
+
+        // Generated expected args for verification
+        #fn_vis fn #expected_args_name() -> ::std::vec::Vec<::standout_dispatch::verify::ExpectedArg> {
+            vec![#(#expected_args),*]
         }
     })
 }

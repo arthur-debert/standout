@@ -339,3 +339,140 @@ fn test_mixed_params() {
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), "verbose=true, path_len=0, limit=Some(5)");
 }
+
+// =============================================================================
+// Expected args generation for verification
+// =============================================================================
+
+use standout_dispatch::verify::{verify_handler_args, ArgKind, ExpectedArg};
+
+#[test]
+fn test_expected_args_generated_for_flag() {
+    let expected = simple_flag__expected_args();
+    assert_eq!(expected.len(), 1);
+    assert_eq!(expected[0].cli_name, "verbose");
+    assert_eq!(expected[0].rust_name, "verbose");
+    assert_eq!(expected[0].kind, ArgKind::Flag);
+}
+
+#[test]
+fn test_expected_args_generated_for_custom_name_flag() {
+    let expected = flag_with_name__expected_args();
+    assert_eq!(expected.len(), 1);
+    assert_eq!(expected[0].cli_name, "show-all");
+    assert_eq!(expected[0].rust_name, "all");
+    assert_eq!(expected[0].kind, ArgKind::Flag);
+}
+
+#[test]
+fn test_expected_args_generated_for_required_arg() {
+    let expected = required_arg__expected_args();
+    assert_eq!(expected.len(), 1);
+    assert_eq!(expected[0].cli_name, "name");
+    assert_eq!(expected[0].rust_name, "name");
+    assert_eq!(expected[0].kind, ArgKind::RequiredArg);
+}
+
+#[test]
+fn test_expected_args_generated_for_optional_arg() {
+    let expected = optional_arg__expected_args();
+    assert_eq!(expected.len(), 1);
+    assert_eq!(expected[0].cli_name, "limit");
+    assert_eq!(expected[0].rust_name, "limit");
+    assert_eq!(expected[0].kind, ArgKind::OptionalArg);
+}
+
+#[test]
+fn test_expected_args_generated_for_vec_arg() {
+    let expected = vec_arg__expected_args();
+    assert_eq!(expected.len(), 1);
+    assert_eq!(expected[0].cli_name, "tags");
+    assert_eq!(expected[0].rust_name, "tags");
+    assert_eq!(expected[0].kind, ArgKind::VecArg);
+}
+
+#[test]
+fn test_expected_args_excludes_ctx_and_matches() {
+    let expected = mixed_params__expected_args();
+    // Should only have verbose (flag) and limit (optional arg), not ctx
+    assert_eq!(expected.len(), 2);
+    assert_eq!(expected[0].cli_name, "verbose");
+    assert_eq!(expected[0].kind, ArgKind::Flag);
+    assert_eq!(expected[1].cli_name, "limit");
+    assert_eq!(expected[1].kind, ArgKind::OptionalArg);
+}
+
+// =============================================================================
+// Verification against clap Command
+// =============================================================================
+
+#[test]
+fn test_verification_passes_for_matching_command() {
+    let command = clap::Command::new("test").arg(
+        clap::Arg::new("verbose")
+            .short('v')
+            .action(clap::ArgAction::SetTrue),
+    );
+
+    let expected = simple_flag__expected_args();
+    assert!(verify_handler_args(&command, "simple_flag", &expected).is_ok());
+}
+
+#[test]
+fn test_verification_fails_for_missing_arg() {
+    let command = clap::Command::new("test");
+    // No arguments defined
+
+    let expected = simple_flag__expected_args();
+    let err = verify_handler_args(&command, "simple_flag", &expected).unwrap_err();
+
+    assert_eq!(err.handler_name, "simple_flag");
+    assert_eq!(err.mismatches.len(), 1);
+    let msg = err.to_string();
+    assert!(msg.contains("verbose"));
+    assert!(msg.contains("argument not defined"));
+}
+
+#[test]
+fn test_verification_fails_for_wrong_action() {
+    let command = clap::Command::new("test").arg(
+        clap::Arg::new("verbose")
+            .long("verbose")
+            .action(clap::ArgAction::Set), // Wrong! Should be SetTrue for bool flag
+    );
+
+    let expected = simple_flag__expected_args();
+    let err = verify_handler_args(&command, "simple_flag", &expected).unwrap_err();
+
+    assert_eq!(err.mismatches.len(), 1);
+    let msg = err.to_string();
+    assert!(msg.contains("boolean flag"));
+    assert!(msg.contains("ArgAction::Set"));
+    assert!(msg.contains("SetTrue")); // Suggestion in fix
+}
+
+#[test]
+fn test_verification_error_message_is_helpful() {
+    let command = clap::Command::new("list").arg(
+        clap::Arg::new("verbose")
+            .long("verbose")
+            .action(clap::ArgAction::Set),
+    );
+
+    let expected = vec![ExpectedArg::flag("verbose", "verbose")];
+    let err = verify_handler_args(&command, "list_handler", &expected).unwrap_err();
+
+    let msg = err.to_string();
+
+    // Should include handler name and command name
+    assert!(msg.contains("Handler `list_handler`"));
+    assert!(msg.contains("command `list`"));
+
+    // Should explain the mismatch
+    assert!(msg.contains("Handler expects: boolean flag"));
+    assert!(msg.contains("Command defines:"));
+
+    // Should provide actionable fix
+    assert!(msg.contains("Fix:"));
+    assert!(msg.contains("ArgAction::SetTrue"));
+}
