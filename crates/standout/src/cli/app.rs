@@ -651,11 +651,39 @@ impl App {
     /// Verifies that registered handlers match the CLI command definition.
     ///
     /// This checks that all required arguments expected by handlers are present
-    /// in the clap Command definition.
+    /// in the clap Command definition with compatible types and configurations.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use clap::{Arg, Command};
+    /// use standout::cli::App;
+    ///
+    /// #[handler]
+    /// fn list_handler(#[arg] filter: Option<String>) -> Result<Output<Data>, Error> {
+    ///     // ...
+    /// }
+    ///
+    /// // Build your app with handlers
+    /// let app = App::builder()
+    ///     .command_handler("list", list_handler_Handler, "list_template")
+    ///     .unwrap()
+    ///     .build()?;
+    ///
+    /// // Define your CLI structure
+    /// let cmd = Command::new("myapp")
+    ///     .subcommand(Command::new("list")
+    ///         .arg(Arg::new("filter").long("filter")));
+    ///
+    /// // Verify they match - fails fast with helpful error if not
+    /// app.verify_command(&cmd)?;
+    /// ```
     ///
     /// # Errors
     ///
-    /// Returns a `SetupError` if any mismatches are found.
+    /// Returns a `SetupError::VerificationFailed` if any mismatches are found.
+    /// The error contains detailed information about what doesn't match and
+    /// how to fix it.
     pub fn verify_command(&self, cmd: &Command) -> Result<(), SetupError> {
         verify_recursive(cmd, &self.expected_args, &[], true)
     }
@@ -698,9 +726,7 @@ fn verify_recursive(
     // Check current command
     let path_str = current_path.join(".");
     if let Some(expected) = expected_args.get(&path_str) {
-        if let Err(e) = verify_handler_args(cmd, &path_str, expected) {
-            return Err(SetupError::VerificationFailed(e.to_string()));
-        }
+        verify_handler_args(cmd, &path_str, expected)?;
     }
 
     // Check subcommands
