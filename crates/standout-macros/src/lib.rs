@@ -42,6 +42,7 @@
 //! [`EmbeddedSource`]: standout::EmbeddedSource
 //! [`RenderSetup`]: standout::RenderSetup
 
+mod command;
 mod dispatch;
 mod embed;
 mod handler;
@@ -473,6 +474,96 @@ pub fn handler(attr: TokenStream, item: TokenStream) -> TokenStream {
     let attr = proc_macro2::TokenStream::from(attr);
     let item = proc_macro2::TokenStream::from(item);
     handler::handler_impl(attr, item)
+        .unwrap_or_else(|e| e.to_compile_error())
+        .into()
+}
+
+/// Defines a complete command with handler, clap Command, and template from a single source.
+///
+/// This macro extends `#[handler]` to generate both the handler wrapper AND the complete
+/// clap `Command` definition. This eliminates mismatches between handler expectations
+/// and CLI definitions since everything is derived from one source.
+///
+/// # Command Attributes
+///
+/// | Attribute | Type | Required | Description |
+/// |-----------|------|----------|-------------|
+/// | `name` | string | Yes | Command name |
+/// | `about` | string | No | Short description |
+/// | `long_about` | string | No | Detailed description |
+/// | `visible_alias` | string | No | Command alias |
+/// | `hide` | bool | No | Hide from help |
+/// | `template` | string | No | Template name (defaults to command name) |
+///
+/// # Parameter Annotations
+///
+/// ## Flags (`#[flag(...)]`)
+///
+/// | Attribute | Type | Description |
+/// |-----------|------|-------------|
+/// | `short` | char | Short flag (e.g., `-a`) |
+/// | `long` | string | Long flag, defaults to param name with `_` → `-` |
+/// | `help` | string | Help text |
+/// | `hide` | bool | Hide from help |
+///
+/// ## Arguments (`#[arg(...)]`)
+///
+/// | Attribute | Type | Description |
+/// |-----------|------|-------------|
+/// | `short` | char | Short option (e.g., `-f`) |
+/// | `long` | string | Long option, defaults to param name with `_` → `-` |
+/// | `help` | string | Help text |
+/// | `value_name` | string | Placeholder in help |
+/// | `default` | string | Default value |
+/// | `hide` | bool | Hide from help |
+/// | `positional` | bool | Positional argument (no `--` prefix) |
+///
+/// ## Pass-through
+///
+/// | Annotation | Type | Description |
+/// |------------|------|-------------|
+/// | `#[ctx]` | `&CommandContext` | Access command context |
+/// | `#[matches]` | `&ArgMatches` | Access raw matches |
+///
+/// # Generated Code
+///
+/// For a function `fn foo(...)`, the macro generates:
+///
+/// - `fn foo(...)` - original function (preserved for testing)
+/// - `fn foo__handler(...)` - wrapper for dispatch
+/// - `fn foo__expected_args()` - verification metadata
+/// - `fn foo__command()` - clap `Command` definition
+/// - `fn foo__template()` - template name
+/// - `struct foo_Handler` - implements `Handler` trait
+///
+/// # Template Convention
+///
+/// The `template` attribute is optional. When omitted, it defaults to the command name.
+/// For example, `#[command(name = "list")]` will use template `"list"`.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use standout_macros::command;
+///
+/// #[command(name = "list", about = "List all items")]
+/// fn list_items(
+///     #[flag(short = 'a', help = "Show all")] all: bool,
+///     #[arg(short = 'f', help = "Filter")] filter: Option<String>,
+/// ) -> Result<Vec<Item>, Error> {
+///     storage::list(all, filter)
+/// }
+///
+/// // Use:
+/// // - list_items__command() returns the clap Command
+/// // - list_items__template() returns "list"
+/// // - list_items_Handler implements Handler
+/// ```
+#[proc_macro_attribute]
+pub fn command(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let attr = proc_macro2::TokenStream::from(attr);
+    let item = proc_macro2::TokenStream::from(item);
+    command::command_impl(attr, item)
         .unwrap_or_else(|e| e.to_compile_error())
         .into()
 }
