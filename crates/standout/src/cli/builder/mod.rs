@@ -240,17 +240,15 @@ impl AppBuilder {
     /// Ensures all pending commands have been finalized into dispatch functions.
     ///
     /// This method is called lazily on first dispatch. It creates the actual
-    /// dispatch closures from the stored recipes, capturing the current theme
-    /// and context registry. This deferred creation allows `.theme()` to be
-    /// called after `.command()` without affecting the result.
+    /// dispatch closures from the stored recipes. The theme is NOT captured here -
+    /// it is passed at runtime via late binding, which allows `.theme()` to be
+    /// called in any order relative to `.command()`.
     fn ensure_commands_finalized(&self) {
         // Already finalized?
         if self.finalized_commands.borrow().is_some() {
             return;
         }
 
-        // Get the theme (use default if not set)
-        let theme = self.theme.clone().unwrap_or_default();
         let context_registry = &self.context_registry;
 
         // Build dispatch functions from recipes
@@ -259,7 +257,6 @@ impl AppBuilder {
             let dispatch = pending.recipe.create_dispatch(
                 &pending.template,
                 context_registry,
-                &theme,
                 self.template_engine.clone(),
             );
             commands.insert(path.clone(), dispatch);
@@ -339,33 +336,38 @@ impl AppBuilder {
             }
         }
 
-        // Ensure commands are finalized (captures the engine)
+        // PHASE 1: Resolve theme BEFORE finalization
+        // This ensures ensure_commands_finalized() captures the correct theme.
+        // Theme resolution: explicit .theme() takes precedence, then .default_theme() from stylesheet registry
+        if self.theme.is_none() {
+            if let Some(ref mut registry) = self.stylesheet_registry {
+                let resolved = if let Some(name) = &self.default_theme_name {
+                    Some(
+                        registry
+                            .get(name)
+                            .map_err(|_| SetupError::ThemeNotFound(name.to_string()))?,
+                    )
+                } else {
+                    // Try defaults in order: default, theme, base
+                    registry
+                        .get("default")
+                        .or_else(|_| registry.get("theme"))
+                        .or_else(|_| registry.get("base"))
+                        .ok()
+                };
+                self.theme = resolved;
+            }
+        }
+
+        // PHASE 2: Finalize commands (now theme is resolved and will be captured correctly)
         self.ensure_commands_finalized();
         let commands = self
             .finalized_commands
             .into_inner()
             .expect("Commands should be finalized");
 
-        // Resolve theme: explicit theme takes precedence, then stylesheet registry
-        let theme = if let Some(theme) = self.theme.take() {
-            Some(theme)
-        } else if let Some(ref mut registry) = self.stylesheet_registry {
-            if let Some(name) = &self.default_theme_name {
-                let theme = registry
-                    .get(name)
-                    .map_err(|_| SetupError::ThemeNotFound(name.to_string()))?;
-                Some(theme)
-            } else {
-                // Try defaults in order: default, theme, base
-                registry
-                    .get("default")
-                    .or_else(|_| registry.get("theme"))
-                    .or_else(|_| registry.get("base"))
-                    .ok()
-            }
-        } else {
-            None
-        };
+        // Theme is already resolved, just take it
+        let theme = self.theme.take();
 
         // Template registry is already Rc (or None)
         let template_registry = self.template_registry.take();

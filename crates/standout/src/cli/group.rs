@@ -5,8 +5,6 @@
 
 use crate::context::ContextRegistry;
 
-use crate::Theme;
-
 use clap::ArgMatches;
 use serde::Serialize;
 use std::cell::RefCell;
@@ -25,9 +23,16 @@ use standout_pipe::PipeTarget;
 /// A recipe for creating a dispatch closure.
 ///
 /// Unlike `ErasedCommandConfig::register` which consumes self, this trait
-/// allows creating dispatch closures on demand without consuming the recipe.
-/// This enables deferred closure creation where the theme and context_registry
-/// are captured at dispatch time rather than at registration time.
+/// takes `&self` to allow deferred closure creation. This enables late binding
+/// where the theme is passed at dispatch time rather than captured at registration.
+///
+/// # Implementation Notes
+///
+/// Most implementations (`ClosureRecipe`, `StructRecipe`) can be called multiple
+/// times since they clone their Rc-wrapped handlers. However, `ErasedConfigRecipe`
+/// is single-use due to type erasure constraints - it will panic if called twice.
+/// This is acceptable because `ensure_commands_finalized()` is guarded to run
+/// only once per builder.
 pub(crate) trait CommandRecipe {
     /// Returns the template for this command, if explicitly set.
     #[allow(dead_code)]
@@ -43,12 +48,13 @@ pub(crate) trait CommandRecipe {
 
     /// Creates a dispatch closure with the given configuration.
     ///
-    /// This can be called multiple times (unlike ErasedCommandConfig::register).
+    /// # Panics
+    ///
+    /// `ErasedConfigRecipe` will panic if called more than once (see trait docs).
     fn create_dispatch(
         &self,
         template: &str,
         context_registry: &ContextRegistry,
-        theme: &Theme,
         template_engine: Rc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn;
 }
@@ -111,19 +117,18 @@ where
         &self,
         template: &str,
         context_registry: &ContextRegistry,
-        theme: &Theme,
         template_engine: Rc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn {
         let handler = self.handler.clone();
         let template = template.to_string();
         let context_registry = context_registry.clone();
-        let theme = theme.clone();
 
         Rc::new(RefCell::new(
             move |matches: &ArgMatches,
                   ctx: &CommandContext,
                   hooks: Option<&Hooks>,
-                  output_mode: crate::OutputMode| {
+                  output_mode: crate::OutputMode,
+                  theme: &crate::Theme| {
                 let result = handler
                     .borrow_mut()
                     .handle(matches, ctx)
@@ -134,7 +139,7 @@ where
                     ctx,
                     hooks,
                     &template,
-                    &theme,
+                    theme,
                     &context_registry,
                     &**template_engine,
                     output_mode,
@@ -205,19 +210,18 @@ where
         &self,
         template: &str,
         context_registry: &ContextRegistry,
-        theme: &Theme,
         template_engine: Rc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn {
         let handler = self.handler.clone();
         let template = template.to_string();
         let context_registry = context_registry.clone();
-        let theme = theme.clone();
 
         Rc::new(RefCell::new(
             move |matches: &ArgMatches,
                   ctx: &CommandContext,
                   hooks: Option<&Hooks>,
-                  output_mode: crate::OutputMode| {
+                  output_mode: crate::OutputMode,
+                  theme: &crate::Theme| {
                 let result = handler
                     .borrow_mut()
                     .handle(matches, ctx)
@@ -228,7 +232,7 @@ where
                     ctx,
                     hooks,
                     &template,
-                    &theme,
+                    theme,
                     &context_registry,
                     &**template_engine,
                     output_mode,
@@ -242,6 +246,16 @@ where
 ///
 /// This allows group-registered commands to use the deferred closure pattern.
 /// The inner config is wrapped in RefCell to allow interior mutability.
+///
+/// # Single-Use Constraint
+///
+/// Unlike `ClosureRecipe` and `StructRecipe`, this implementation can only
+/// have `create_dispatch` called once. This is because `ErasedCommandConfig::register`
+/// consumes `Box<Self>`, so we must use `.take()` to extract it from the RefCell.
+///
+/// This constraint is safe because `ensure_commands_finalized()` in `AppBuilder`
+/// is guarded to run only once, so each recipe's `create_dispatch` is called
+/// exactly once during the builder's lifecycle.
 pub(crate) struct ErasedConfigRecipe {
     config: RefCell<Option<Box<dyn ErasedCommandConfig>>>,
     #[allow(dead_code)]
@@ -281,7 +295,6 @@ impl CommandRecipe for ErasedConfigRecipe {
         &self,
         template: &str,
         context_registry: &ContextRegistry,
-        theme: &Theme,
         template_engine: Rc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn {
         let config = self
@@ -293,7 +306,6 @@ impl CommandRecipe for ErasedConfigRecipe {
             "",
             template.to_string(),
             context_registry.clone(),
-            theme.clone(),
             template_engine,
         )
     }
@@ -560,7 +572,6 @@ pub(crate) trait ErasedCommandConfig {
         path: &str,
         template: String,
         context_registry: ContextRegistry,
-        theme: Theme,
         template_engine: Rc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn;
 }
@@ -779,7 +790,6 @@ where
         _path: &str,
         template: String,
         context_registry: ContextRegistry,
-        theme: Theme,
         template_engine: Rc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn {
         let handler = self.handler;
@@ -788,7 +798,8 @@ where
             move |matches: &ArgMatches,
                   ctx: &CommandContext,
                   hooks: Option<&Hooks>,
-                  output_mode: crate::OutputMode| {
+                  output_mode: crate::OutputMode,
+                  theme: &crate::Theme| {
                 let result = handler
                     .borrow_mut()
                     .handle(matches, ctx)
@@ -799,7 +810,7 @@ where
                     ctx,
                     hooks,
                     &template,
-                    &theme,
+                    theme,
                     &context_registry,
                     &**template_engine,
                     output_mode,
@@ -842,7 +853,6 @@ where
         _path: &str,
         template: String,
         context_registry: ContextRegistry,
-        theme: Theme,
         template_engine: Rc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn {
         let handler = self.handler;
@@ -851,7 +861,8 @@ where
             move |matches: &ArgMatches,
                   ctx: &CommandContext,
                   hooks: Option<&Hooks>,
-                  output_mode: crate::OutputMode| {
+                  output_mode: crate::OutputMode,
+                  theme: &crate::Theme| {
                 let result = handler
                     .borrow_mut()
                     .handle(matches, ctx)
@@ -862,7 +873,7 @@ where
                     ctx,
                     hooks,
                     &template,
-                    &theme,
+                    theme,
                     &context_registry,
                     &**template_engine,
                     output_mode,

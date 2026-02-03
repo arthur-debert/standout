@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Fixed command sequencing sensitivity (Late Binding)** - Refactored command dispatch to resolve dependencies (like `Theme`) at runtime rather than build time. This fixes an issue where configuring the theme after registering commands resulted in commands using the default theme (Issue #89).
+  - Updated internal `DispatchFn` signature to accept `&Theme` at runtime.
+  - Commands now correctly use the final configured theme regardless of registration order.
+  - Works with all registration methods: `.command()`, `.commands()` (dispatch! macro), and nested `.group()` calls.
+
+
 ## [5.0.0] - 2026-02-03
 
 ### Added
