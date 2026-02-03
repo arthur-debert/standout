@@ -20,6 +20,7 @@ pub fn list(#[flag] all: bool, #[arg] limit: Option<usize>) -> Result<Vec<Item>,
 ```
 
 The macro:
+
 - Extracts CLI arguments from `ArgMatches` based on annotations
 - Auto-wraps `Result<T, E>` in `Output::Render` via `IntoHandlerResult`
 - Preserves the original function for direct testing
@@ -171,6 +172,7 @@ fn list(_m: &ArgMatches, _ctx: &CommandContext) -> impl IntoHandlerResult<Vec<It
 ```
 
 The trait is implemented for:
+
 - `Result<T, E>` where `E: Into<anyhow::Error>` → wraps `Ok(t)` in `Output::Render(t)`
 - `HandlerResult<T>` → passes through unchanged
 
@@ -243,6 +245,7 @@ fn delete_handler(matches: &ArgMatches, _ctx: &CommandContext) -> HandlerResult<
 ```
 
 Silent behavior:
+
 - Post-output hooks still receive `RenderedOutput::Silent`
 - Render function is not called
 - Nothing prints to stdout
@@ -379,11 +382,13 @@ Use `get_required` for mandatory dependencies (fails fast with clear error), `ge
 ### When to Use Which
 
 **Use App State for:**
+
 - Database connections — expensive to create, should be pooled
 - Configuration — loaded once at startup
 - API clients — shared HTTP clients with connection pooling
 
 **Use Extensions for:**
+
 - User context — current user, session, permissions
 - Request metadata — request ID, timing, correlation ID
 - Transient state — data computed by one hook, used by handler
