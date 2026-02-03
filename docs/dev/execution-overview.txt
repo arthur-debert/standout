@@ -1,0 +1,102 @@
+The Standout Execution Flow
+
+The Standout Execution Flow
+
+The first step in a well designed shell application is parsing the user input strings, and having the parsed command(s), arguments, options and flags.
+This normalized data ensures correct and consistent results, and is key to avoid a proliferation of small scale parsing code through out.
+
+The golden standard for CLI definition in Rust is clap, which offers rich and correct definition for cli programs.
+Standout is built on top of clap, that is , it augments it with additional information and powers.
+
+1. The Execution Flow
+
+  1.0 Clap CLI Definition
+
+    The clap cli definition is built. This can be done through several ways (see bellow). 
+
+  1.1 Parsing And Command Discovery
+
+    We will now gather the inputs for our run. First we use clap to parse the input string into parsed  clap args.
+    We then run the parsed args against out standout-dispatch auto dispatcher, which replaces the usual manual command main loop that matches the command names to the CLI definition.
+
+  1.2 Command Pipeline Execution
+      
+    Now we can examine the command to be run. Orchestrating this execution is the core role of standout.
+    As the bare minimum, it ensures the strict separation of logic and output presentation by running the parsed arguments through your command logic handler, which returns a regular rust Result datatype. This is where logic resides and the hard requirement on the return type ensure a clean separation.
+    
+    1.2.1 Central Flow 
+
+      1.2.1.1 The Core: logic + renderer
+
+        Now, standout will feed the data from your command logic into it's renderer, which is smart about the output format (rich term , plain text, json etc) and can get user choice from the cli args.
+        By design, standout assumes it's capable of rendering all of the base formats. Hence, for plain text and term formats, it needs the template name to be used. 
+        The result is feed into the template engine, which does variable substitution with the data result, general template presentation logic and finally, if needed, converts styles into the format specific attributes (i.e. ANSI codes for term). 
+
+        In a very simplified way, data flow as : 
+          user input str -> parsed args -> data result    -> final output
+          user provided  -> clap        -> logic handler  -> renderer
+        In the core flow, what we need is the clap CLI, the logic handler and the template name.
+
+        It's also useful to think about the execution as running in phases: 
+          - Input gathering and processing
+          - Logic execution
+          - Rendering 
+          - Post rendering (as piping)
+
+
+      1.2.2 Optional Injection and Transformation Points
+
+        To enforce a clean input -> pure function -> data -> rendered output flow, standout offers optional extension points. These keep the execution flow pure, and UI specificities creeping into the logic handler. 
+        As these are command specific, the very first thing we will do is to parse the args, and with the parsed args run the auto dispatch. This will give us the command being run.
+        The standout command definition extends clap's, and it includes the additional information needed to orchestrate the execution: the handler, template name and any of the optional extension points.
+
+
+  1.2.2 Extension / Injection Points
+
+    1.2.2.1 Additional Inputs
+
+      While the majority of commands can work from the cli args alone, not all do. Some, benefit from using other data sources as the command's input.
+      This is handled by the standout-input crate which exposes: 
+        - Environment  Vars
+        - Terminal information (is tty, color, is being piped , etc)
+        - User interactive prompts (through inquire or a simpler standout engine)
+        - Text Editor (as in $EDITOR)
+
+      The additional inputs are combined with the parsed cli and form the full input source.
+
+    1.2.2.2 Pre Dispatch Hooks
+
+
+     With the  full input data in hand  we begin the logic execution. If set, pre-dispatch hooks will be run.
+     These can be any number of hooks. Each one gets feed the transformed params from the previous one, that is, hooks outputs and the next's inputs are chained. 
+
+     Pre-dispatch hooks are very powerful. They can create arbitrary application data, for later stages, context data and so on. 
+
+    1.2.2.3 Post Dispatch Hooks
+      
+
+        This hooks runs just after the logic handler and now has the actual result data to process.
+        It's role is to further process the result data before rendering, for the rare cases where that processing is not the core application logic (lest it be in the logic handler), and too complex for output formatting. For example, you may need to augment the result with user account information (like their their Auth status or usage quotas)
+
+    1.2.2.4 Post Output
+
+      And this hook takes the processed output string (be it terminal formatted text, or json encoded data). Once possible use case is logging, which is not part of output processing not the logic itself. 
+
+    1.2.3.5. Piping
+      
+      It's often useful to leverage shell commands to further process the output, piping to other commands and so on. 
+      The standout-piping crate, using post output hooks will chain piping definition. As before, this is optional, and a command can have any number of them. The next pipe receives the transformed string from the previous, and so on.
+
+
+  1.3 The Full Execution Flow: 
+
+    Now we can see what the full execution can be extended to be: 
+          Input Gathering                                                            | Logic                         | Output                          | Post processing
+          user input str -> input hooks -> inputs (parsed args + inputs injections) ->  pre-dispatch hooks -> logic ->  post-dispatch hooks -> output -> pipe
+
+2. Recap
+
+  The flow can be very simple-> parsed args -> logic -> output rendering. For which you will only need, clap CLI definition aside, only to set the handler and template types.
+  Additionally, you can set any number of callbacks to each hook, giving you well defined points to inject data, transform it, augment the output and more.
+
+  A general diagram in ./execution-overview.svg illustrates this.
