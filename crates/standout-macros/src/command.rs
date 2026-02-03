@@ -60,6 +60,7 @@
 //! | `default` | string | Default value |
 //! | `hide` | bool | Hide from help |
 //! | `positional` | bool | Positional argument (no `--` prefix) |
+//! | `allow_negative_numbers` | bool | Allow negative number values (e.g., -5) |
 //!
 //! ## Pass-through annotations
 //!
@@ -203,6 +204,7 @@ struct ArgAttrs {
     default: Option<String>,
     hide: bool,
     positional: bool,
+    allow_negative_numbers: bool,
 }
 
 /// Parsed parameter information
@@ -392,6 +394,18 @@ fn parse_arg_attrs(attr: &syn::Attribute) -> Result<ArgAttrs> {
                     attrs.positional = true;
                 }
             }
+            Some("allow_negative_numbers") => {
+                if meta.input.peek(Token![=]) {
+                    let value: Lit = meta.value()?.parse()?;
+                    if let Lit::Bool(b) = value {
+                        attrs.allow_negative_numbers = b.value();
+                    } else {
+                        return Err(Error::new(value.span(), "expected boolean literal"));
+                    }
+                } else {
+                    attrs.allow_negative_numbers = true;
+                }
+            }
             Some("name") => {
                 // Support legacy `name = "x"` for backwards compat with #[handler]
                 let value: Lit = meta.value()?.parse()?;
@@ -482,6 +496,49 @@ fn extract_inner_type(ty: &Type) -> Option<&Type> {
 
 fn is_reference_type(ty: &Type) -> bool {
     matches!(ty, Type::Reference(_))
+}
+
+/// Get the base type name (e.g., "usize" from Option<usize> or Vec<usize>)
+fn get_base_type(ty: &Type) -> Option<&Type> {
+    if is_option_type(ty) || is_vec_type(ty) {
+        extract_inner_type(ty)
+    } else {
+        Some(ty)
+    }
+}
+
+/// Check if a type needs value_parser (i.e., is not String)
+fn needs_value_parser(ty: &Type) -> bool {
+    let base = match get_base_type(ty) {
+        Some(t) => t,
+        None => return false,
+    };
+
+    // Check if it's a simple path type
+    if let Type::Path(type_path) = base {
+        if let Some(segment) = type_path.path.segments.last() {
+            let type_name = segment.ident.to_string();
+            // String types don't need value_parser
+            if type_name == "String" || type_name == "OsString" {
+                return false;
+            }
+            // All other types need it
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Generate value_parser call for a type
+fn generate_value_parser(ty: &Type) -> Option<TokenStream> {
+    let base = get_base_type(ty)?;
+
+    if !needs_value_parser(ty) {
+        return None;
+    }
+
+    Some(quote! { .value_parser(::clap::value_parser!(#base)) })
 }
 
 fn is_unit_result(fn_item: &ItemFn) -> bool {
@@ -652,6 +709,11 @@ fn generate_clap_arg(param: &ParamInfo) -> Option<TokenStream> {
                 arg = quote! { #arg.action(::clap::ArgAction::Set) };
             }
 
+            // Add value_parser for non-String types
+            if let Some(value_parser) = generate_value_parser(ty) {
+                arg = quote! { #arg #value_parser };
+            }
+
             // Required if not optional and no default
             if !is_optional && !is_vec && attrs.default.is_none() {
                 arg = quote! { #arg.required(true) };
@@ -682,6 +744,10 @@ fn generate_clap_arg(param: &ParamInfo) -> Option<TokenStream> {
 
             if attrs.hide {
                 arg = quote! { #arg.hide(true) };
+            }
+
+            if attrs.allow_negative_numbers {
+                arg = quote! { #arg.allow_negative_numbers(true) };
             }
 
             Some(quote! { .arg(#arg) })

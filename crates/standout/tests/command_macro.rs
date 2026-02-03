@@ -140,8 +140,6 @@ fn test_optional_arg_missing() {
 // Command with multiple parameters
 // =============================================================================
 
-// Note: For non-String types like usize, you would need to add value_parser support
-// to the #[command] macro. For now, use String and parse manually.
 #[command(name = "process", about = "Process items")]
 fn process_cmd(
     #[flag(short = 'v', long = "verbose")] verbose: bool,
@@ -296,5 +294,177 @@ fn test_default_value() {
         .try_get_matches_from(["paginate", "--page-size", "50"])
         .unwrap();
     let result = paginate_cmd__handler(&matches, &ctx);
+    assert!(result.is_ok());
+}
+
+// =============================================================================
+// Command with typed arguments (value_parser support)
+// =============================================================================
+
+#[derive(Serialize)]
+struct TypedOutput {
+    limit: usize,
+    offset: Option<i32>,
+    values: Vec<u64>,
+}
+
+#[command(name = "typed", about = "Command with typed args")]
+fn typed_cmd(
+    #[arg(short = 'l', long = "limit", help = "Result limit")] limit: usize,
+    #[arg(short = 'o', long = "offset", help = "Result offset")] offset: Option<i32>,
+    #[arg(short = 'v', long = "value", help = "Values to process")] values: Vec<u64>,
+) -> Result<Output<TypedOutput>, anyhow::Error> {
+    Ok(Output::Render(TypedOutput {
+        limit,
+        offset,
+        values,
+    }))
+}
+
+#[test]
+fn test_typed_required_usize() {
+    let cmd = typed_cmd__command();
+    let matches = cmd.try_get_matches_from(["typed", "-l", "42"]).unwrap();
+
+    let ctx = CommandContext::default();
+    let result = typed_cmd__handler(&matches, &ctx);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_typed_optional_i32() {
+    let cmd = typed_cmd__command();
+
+    // Without offset
+    let matches = cmd
+        .clone()
+        .try_get_matches_from(["typed", "-l", "10"])
+        .unwrap();
+    let ctx = CommandContext::default();
+    let result = typed_cmd__handler(&matches, &ctx);
+    assert!(result.is_ok());
+
+    // With offset (positive value)
+    let matches = cmd
+        .try_get_matches_from(["typed", "-l", "10", "-o", "5"])
+        .unwrap();
+    let result = typed_cmd__handler(&matches, &ctx);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_typed_vec_u64() {
+    let cmd = typed_cmd__command();
+    let matches = cmd
+        .try_get_matches_from(["typed", "-l", "10", "-v", "100", "-v", "200", "-v", "300"])
+        .unwrap();
+
+    let ctx = CommandContext::default();
+    let result = typed_cmd__handler(&matches, &ctx);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_typed_invalid_value_rejected() {
+    let cmd = typed_cmd__command();
+
+    // "abc" is not a valid usize
+    let result = cmd.try_get_matches_from(["typed", "-l", "abc"]);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_typed_verification_passes() {
+    let cmd = typed_cmd__command();
+    let expected = typed_cmd__expected_args();
+    assert!(verify_handler_args(&cmd, "typed_cmd", &expected).is_ok());
+}
+
+// =============================================================================
+// Command with PathBuf argument
+// =============================================================================
+
+use std::path::PathBuf;
+
+#[command(name = "read-file")]
+fn read_file_cmd(
+    #[arg(positional, help = "Path to file")] path: PathBuf,
+) -> Result<Output<String>, anyhow::Error> {
+    Ok(Output::Render(path.display().to_string()))
+}
+
+#[test]
+fn test_pathbuf_arg() {
+    let cmd = read_file_cmd__command();
+    let matches = cmd
+        .try_get_matches_from(["read-file", "/some/path/to/file.txt"])
+        .unwrap();
+
+    let ctx = CommandContext::default();
+    let result = read_file_cmd__handler(&matches, &ctx);
+    assert!(result.is_ok());
+}
+
+// =============================================================================
+// Command with float arguments
+// =============================================================================
+
+#[derive(Serialize)]
+struct FloatOutput {
+    factor: f64,
+    precision: Option<f32>,
+}
+
+#[command(name = "scale")]
+fn scale_cmd(
+    #[arg(short = 'f', long = "factor", help = "Scale factor")] factor: f64,
+    #[arg(short = 'p', long = "precision", help = "Precision")] precision: Option<f32>,
+) -> Result<Output<FloatOutput>, anyhow::Error> {
+    Ok(Output::Render(FloatOutput { factor, precision }))
+}
+
+#[test]
+fn test_float_args() {
+    let cmd = scale_cmd__command();
+    let matches = cmd
+        .try_get_matches_from(["scale", "-f", "2.5", "-p", "0.001"])
+        .unwrap();
+
+    let ctx = CommandContext::default();
+    let result = scale_cmd__handler(&matches, &ctx);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_float_scientific_notation() {
+    let cmd = scale_cmd__command();
+    let matches = cmd.try_get_matches_from(["scale", "-f", "1e-6"]).unwrap();
+
+    let ctx = CommandContext::default();
+    let result = scale_cmd__handler(&matches, &ctx);
+    assert!(result.is_ok());
+}
+
+// =============================================================================
+// Command with negative number support
+// =============================================================================
+
+#[command(name = "offset")]
+fn offset_cmd(
+    #[arg(short = 'x', allow_negative_numbers, help = "X offset")] x: i32,
+    #[arg(short = 'y', allow_negative_numbers, help = "Y offset")] y: i32,
+) -> Result<Output<(i32, i32)>, anyhow::Error> {
+    Ok(Output::Render((x, y)))
+}
+
+#[test]
+fn test_negative_numbers_allowed() {
+    let cmd = offset_cmd__command();
+    let matches = cmd
+        .try_get_matches_from(["offset", "-x", "-10", "-y", "5"])
+        .unwrap();
+
+    let ctx = CommandContext::default();
+    let result = offset_cmd__handler(&matches, &ctx);
     assert!(result.is_ok());
 }
