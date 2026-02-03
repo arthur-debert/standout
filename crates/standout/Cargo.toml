@@ -1,6 +1,6 @@
 [package]
 name = "standout"
-version = "4.0.0"
+version = "5.0.0"
 edition = "2021"
 description = "Styled CLI template rendering with automatic terminal detection"
 license = "MIT"
@@ -11,12 +11,12 @@ readme = "README.md"
 
 [dependencies]
 # Core rendering (re-exported from standout-render)
-standout-render = { version = "4.0.0", path = "../standout-render" }
-standout-pipe = { path = "../standout-pipe", version = "4.0.0" }
-standout-bbparser = { version = "4.0.0", path = "../standout-bbparser" }
-standout-macros = { version = "4.0.0", path = "../standout-macros" }
-standout-dispatch = { version = "4.0.0", path = "../standout-dispatch" }
-standout-seeker = { version = "4.0.0", path = "../standout-seeker" }
+standout-render = { version = "5.0.0", path = "../standout-render" }
+standout-pipe = { path = "../standout-pipe", version = "5.0.0" }
+standout-bbparser = { version = "5.0.0", path = "../standout-bbparser" }
+standout-macros = { version = "5.0.0", path = "../standout-macros" }
+standout-dispatch = { version = "5.0.0", path = "../standout-dispatch" }
+standout-seeker = { version = "5.0.0", path = "../standout-seeker" }
 
 # Direct dependencies (also used by standout-render, but needed here for cli module)
 console = "0.15"
