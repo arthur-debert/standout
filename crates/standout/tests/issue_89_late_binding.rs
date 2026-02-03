@@ -142,3 +142,84 @@ fn test_late_binding_with_nested_groups() {
         _ => panic!("Expected handled result, got {:?}", result),
     }
 }
+
+// ============================================================================
+// Invariant Tests
+// ============================================================================
+
+/// Test the invariant: unknown style tags render as [tag?].
+///
+/// This is the symptom of the original bug - when a theme is not applied,
+/// style tags render with a "?" suffix to indicate the style was not found.
+/// This test documents this behavior as a regression detection mechanism.
+#[test]
+fn test_unknown_style_renders_as_tag_question_mark() {
+    // Build WITHOUT any theme - styles should render as [tag?]
+    let app = App::builder()
+        .command(
+            "test",
+            |_m, _ctx| Ok(Output::Render("content".to_string())),
+            "[unknown_style]content[/unknown_style]",
+        )
+        .unwrap()
+        // No .theme() call - intentionally missing
+        .build()
+        .expect("Failed to build app");
+
+    let cmd = Command::new("app").subcommand(Command::new("test"));
+    let result = app.run_to_string(cmd, ["app", "--output=term", "test"]);
+
+    match result {
+        standout::cli::RunResult::Handled(output) => {
+            // Unknown styles should render as [tag?] to indicate missing style
+            assert!(
+                output.contains("[unknown_style?]"),
+                "Unknown style should render as [unknown_style?], but got: {:?}",
+                output
+            );
+        }
+        _ => panic!("Expected handled result, got {:?}", result),
+    }
+}
+
+/// Test that a defined style does NOT render as [tag?].
+///
+/// This is the complement to the previous test - when a style IS defined,
+/// it should be applied and NOT show the "?" suffix.
+#[test]
+fn test_defined_style_does_not_render_as_tag_question_mark() {
+    let style = Style::new().yellow().force_styling(true);
+    let theme = Theme::new().add("defined_style", style);
+
+    let app = App::builder()
+        .command(
+            "test",
+            |_m, _ctx| Ok(Output::Render("content".to_string())),
+            "[defined_style]content[/defined_style]",
+        )
+        .unwrap()
+        .theme(theme)
+        .build()
+        .expect("Failed to build app");
+
+    let cmd = Command::new("app").subcommand(Command::new("test"));
+    let result = app.run_to_string(cmd, ["app", "--output=term", "test"]);
+
+    match result {
+        standout::cli::RunResult::Handled(output) => {
+            // Defined style should NOT render as [tag?]
+            assert!(
+                !output.contains("[defined_style?]"),
+                "Defined style should NOT show ? marker, but got: {:?}",
+                output
+            );
+            // Should contain yellow ANSI code: \x1b[33m
+            assert!(
+                output.contains("\x1b[33m"),
+                "Defined style should apply yellow color, but got: {:?}",
+                output
+            );
+        }
+        _ => panic!("Expected handled result, got {:?}", result),
+    }
+}
