@@ -133,6 +133,7 @@ impl AppBuilder {
 
             // Run the handler (post-dispatch hooks are run inside dispatch function)
             // output_mode is passed separately because CommandContext is render-agnostic
+            // Late binding: theme is resolved here at dispatch time, not when commands were registered
             let default_theme = crate::Theme::default();
             let theme = self.theme.as_ref().unwrap_or(&default_theme);
             let dispatch_output =

@@ -223,6 +223,7 @@ impl App {
             let sub_matches = get_deepest_matches(&matches);
 
             // Run the handler (output_mode passed separately as CommandContext is render-agnostic)
+            // Late binding: theme is resolved here at dispatch time, not when commands were registered
             let default_theme = Theme::default();
             let theme = self.core.theme().unwrap_or(&default_theme);
             let dispatch_output =

@@ -240,16 +240,14 @@ impl AppBuilder {
     /// Ensures all pending commands have been finalized into dispatch functions.
     ///
     /// This method is called lazily on first dispatch. It creates the actual
-    /// dispatch closures from the stored recipes, capturing the current theme
-    /// and context registry. This deferred creation allows `.theme()` to be
-    /// called after `.command()` without affecting the result.
+    /// dispatch closures from the stored recipes. The theme is NOT captured here -
+    /// it is passed at runtime via late binding, which allows `.theme()` to be
+    /// called in any order relative to `.command()`.
     fn ensure_commands_finalized(&self) {
         // Already finalized?
         if self.finalized_commands.borrow().is_some() {
             return;
         }
-
-        // Get the theme (use default if not set)
 
         let context_registry = &self.context_registry;
 
