@@ -101,11 +101,11 @@ pub(crate) fn render_handler_output<T: Serialize>(
 
 /// Type-erased dispatch function for single-threaded handlers.
 ///
-/// Takes ArgMatches, CommandContext, optional Hooks, and OutputMode. The hooks
-/// parameter allows post-dispatch hooks to run between handler execution and
-/// rendering. OutputMode is passed separately because CommandContext is
-/// render-agnostic (from standout-dispatch), while output_mode is a rendering
-/// concern managed by standout.
+/// Takes ArgMatches, CommandContext, optional Hooks, OutputMode, and Theme.
+/// The hooks parameter allows post-dispatch hooks to run between handler
+/// execution and rendering. OutputMode is passed separately because CommandContext
+/// is render-agnostic, while output_mode is a rendering concern.
+/// Theme is passed at runtime (late binding) to ensure the correct theme is used.
 ///
 /// Uses `Rc<RefCell<_>>` and `FnMut` for single-threaded CLI apps.
 pub type DispatchFn = Rc<
@@ -115,6 +115,7 @@ pub type DispatchFn = Rc<
             &CommandContext,
             Option<&Hooks>,
             crate::OutputMode,
+            &crate::Theme,
         ) -> Result<DispatchOutput, String>,
     >,
 >;
@@ -126,8 +127,9 @@ pub fn dispatch(
     ctx: &CommandContext,
     hooks: Option<&Hooks>,
     output_mode: crate::OutputMode,
+    theme: &crate::Theme,
 ) -> Result<DispatchOutput, String> {
-    (dispatch_fn.borrow_mut())(matches, ctx, hooks, output_mode)
+    (dispatch_fn.borrow_mut())(matches, ctx, hooks, output_mode, theme)
 }
 
 // Note: extract_command_path, get_deepest_matches, has_subcommand, insert_default_command,

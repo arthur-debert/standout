@@ -250,7 +250,7 @@ impl AppBuilder {
         }
 
         // Get the theme (use default if not set)
-        let theme = self.theme.clone().unwrap_or_default();
+
         let context_registry = &self.context_registry;
 
         // Build dispatch functions from recipes
@@ -259,7 +259,6 @@ impl AppBuilder {
             let dispatch = pending.recipe.create_dispatch(
                 &pending.template,
                 context_registry,
-                &theme,
                 self.template_engine.clone(),
             );
             commands.insert(path.clone(), dispatch);

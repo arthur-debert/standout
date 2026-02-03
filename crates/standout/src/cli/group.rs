@@ -5,8 +5,6 @@
 
 use crate::context::ContextRegistry;
 
-use crate::Theme;
-
 use clap::ArgMatches;
 use serde::Serialize;
 use std::cell::RefCell;
@@ -48,7 +46,6 @@ pub(crate) trait CommandRecipe {
         &self,
         template: &str,
         context_registry: &ContextRegistry,
-        theme: &Theme,
         template_engine: Rc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn;
 }
@@ -111,19 +108,18 @@ where
         &self,
         template: &str,
         context_registry: &ContextRegistry,
-        theme: &Theme,
         template_engine: Rc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn {
         let handler = self.handler.clone();
         let template = template.to_string();
         let context_registry = context_registry.clone();
-        let theme = theme.clone();
 
         Rc::new(RefCell::new(
             move |matches: &ArgMatches,
                   ctx: &CommandContext,
                   hooks: Option<&Hooks>,
-                  output_mode: crate::OutputMode| {
+                  output_mode: crate::OutputMode,
+                  theme: &crate::Theme| {
                 let result = handler
                     .borrow_mut()
                     .handle(matches, ctx)
@@ -134,7 +130,7 @@ where
                     ctx,
                     hooks,
                     &template,
-                    &theme,
+                    theme,
                     &context_registry,
                     &**template_engine,
                     output_mode,
@@ -205,19 +201,18 @@ where
         &self,
         template: &str,
         context_registry: &ContextRegistry,
-        theme: &Theme,
         template_engine: Rc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn {
         let handler = self.handler.clone();
         let template = template.to_string();
         let context_registry = context_registry.clone();
-        let theme = theme.clone();
 
         Rc::new(RefCell::new(
             move |matches: &ArgMatches,
                   ctx: &CommandContext,
                   hooks: Option<&Hooks>,
-                  output_mode: crate::OutputMode| {
+                  output_mode: crate::OutputMode,
+                  theme: &crate::Theme| {
                 let result = handler
                     .borrow_mut()
                     .handle(matches, ctx)
@@ -228,7 +223,7 @@ where
                     ctx,
                     hooks,
                     &template,
-                    &theme,
+                    theme,
                     &context_registry,
                     &**template_engine,
                     output_mode,
@@ -281,7 +276,6 @@ impl CommandRecipe for ErasedConfigRecipe {
         &self,
         template: &str,
         context_registry: &ContextRegistry,
-        theme: &Theme,
         template_engine: Rc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn {
         let config = self
@@ -293,7 +287,6 @@ impl CommandRecipe for ErasedConfigRecipe {
             "",
             template.to_string(),
             context_registry.clone(),
-            theme.clone(),
             template_engine,
         )
     }
@@ -560,7 +553,6 @@ pub(crate) trait ErasedCommandConfig {
         path: &str,
         template: String,
         context_registry: ContextRegistry,
-        theme: Theme,
         template_engine: Rc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn;
 }
@@ -779,7 +771,6 @@ where
         _path: &str,
         template: String,
         context_registry: ContextRegistry,
-        theme: Theme,
         template_engine: Rc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn {
         let handler = self.handler;
@@ -788,7 +779,8 @@ where
             move |matches: &ArgMatches,
                   ctx: &CommandContext,
                   hooks: Option<&Hooks>,
-                  output_mode: crate::OutputMode| {
+                  output_mode: crate::OutputMode,
+                  theme: &crate::Theme| {
                 let result = handler
                     .borrow_mut()
                     .handle(matches, ctx)
@@ -799,7 +791,7 @@ where
                     ctx,
                     hooks,
                     &template,
-                    &theme,
+                    theme,
                     &context_registry,
                     &**template_engine,
                     output_mode,
@@ -842,7 +834,6 @@ where
         _path: &str,
         template: String,
         context_registry: ContextRegistry,
-        theme: Theme,
         template_engine: Rc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn {
         let handler = self.handler;
@@ -851,7 +842,8 @@ where
             move |matches: &ArgMatches,
                   ctx: &CommandContext,
                   hooks: Option<&Hooks>,
-                  output_mode: crate::OutputMode| {
+                  output_mode: crate::OutputMode,
+                  theme: &crate::Theme| {
                 let result = handler
                     .borrow_mut()
                     .handle(matches, ctx)
@@ -862,7 +854,7 @@ where
                     ctx,
                     hooks,
                     &template,
-                    &theme,
+                    theme,
                     &context_registry,
                     &**template_engine,
                     output_mode,

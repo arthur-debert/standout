@@ -133,11 +133,13 @@ impl AppBuilder {
 
             // Run the handler (post-dispatch hooks are run inside dispatch function)
             // output_mode is passed separately because CommandContext is render-agnostic
-            let dispatch_output = match dispatch(dispatch_fn, sub_matches, &ctx, hooks, output_mode)
-            {
-                Ok(output) => output,
-                Err(e) => return RunResult::Handled(e),
-            };
+            let default_theme = crate::Theme::default();
+            let theme = self.theme.as_ref().unwrap_or(&default_theme);
+            let dispatch_output =
+                match dispatch(dispatch_fn, sub_matches, &ctx, hooks, output_mode, theme) {
+                    Ok(output) => output,
+                    Err(e) => return RunResult::Handled(e),
+                };
 
             // Convert to Output enum for post-output hooks
             let output = match dispatch_output {

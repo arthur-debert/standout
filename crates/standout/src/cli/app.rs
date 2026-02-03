@@ -223,11 +223,13 @@ impl App {
             let sub_matches = get_deepest_matches(&matches);
 
             // Run the handler (output_mode passed separately as CommandContext is render-agnostic)
-            let dispatch_output = match dispatch(dispatch_fn, sub_matches, &ctx, hooks, output_mode)
-            {
-                Ok(output) => output,
-                Err(e) => return RunResult::Handled(e),
-            };
+            let default_theme = Theme::default();
+            let theme = self.core.theme().unwrap_or(&default_theme);
+            let dispatch_output =
+                match dispatch(dispatch_fn, sub_matches, &ctx, hooks, output_mode, theme) {
+                    Ok(output) => output,
+                    Err(e) => return RunResult::Handled(e),
+                };
 
             // Convert to RenderedOutput for post-output hooks
             let output = match dispatch_output {
