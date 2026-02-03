@@ -354,7 +354,9 @@ pub fn verify_handler_args(
                                 cli_name: exp.cli_name.clone(),
                                 expected_kind: exp.kind.clone(),
                             });
-                        } else if !arg.is_required_set() {
+                        } else if matches!(action, ArgAction::Count) {
+                            // Count is fine for a required integer arg (it returns 0 if missing)
+                        } else if !arg.is_required_set() && arg.get_default_values().is_empty() {
                             mismatches.push(ArgMismatch::RequiredMismatch {
                                 cli_name: exp.cli_name.clone(),
                                 handler_required: true,
