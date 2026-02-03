@@ -298,7 +298,7 @@ pub use standout_render::{
 pub use setup::SetupError;
 
 // Macro re-exports
-pub use standout_macros::{embed_styles, embed_templates, handler};
+pub use standout_macros::{command, embed_styles, embed_templates, handler};
 
 // Tabular derive macros
 pub use standout_macros::{Tabular, TabularRow};
