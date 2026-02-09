@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.0.2] - 2026-02-09
+
 ### Fixed
 
 - **Extension-agnostic registry resolution for templates and styles** - Registry lookups now fall back to the base name when a recognized extension doesn't match exactly. For example, looking up `"list.j2"` now finds a template registered from `list.jinja`, because the registry strips the known `.j2` extension and retries with the base name `"list"`. This fix applies uniformly to `FileRegistry`, `TemplateRegistry`, and `StylesheetRegistry` — all lookup tiers (inline, file-based, directory-based, framework) support the fallback.
@@ -1023,7 +1025,8 @@ let output = render_with_output(template, &data, &theme, OutputMode::Term)?;
   - Command handler system with `dispatch_from` convenience method
   - Archive variant support in clap integration
 
-[Unreleased]: https://github.com/arthur-debert/standout/compare/standout-v6.0.1...HEAD
+[Unreleased]: https://github.com/arthur-debert/standout/compare/standout-v6.0.2...HEAD
+[6.0.2]: https://github.com/arthur-debert/standout/compare/standout-v6.0.1...standout-v6.0.2
 [6.0.1]: https://github.com/arthur-debert/standout/compare/standout-v6.0.0...standout-v6.0.1
 [6.0.0]: https://github.com/arthur-debert/standout/compare/standout-v5.0.0...standout-v6.0.0
 [5.0.0]: https://github.com/arthur-debert/standout/compare/standout-v4.0.0...standout-v5.0.0
