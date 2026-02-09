@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Extension-agnostic registry resolution for templates and styles** - Registry lookups now fall back to the base name when a recognized extension doesn't match exactly. For example, looking up `"list.j2"` now finds a template registered from `list.jinja`, because the registry strips the known `.j2` extension and retries with the base name `"list"`. This fix applies uniformly to `FileRegistry`, `TemplateRegistry`, and `StylesheetRegistry` — all lookup tiers (inline, file-based, directory-based, framework) support the fallback.
+  - Added `resolve_in_map()` helper in `file_loader` for extension-agnostic HashMap lookups.
+  - Updated `FileRegistry::get()` and `get_entry()` to try base name when exact lookup fails.
+  - Updated `TemplateRegistry::get()` to use fallback for inline, files, and framework tiers.
+  - Updated `StylesheetRegistry::get()` and `contains()` to use fallback for inline tier.
+
 ## [6.0.1] - 2026-02-09
 
 ### Fixed

@@ -97,6 +97,20 @@
 //! registry.get("default.yml") // → default.yml (explicit)
 //! ```
 //!
+//! # Extension-Agnostic Resolution
+//!
+//! Lookups are extension-agnostic: if a name with a recognized extension isn't
+//! found, the extension is stripped and the base name is tried. This allows
+//! callers to use any known extension regardless of the actual file extension:
+//!
+//! ```rust,ignore
+//! // File on disk: config.yaml
+//! // Registry has: "config" and "config.yaml"
+//! registry.get("config")       // → found (extensionless key)
+//! registry.get("config.yaml")  // → found (exact match)
+//! registry.get("config.yml")   // → found (strips .yml, falls back to "config")
+//! ```
+//!
 //! # Collision Detection
 //!
 //! Cross-directory collisions (same name from different directories) cause a panic
@@ -229,6 +243,50 @@ pub fn strip_extension(name: &str, extensions: &[&str]) -> String {
         }
     }
     name.to_string()
+}
+
+/// Looks up a key in a HashMap with extension-agnostic fallback.
+///
+/// Tries the exact name first. If not found and the name has a recognized
+/// extension, strips the extension and tries the base name. This enables
+/// lookups like `"config.j2"` to find entries registered as `"config"`.
+///
+/// # Example
+///
+/// ```rust
+/// use std::collections::HashMap;
+/// use standout_render::file_loader::resolve_in_map;
+///
+/// let mut map = HashMap::new();
+/// map.insert("config".to_string(), "content");
+/// map.insert("config.yaml".to_string(), "yaml content");
+///
+/// let extensions = &[".yaml", ".yml", ".j2"];
+///
+/// // Exact match
+/// assert_eq!(resolve_in_map(&map, "config", extensions), Some(&"content"));
+/// assert_eq!(resolve_in_map(&map, "config.yaml", extensions), Some(&"yaml content"));
+///
+/// // Extension-agnostic fallback: .j2 is stripped, finds "config"
+/// assert_eq!(resolve_in_map(&map, "config.j2", extensions), Some(&"content"));
+///
+/// // No match
+/// assert_eq!(resolve_in_map(&map, "missing", extensions), None::<&&str>);
+/// ```
+pub fn resolve_in_map<'a, V>(
+    map: &'a HashMap<String, V>,
+    name: &str,
+    extensions: &[&str],
+) -> Option<&'a V> {
+    if let Some(value) = map.get(name) {
+        return Some(value);
+    }
+    let base_name = strip_extension(name, extensions);
+    if base_name != name {
+        map.get(base_name.as_str())
+    } else {
+        None
+    }
 }
 
 /// Builds a registry map from embedded entries with extension priority handling.
@@ -637,6 +695,11 @@ impl<T: Clone> FileRegistry<T> {
 
     /// Gets a resource by name, applying the transform if reading from disk.
     ///
+    /// Names are resolved with extension-agnostic fallback: if the exact name
+    /// isn't found and it has a recognized extension, the extension is stripped
+    /// and the base name is tried. This allows lookups like `"config.j2"` to
+    /// find a file registered as `"config"` (from `config.jinja`).
+    ///
     /// In dev mode (when using [`LoadedEntry::File`]): re-reads file and transforms
     /// on each call, enabling hot reload.
     ///
@@ -651,7 +714,24 @@ impl<T: Clone> FileRegistry<T> {
     pub fn get(&mut self, name: &str) -> Result<T, LoadError> {
         self.ensure_initialized()?;
 
-        match self.entries.get(name) {
+        // Try exact name first, fall back to base name (extension stripped)
+        if self.entries.contains_key(name) {
+            return self.get_by_key(name);
+        }
+
+        let base_name = strip_extension(name, self.config.extensions);
+        if base_name != name && self.entries.contains_key(base_name.as_str()) {
+            return self.get_by_key(&base_name);
+        }
+
+        Err(LoadError::NotFound {
+            name: name.to_string(),
+        })
+    }
+
+    /// Resolves an entry by key, reading from disk if necessary.
+    fn get_by_key(&self, key: &str) -> Result<T, LoadError> {
+        match self.entries.get(key) {
             Some(LoadedEntry::Embedded(content)) => Ok(content.clone()),
             Some(LoadedEntry::File(path)) => {
                 let content = std::fs::read_to_string(path).map_err(|e| LoadError::Io {
@@ -661,7 +741,7 @@ impl<T: Clone> FileRegistry<T> {
                 (self.config.transform)(&content).map_err(|e| {
                     if let LoadError::Transform { message, .. } = e {
                         LoadError::Transform {
-                            name: name.to_string(),
+                            name: key.to_string(),
                             message,
                         }
                     } else {
@@ -670,17 +750,29 @@ impl<T: Clone> FileRegistry<T> {
                 })
             }
             None => Err(LoadError::NotFound {
-                name: name.to_string(),
+                name: key.to_string(),
             }),
         }
     }
 
     /// Returns a reference to the entry if it exists.
     ///
+    /// Names are resolved with extension-agnostic fallback: if the exact name
+    /// isn't found and it has a recognized extension, the extension is stripped
+    /// and the base name is tried.
+    ///
     /// Unlike [`get`](Self::get), this doesn't trigger initialization or file reading.
     /// Useful for checking if a name exists without side effects.
     pub fn get_entry(&self, name: &str) -> Option<&LoadedEntry<T>> {
-        self.entries.get(name)
+        if let Some(entry) = self.entries.get(name) {
+            return Some(entry);
+        }
+        let base_name = strip_extension(name, self.config.extensions);
+        if base_name != name {
+            self.entries.get(base_name.as_str())
+        } else {
+            None
+        }
     }
 
     /// Returns an iterator over all registered names.
@@ -1169,5 +1261,109 @@ mod tests {
         let display = err.to_string();
         assert!(display.contains("bad"));
         assert!(display.contains("parse error"));
+    }
+
+    // =========================================================================
+    // Extension-agnostic resolution tests
+    // =========================================================================
+
+    #[test]
+    fn test_resolve_in_map_exact_match() {
+        let mut map = HashMap::new();
+        map.insert("config".to_string(), "base");
+        map.insert("config.tmpl".to_string(), "with ext");
+
+        let extensions = &[".tmpl", ".j2"];
+
+        assert_eq!(resolve_in_map(&map, "config", extensions), Some(&"base"));
+        assert_eq!(
+            resolve_in_map(&map, "config.tmpl", extensions),
+            Some(&"with ext")
+        );
+    }
+
+    #[test]
+    fn test_resolve_in_map_fallback_to_base_name() {
+        let mut map = HashMap::new();
+        map.insert("config".to_string(), "content");
+
+        let extensions = &[".tmpl", ".j2"];
+
+        // "config.j2" not in map, but .j2 is known → strips to "config" → found
+        assert_eq!(
+            resolve_in_map(&map, "config.j2", extensions),
+            Some(&"content")
+        );
+        // "config.tmpl" not in map either → strips to "config" → found
+        assert_eq!(
+            resolve_in_map(&map, "config.tmpl", extensions),
+            Some(&"content")
+        );
+    }
+
+    #[test]
+    fn test_resolve_in_map_unknown_extension_no_fallback() {
+        let mut map = HashMap::new();
+        map.insert("config".to_string(), "content");
+
+        let extensions = &[".tmpl", ".j2"];
+
+        // ".txt" is not a known extension → no stripping → not found
+        assert_eq!(resolve_in_map(&map, "config.txt", extensions), None);
+    }
+
+    #[test]
+    fn test_resolve_in_map_no_match() {
+        let map: HashMap<String, &str> = HashMap::new();
+        let extensions = &[".tmpl"];
+
+        assert_eq!(resolve_in_map(&map, "missing", extensions), None);
+        assert_eq!(resolve_in_map(&map, "missing.tmpl", extensions), None);
+    }
+
+    #[test]
+    fn test_registry_get_cross_extension_fallback() {
+        let temp_dir = TempDir::new().unwrap();
+        // File has .tmpl extension
+        create_file(temp_dir.path(), "config.tmpl", "Template content");
+
+        let mut registry = FileRegistry::new(string_config());
+        registry.add_dir(temp_dir.path()).unwrap();
+
+        // Lookup with different known extension should fall back to base name
+        assert_eq!(registry.get("config.j2").unwrap(), "Template content");
+        assert_eq!(registry.get("config.jinja2").unwrap(), "Template content");
+        // Direct access still works
+        assert_eq!(registry.get("config").unwrap(), "Template content");
+        assert_eq!(registry.get("config.tmpl").unwrap(), "Template content");
+    }
+
+    #[test]
+    fn test_registry_get_entry_cross_extension_fallback() {
+        let temp_dir = TempDir::new().unwrap();
+        create_file(temp_dir.path(), "list.tmpl", "List content");
+
+        let mut registry = FileRegistry::new(string_config());
+        registry.add_dir(temp_dir.path()).unwrap();
+        registry.refresh().unwrap();
+
+        // get_entry with different extension should fall back to base name
+        assert!(registry.get_entry("list.j2").is_some());
+        assert!(registry.get_entry("list.jinja2").is_some());
+        assert!(registry.get_entry("list").is_some());
+        assert!(registry.get_entry("list.tmpl").is_some());
+    }
+
+    #[test]
+    fn test_registry_get_cross_extension_nested_path() {
+        let temp_dir = TempDir::new().unwrap();
+        create_file(temp_dir.path(), "todos/list.tmpl", "Todos list");
+
+        let mut registry = FileRegistry::new(string_config());
+        registry.add_dir(temp_dir.path()).unwrap();
+
+        // Nested path with different extension
+        assert_eq!(registry.get("todos/list.j2").unwrap(), "Todos list");
+        assert_eq!(registry.get("todos/list").unwrap(), "Todos list");
     }
 }

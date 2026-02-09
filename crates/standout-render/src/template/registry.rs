@@ -68,8 +68,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::file_loader::{
-    self, build_embedded_registry, FileRegistry, FileRegistryConfig, LoadError, LoadedEntry,
-    LoadedFile,
+    self, build_embedded_registry, resolve_in_map, FileRegistry, FileRegistryConfig, LoadError,
+    LoadedEntry, LoadedFile,
 };
 
 /// Recognized template file extensions in priority order.
@@ -610,9 +610,10 @@ impl TemplateRegistry {
 
     /// Looks up a template by name.
     ///
-    /// Names can be specified with or without extension:
-    /// - `"config"` resolves to `config.jinja` (or highest-priority extension)
-    /// - `"config.jinja"` resolves to exactly that file
+    /// Names are resolved with extension-agnostic fallback: if the exact name
+    /// isn't found and it has a recognized extension, the extension is stripped
+    /// and the base name is tried. This allows lookups like `"list.j2"` to
+    /// find a template registered as `"list"` (from `list.jinja`).
     ///
     /// # Resolution Priority
     ///
@@ -629,22 +630,22 @@ impl TemplateRegistry {
     /// Returns [`RegistryError::NotFound`] if the template doesn't exist.
     pub fn get(&self, name: &str) -> Result<ResolvedTemplate, RegistryError> {
         // Check inline first (highest priority)
-        if let Some(content) = self.inline.get(name) {
+        if let Some(content) = resolve_in_map(&self.inline, name, TEMPLATE_EXTENSIONS) {
             return Ok(ResolvedTemplate::Inline(content.clone()));
         }
 
         // Check file-based templates from add_from_files
-        if let Some(path) = self.files.get(name) {
+        if let Some(path) = resolve_in_map(&self.files, name, TEMPLATE_EXTENSIONS) {
             return Ok(ResolvedTemplate::File(path.clone()));
         }
 
-        // Check directory-based file registry
+        // Check directory-based file registry (has its own extension fallback)
         if let Some(entry) = self.inner.get_entry(name) {
             return Ok(ResolvedTemplate::from(entry));
         }
 
         // Check framework templates (lowest priority)
-        if let Some(content) = self.framework.get(name) {
+        if let Some(content) = resolve_in_map(&self.framework, name, TEMPLATE_EXTENSIONS) {
             return Ok(ResolvedTemplate::Inline(content.clone()));
         }
 
@@ -1244,5 +1245,58 @@ mod tests {
 
         assert!(registry.is_empty());
         assert!(!registry.has_framework_templates());
+    }
+
+    // =========================================================================
+    // Extension-agnostic resolution tests
+    // =========================================================================
+
+    #[test]
+    fn test_inline_cross_extension_lookup() {
+        // Inline registered as "list.jinja", looked up as "list.j2"
+        let entries: &[(&str, &str)] = &[("list.jinja", "List content")];
+        let registry = TemplateRegistry::from_embedded_entries(entries);
+
+        // "list.j2" should fall back to "list" (base name)
+        let content = registry.get_content("list.j2").unwrap();
+        assert_eq!(content, "List content");
+    }
+
+    #[test]
+    fn test_inline_cross_extension_nested_path() {
+        let entries: &[(&str, &str)] = &[("todos/list.jinja", "Todos")];
+        let registry = TemplateRegistry::from_embedded_entries(entries);
+
+        assert_eq!(registry.get_content("todos/list.j2").unwrap(), "Todos");
+        assert_eq!(registry.get_content("todos/list.stpl").unwrap(), "Todos");
+        assert_eq!(registry.get_content("todos/list").unwrap(), "Todos");
+    }
+
+    #[test]
+    fn test_framework_cross_extension_lookup() {
+        let mut registry = TemplateRegistry::new();
+        let entries: &[(&str, &str)] = &[("standout/list-view.jinja", "Framework view")];
+        registry.add_framework_entries(entries);
+
+        // Look up with different extension
+        let content = registry.get_content("standout/list-view.j2").unwrap();
+        assert_eq!(content, "Framework view");
+    }
+
+    #[test]
+    fn test_files_cross_extension_lookup() {
+        let mut registry = TemplateRegistry::new();
+        let files = vec![TemplateFile::new(
+            "config",
+            "config.jinja",
+            "/templates/config.jinja",
+            "/templates",
+        )];
+        registry.add_from_files(files).unwrap();
+
+        // Look up with different extension should find via base name
+        assert!(registry.get("config.j2").is_ok());
+        assert!(registry.get("config.stpl").is_ok());
+        assert!(registry.get("config.txt").is_ok());
     }
 }

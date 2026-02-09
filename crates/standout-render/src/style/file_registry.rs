@@ -61,7 +61,9 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use super::super::theme::Theme;
-use crate::file_loader::{build_embedded_registry, FileRegistry, FileRegistryConfig, LoadError};
+use crate::file_loader::{
+    build_embedded_registry, resolve_in_map, FileRegistry, FileRegistryConfig, LoadError,
+};
 
 use super::error::StylesheetError;
 
@@ -300,6 +302,11 @@ impl StylesheetRegistry {
 
     /// Gets a theme by name.
     ///
+    /// Names are resolved with extension-agnostic fallback: if the exact name
+    /// isn't found and it has a recognized extension, the extension is stripped
+    /// and the base name is tried. This allows lookups like `"config.yml"` to
+    /// find a theme registered as `"config"` (from `config.yaml`).
+    ///
     /// Looks up the theme in order: inline first, then file-based.
     /// In development mode, file-based themes are re-read on each access.
     ///
@@ -317,12 +324,12 @@ impl StylesheetRegistry {
     /// let theme = registry.get("darcula")?;
     /// ```
     pub fn get(&mut self, name: &str) -> Result<Theme, StylesheetError> {
-        // Check inline first
-        if let Some(theme) = self.inline.get(name) {
+        // Check inline first (with extension-agnostic fallback)
+        if let Some(theme) = resolve_in_map(&self.inline, name, STYLESHEET_EXTENSIONS) {
             return Ok(theme.clone());
         }
 
-        // Try file-based
+        // Try file-based (FileRegistry has its own extension fallback)
         let theme = self.inner.get(name).map_err(|e| StylesheetError::Load {
             message: e.to_string(),
         })?;
@@ -338,7 +345,8 @@ impl StylesheetRegistry {
     ///
     /// * `name` - The theme name to check
     pub fn contains(&self, name: &str) -> bool {
-        self.inline.contains_key(name) || self.inner.get_entry(name).is_some()
+        resolve_in_map(&self.inline, name, STYLESHEET_EXTENSIONS).is_some()
+            || self.inner.get_entry(name).is_some()
     }
 
     /// Returns an iterator over all registered theme names.

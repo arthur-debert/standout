@@ -207,8 +207,8 @@ pub use util::{flatten_json_for_csv, rgb_to_ansi256, rgb_to_truecolor, truncate_
 
 // File loader exports
 pub use file_loader::{
-    build_embedded_registry, extension_priority, strip_extension, walk_dir, FileRegistry,
-    FileRegistryConfig, LoadError, LoadedEntry, LoadedFile,
+    build_embedded_registry, extension_priority, resolve_in_map, strip_extension, walk_dir,
+    FileRegistry, FileRegistryConfig, LoadError, LoadedEntry, LoadedFile,
 };
 
 // Embedded source types (for macros)
