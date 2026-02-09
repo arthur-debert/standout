@@ -20,7 +20,7 @@ use crate::error::RenderError;
 /// - Variable substitution
 /// - Template logic (loops, conditionals) - if supported
 /// - Custom filters and functions - if supported
-pub trait TemplateEngine {
+pub trait TemplateEngine: Send + Sync {
     /// Renders a template string with the given data.
     ///
     /// This compiles and renders the template in one step. For repeated

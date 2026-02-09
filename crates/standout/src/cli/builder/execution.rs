@@ -13,12 +13,12 @@ use std::path::PathBuf;
 
 use super::{AppBuilder, PendingCommand};
 use crate::cli::dispatch::{
-    dispatch, extract_command_path, get_deepest_matches, has_subcommand, insert_default_command,
+    extract_command_path, get_deepest_matches, has_subcommand, insert_default_command,
     DispatchOutput,
 };
 use crate::cli::group::{ErasedConfigRecipe, GroupBuilder, GroupEntry};
 use crate::cli::handler::{CommandContext, RunResult};
-use crate::cli::hooks::{RenderedOutput, TextOutput};
+use crate::cli::hooks::RenderedOutput;
 use crate::SetupError;
 
 impl AppBuilder {
@@ -115,7 +115,7 @@ impl AppBuilder {
 
         // Look up handler
         let commands = self.get_commands();
-        if let Some(dispatch_fn) = commands.get(&path_str) {
+        if let Some(dispatch) = commands.get(&path_str) {
             let mut ctx = CommandContext::new(path, self.app_state.clone());
 
             // Get hooks for this command (used for pre-dispatch, post-dispatch, and post-output)
@@ -133,20 +133,14 @@ impl AppBuilder {
 
             // Run the handler (post-dispatch hooks are run inside dispatch function)
             // output_mode is passed separately because CommandContext is render-agnostic
-            // Late binding: theme is resolved here at dispatch time, not when commands were registered
-            let default_theme = crate::Theme::default();
-            let theme = self.theme.as_ref().unwrap_or(&default_theme);
-            let dispatch_output =
-                match dispatch(dispatch_fn, sub_matches, &ctx, hooks, output_mode, theme) {
-                    Ok(output) => output,
-                    Err(e) => return RunResult::Handled(e),
-                };
+            let dispatch_output = match dispatch(sub_matches, &ctx, hooks, output_mode) {
+                Ok(output) => output,
+                Err(e) => return RunResult::Handled(e),
+            };
 
             // Convert to Output enum for post-output hooks
             let output = match dispatch_output {
-                DispatchOutput::Text { formatted, raw } => {
-                    RenderedOutput::Text(TextOutput::new(formatted, raw))
-                }
+                DispatchOutput::Text(s) => RenderedOutput::Text(s),
                 DispatchOutput::Binary(b, f) => RenderedOutput::Binary(b, f),
                 DispatchOutput::Silent => RenderedOutput::Silent,
             };
@@ -171,9 +165,8 @@ impl AppBuilder {
                     let dest = OutputDestination::File(path);
 
                     match &final_output {
-                        RenderedOutput::Text(t) => {
-                            // Write raw output (without ANSI codes) to file
-                            if let Err(e) = write_output(&t.raw, &dest) {
+                        RenderedOutput::Text(s) => {
+                            if let Err(e) = write_output(s, &dest) {
                                 return RunResult::Handled(format!("Error writing output: {}", e));
                             }
                             // Suppress further output
@@ -190,9 +183,9 @@ impl AppBuilder {
                 }
             }
 
-            // Convert back to RunResult (using formatted for terminal display)
+            // Convert back to RunResult
             match final_output {
-                RenderedOutput::Text(t) => RunResult::Handled(t.formatted),
+                RenderedOutput::Text(s) => RunResult::Handled(s),
                 RenderedOutput::Binary(b, f) => RunResult::Binary(b, f),
                 RenderedOutput::Silent => RunResult::Handled(String::new()),
             }
@@ -818,11 +811,8 @@ mod tests {
             .hooks(
                 "list",
                 Hooks::new().post_output(|_, _ctx, output| {
-                    if let RenderedOutput::Text(text_output) = output {
-                        Ok(RenderedOutput::Text(TextOutput::new(
-                            text_output.formatted.to_uppercase(),
-                            text_output.raw.to_uppercase(),
-                        )))
+                    if let RenderedOutput::Text(text) = output {
+                        Ok(RenderedOutput::Text(text.to_uppercase()))
                     } else {
                         Ok(output)
                     }
@@ -853,21 +843,15 @@ mod tests {
                 "list",
                 Hooks::new()
                     .post_output(|_, _ctx, output| {
-                        if let RenderedOutput::Text(text_output) = output {
-                            Ok(RenderedOutput::Text(TextOutput::new(
-                                format!("[{}]", text_output.formatted),
-                                format!("[{}]", text_output.raw),
-                            )))
+                        if let RenderedOutput::Text(text) = output {
+                            Ok(RenderedOutput::Text(format!("[{}]", text)))
                         } else {
                             Ok(output)
                         }
                     })
                     .post_output(|_, _ctx, output| {
-                        if let RenderedOutput::Text(text_output) = output {
-                            Ok(RenderedOutput::Text(TextOutput::new(
-                                text_output.formatted.to_uppercase(),
-                                text_output.raw.to_uppercase(),
-                            )))
+                        if let RenderedOutput::Text(text) = output {
+                            Ok(RenderedOutput::Text(text.to_uppercase()))
                         } else {
                             Ok(output)
                         }
@@ -927,7 +911,7 @@ mod tests {
                 "config.get",
                 Hooks::new().post_output(|_, _ctx, output| {
                     if let RenderedOutput::Text(_) = output {
-                        Ok(RenderedOutput::Text(TextOutput::plain("***".into())))
+                        Ok(RenderedOutput::Text("***".into()))
                     } else {
                         Ok(output)
                     }
@@ -1041,11 +1025,8 @@ mod tests {
             .hooks(
                 "test",
                 Hooks::new().post_output(|_, _ctx, output| {
-                    if let RenderedOutput::Text(text_output) = output {
-                        Ok(RenderedOutput::Text(TextOutput::new(
-                            format!("wrapped: {}", text_output.formatted),
-                            format!("wrapped: {}", text_output.raw),
-                        )))
+                    if let RenderedOutput::Text(text) = output {
+                        Ok(RenderedOutput::Text(format!("wrapped: {}", text)))
                     } else {
                         Ok(output)
                     }
@@ -1426,18 +1407,18 @@ mod tests {
     // ============================================================================
 
     #[test]
-    fn test_default_command_builder() {
-        let builder = AppBuilder::new().default_command("list");
+    fn test_default_builder() {
+        let builder = AppBuilder::new().default("list");
 
         assert_eq!(builder.default_command, Some("list".to_string()));
     }
 
     #[test]
-    fn test_default_command_naked_invocation() {
+    fn test_default_naked_invocation() {
         use serde_json::json;
 
         let builder = AppBuilder::new()
-            .default_command("list")
+            .default("list")
             .command(
                 "list",
                 |_m, _ctx| Ok(HandlerOutput::Render(json!({"items": ["a", "b"]}))),
@@ -1462,11 +1443,11 @@ mod tests {
     }
 
     #[test]
-    fn test_default_command_with_options() {
+    fn test_default_with_options() {
         use serde_json::json;
 
         let builder = AppBuilder::new()
-            .default_command("list")
+            .default("list")
             .command(
                 "list",
                 |_m, _ctx| Ok(HandlerOutput::Render(json!({"count": 42}))),
@@ -1484,11 +1465,11 @@ mod tests {
     }
 
     #[test]
-    fn test_default_command_explicit_command_overrides() {
+    fn test_default_explicit_command_overrides() {
         use serde_json::json;
 
         let builder = AppBuilder::new()
-            .default_command("list")
+            .default("list")
             .command(
                 "list",
                 |_m, _ctx| Ok(HandlerOutput::Render(json!({"cmd": "list"}))),
@@ -1513,7 +1494,7 @@ mod tests {
     }
 
     #[test]
-    fn test_default_command_no_default_set() {
+    fn test_default_no_default_set() {
         use serde_json::json;
 
         let builder = AppBuilder::new()
@@ -1529,6 +1510,76 @@ mod tests {
         // Without default command, naked invocation should return NoMatch
         let result = builder.dispatch_from(cmd, ["app"]);
         assert!(!result.is_handled());
+    }
+
+    #[test]
+    fn test_conflict_detection_prevents_ambiguity() {
+        use serde_json::json;
+
+        // Create a builder with a group "todo" and a root command "view" that conflicts
+        let result = AppBuilder::new()
+            .default("todo")
+            .group("todo", |g| {
+                g.command("view", |_m, _ctx| Ok(HandlerOutput::Render(json!({}))))
+                    .command("list", |_m, _ctx| Ok(HandlerOutput::Render(json!({}))))
+            })
+            .unwrap()
+            .command(
+                "view", // Conflicts with todo.view!
+                |_m, _ctx| Ok(HandlerOutput::Render(json!({}))),
+                "",
+            )
+            .unwrap()
+            .build();
+
+        assert!(
+            matches!(result, Err(SetupError::CommandConflict { .. })),
+            "Expected CommandConflict error"
+        );
+    }
+
+    #[test]
+    fn test_no_conflict_when_names_differ() {
+        use serde_json::json;
+
+        // Create a builder with a group "todo" and a root command "version" that doesn't conflict
+        let result = AppBuilder::new()
+            .default("todo")
+            .group("todo", |g| {
+                g.command("view", |_m, _ctx| Ok(HandlerOutput::Render(json!({}))))
+                    .command("list", |_m, _ctx| Ok(HandlerOutput::Render(json!({}))))
+            })
+            .unwrap()
+            .command(
+                "version", // No conflict - different name
+                |_m, _ctx| Ok(HandlerOutput::Render(json!({}))),
+                "",
+            )
+            .unwrap()
+            .build();
+
+        assert!(result.is_ok(), "Expected Ok but got error");
+    }
+
+    #[test]
+    fn test_no_conflict_without_default() {
+        use serde_json::json;
+
+        // Without setting a default, there should be no conflict detection
+        let result = AppBuilder::new()
+            .group("todo", |g| {
+                g.command("view", |_m, _ctx| Ok(HandlerOutput::Render(json!({}))))
+            })
+            .unwrap()
+            .command(
+                "view", // Would conflict if todo was default, but it's not
+                |_m, _ctx| Ok(HandlerOutput::Render(json!({}))),
+                "",
+            )
+            .unwrap()
+            .build();
+
+        assert!(result.is_ok(), "Expected Ok but got error");
     }
 
     // ============================================================================
@@ -1661,315 +1712,6 @@ mod tests {
             "Theme was not passed to dispatch - output: {}",
             output
         );
-    }
-
-    #[test]
-    fn test_styles_and_default_theme_with_command() {
-        // This is the exact bug reported by a user: using .styles() + .default_theme()
-        // instead of .theme() directly caused styles to not be found.
-        // The fix ensures theme is resolved from stylesheet registry BEFORE
-        // commands are finalized.
-        use serde_json::json;
-        use std::fs;
-        use tempfile::TempDir;
-
-        let temp_dir = TempDir::new().unwrap();
-
-        // Create a theme file with a custom style
-        fs::write(
-            temp_dir.path().join("dark.yaml"),
-            r#"
-header:
-  fg: blue
-  bold: true
-"#,
-        )
-        .unwrap();
-
-        // This is the pattern that was broken:
-        // .styles_dir() + .default_theme() + .command()
-        let app = AppBuilder::new()
-            .styles_dir(temp_dir.path())
-            .unwrap()
-            .default_theme("dark")
-            .command(
-                "list",
-                |_m, _ctx| Ok(HandlerOutput::Render(json!({"title": "Results"}))),
-                "[header]{{ title }}[/header]",
-            )
-            .unwrap()
-            .build()
-            .unwrap();
-
-        let cmd = Command::new("app").subcommand(Command::new("list"));
-        let result = app.dispatch_from(cmd, ["app", "--output=term", "list"]);
-
-        assert!(result.is_handled());
-        let output = result.output().unwrap();
-
-        // The bug caused [header?] to appear instead of styled text
-        assert!(
-            !output.contains("[header?]"),
-            "ORDERING BUG: .styles() + .default_theme() not applied - output: {}",
-            output
-        );
-    }
-
-    // ============================================================================
-    // Builder Ordering Permutation Tests (issue #89)
-    // These tests verify that builder methods work in any order.
-    // ============================================================================
-
-    #[test]
-    fn test_builder_ordering_theme_before_command() {
-        use crate::Theme;
-        use console::Style;
-        use serde_json::json;
-
-        let theme = Theme::new().add("mystyle", Style::new().bold());
-
-        // Order: theme -> command
-        let app = AppBuilder::new()
-            .theme(theme)
-            .command(
-                "test",
-                |_m, _ctx| Ok(HandlerOutput::Render(json!({"x": "value"}))),
-                "[mystyle]{{ x }}[/mystyle]",
-            )
-            .unwrap()
-            .build()
-            .unwrap();
-
-        let cmd = Command::new("app").subcommand(Command::new("test"));
-        let result = app.dispatch_from(cmd, ["app", "--output=term", "test"]);
-
-        assert!(
-            !result.output().unwrap().contains("[mystyle?]"),
-            "theme -> command ordering failed"
-        );
-    }
-
-    #[test]
-    fn test_builder_ordering_command_before_theme() {
-        use crate::Theme;
-        use console::Style;
-        use serde_json::json;
-
-        let theme = Theme::new().add("mystyle", Style::new().bold());
-
-        // Order: command -> theme
-        let app = AppBuilder::new()
-            .command(
-                "test",
-                |_m, _ctx| Ok(HandlerOutput::Render(json!({"x": "value"}))),
-                "[mystyle]{{ x }}[/mystyle]",
-            )
-            .unwrap()
-            .theme(theme)
-            .build()
-            .unwrap();
-
-        let cmd = Command::new("app").subcommand(Command::new("test"));
-        let result = app.dispatch_from(cmd, ["app", "--output=term", "test"]);
-
-        assert!(
-            !result.output().unwrap().contains("[mystyle?]"),
-            "command -> theme ordering failed"
-        );
-    }
-
-    #[test]
-    fn test_builder_ordering_styles_default_theme_command() {
-        use serde_json::json;
-        use std::fs;
-        use tempfile::TempDir;
-
-        let temp_dir = TempDir::new().unwrap();
-        fs::write(
-            temp_dir.path().join("mytheme.yaml"),
-            "mystyle: { bold: true }",
-        )
-        .unwrap();
-
-        // Order: styles -> default_theme -> command
-        let app = AppBuilder::new()
-            .styles_dir(temp_dir.path())
-            .unwrap()
-            .default_theme("mytheme")
-            .command(
-                "test",
-                |_m, _ctx| Ok(HandlerOutput::Render(json!({"x": "value"}))),
-                "[mystyle]{{ x }}[/mystyle]",
-            )
-            .unwrap()
-            .build()
-            .unwrap();
-
-        let cmd = Command::new("app").subcommand(Command::new("test"));
-        let result = app.dispatch_from(cmd, ["app", "--output=term", "test"]);
-
-        assert!(
-            !result.output().unwrap().contains("[mystyle?]"),
-            "styles -> default_theme -> command ordering failed"
-        );
-    }
-
-    #[test]
-    fn test_builder_ordering_command_before_styles() {
-        use serde_json::json;
-        use std::fs;
-        use tempfile::TempDir;
-
-        let temp_dir = TempDir::new().unwrap();
-        fs::write(
-            temp_dir.path().join("mytheme.yaml"),
-            "mystyle: { bold: true }",
-        )
-        .unwrap();
-
-        // Order: command -> styles -> default_theme (command FIRST)
-        let app = AppBuilder::new()
-            .command(
-                "test",
-                |_m, _ctx| Ok(HandlerOutput::Render(json!({"x": "value"}))),
-                "[mystyle]{{ x }}[/mystyle]",
-            )
-            .unwrap()
-            .styles_dir(temp_dir.path())
-            .unwrap()
-            .default_theme("mytheme")
-            .build()
-            .unwrap();
-
-        let cmd = Command::new("app").subcommand(Command::new("test"));
-        let result = app.dispatch_from(cmd, ["app", "--output=term", "test"]);
-
-        assert!(
-            !result.output().unwrap().contains("[mystyle?]"),
-            "command -> styles -> default_theme ordering failed"
-        );
-    }
-
-    #[test]
-    fn test_builder_ordering_default_theme_before_styles() {
-        use serde_json::json;
-        use std::fs;
-        use tempfile::TempDir;
-
-        let temp_dir = TempDir::new().unwrap();
-        fs::write(
-            temp_dir.path().join("mytheme.yaml"),
-            "mystyle: { bold: true }",
-        )
-        .unwrap();
-
-        // Order: default_theme -> styles -> command (default_theme BEFORE styles)
-        let app = AppBuilder::new()
-            .default_theme("mytheme")
-            .styles_dir(temp_dir.path())
-            .unwrap()
-            .command(
-                "test",
-                |_m, _ctx| Ok(HandlerOutput::Render(json!({"x": "value"}))),
-                "[mystyle]{{ x }}[/mystyle]",
-            )
-            .unwrap()
-            .build()
-            .unwrap();
-
-        let cmd = Command::new("app").subcommand(Command::new("test"));
-        let result = app.dispatch_from(cmd, ["app", "--output=term", "test"]);
-
-        assert!(
-            !result.output().unwrap().contains("[mystyle?]"),
-            "default_theme -> styles -> command ordering failed"
-        );
-    }
-
-    #[test]
-    fn test_builder_ordering_all_permutations_with_explicit_theme() {
-        // Test multiple orderings with explicit .theme() to ensure order independence
-        use crate::Theme;
-        use console::Style;
-        use serde_json::json;
-
-        fn make_theme() -> Theme {
-            Theme::new().add("perm", Style::new().italic())
-        }
-
-        fn make_handler() -> impl Fn(
-            &clap::ArgMatches,
-            &crate::cli::handler::CommandContext,
-        ) -> HandlerResult<serde_json::Value> {
-            |_m, _ctx| Ok(HandlerOutput::Render(json!({"val": "test"})))
-        }
-
-        let template = "[perm]{{ val }}[/perm]";
-
-        // Permutation 1: theme -> command -> context
-        let app1 = AppBuilder::new()
-            .theme(make_theme())
-            .command("test", make_handler(), template)
-            .unwrap()
-            .context("extra", minijinja::Value::from("x"))
-            .build()
-            .unwrap();
-
-        // Permutation 2: command -> theme -> context
-        let app2 = AppBuilder::new()
-            .command("test", make_handler(), template)
-            .unwrap()
-            .theme(make_theme())
-            .context("extra", minijinja::Value::from("x"))
-            .build()
-            .unwrap();
-
-        // Permutation 3: context -> command -> theme
-        let app3 = AppBuilder::new()
-            .context("extra", minijinja::Value::from("x"))
-            .command("test", make_handler(), template)
-            .unwrap()
-            .theme(make_theme())
-            .build()
-            .unwrap();
-
-        // Permutation 4: context -> theme -> command
-        let app4 = AppBuilder::new()
-            .context("extra", minijinja::Value::from("x"))
-            .theme(make_theme())
-            .command("test", make_handler(), template)
-            .unwrap()
-            .build()
-            .unwrap();
-
-        // Permutation 5: command -> context -> theme
-        let app5 = AppBuilder::new()
-            .command("test", make_handler(), template)
-            .unwrap()
-            .context("extra", minijinja::Value::from("x"))
-            .theme(make_theme())
-            .build()
-            .unwrap();
-
-        // Permutation 6: theme -> context -> command
-        let app6 = AppBuilder::new()
-            .theme(make_theme())
-            .context("extra", minijinja::Value::from("x"))
-            .command("test", make_handler(), template)
-            .unwrap()
-            .build()
-            .unwrap();
-
-        for (i, app) in [app1, app2, app3, app4, app5, app6].into_iter().enumerate() {
-            let cmd = Command::new("app").subcommand(Command::new("test"));
-            let result = app.dispatch_from(cmd, ["app", "--output=term", "test"]);
-
-            assert!(
-                !result.output().unwrap().contains("[perm?]"),
-                "Permutation {} failed: style not found",
-                i + 1
-            );
-        }
     }
 
     // ============================================================================

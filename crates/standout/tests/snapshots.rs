@@ -6,7 +6,7 @@ use standout::OutputMode;
 
 #[test]
 fn test_snapshots_term_output() {
-    let app = App::builder()
+    let app = App::<standout::cli::ThreadSafe>::builder()
         .command(
             "list",
             |_m, _ctx| {
@@ -32,7 +32,7 @@ fn test_snapshots_term_output() {
 
 #[test]
 fn test_snapshots_json_output() {
-    let app = App::builder()
+    let app = App::<standout::cli::ThreadSafe>::builder()
         .command(
             "list",
             |_m, _ctx| {
@@ -61,7 +61,7 @@ fn test_snapshots_json_output() {
 
 #[test]
 fn test_snapshots_error_handling() {
-    let app = App::builder()
+    let app = App::<standout::cli::ThreadSafe>::builder()
         .command(
             "fail",
             |_m, _ctx| -> standout::cli::HandlerResult<()> {

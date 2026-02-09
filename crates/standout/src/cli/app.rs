@@ -13,16 +13,19 @@ use serde::Serialize;
 
 use super::core::AppCore;
 use super::dispatch::{
-    dispatch, extract_command_path, get_deepest_matches, has_subcommand, insert_default_command,
-    DispatchFn, DispatchOutput,
+    extract_command_path, get_deepest_matches, has_subcommand, insert_default_command,
+    DispatchOutput, Dispatchable,
 };
 use super::help::{render_help, render_help_with_topics, HelpConfig};
 use super::hooks::Hooks;
+use super::mode::{HandlerMode, ThreadSafe};
 use super::result::HelpResult;
 use crate::cli::handler::{CommandContext, HandlerResult, Output as HandlerOutput, RunResult};
-use crate::cli::hooks::{HookError, RenderedOutput, TextOutput};
-use standout_dispatch::verify::{verify_handler_args, ExpectedArg};
+use crate::cli::hooks::{HookError, RenderedOutput};
 use std::collections::HashMap;
+
+use super::mode::Local;
+use super::LocalAppBuilder;
 
 /// Gets the current terminal width, or None if not available.
 pub(crate) fn get_terminal_width() -> Option<usize> {
@@ -34,12 +37,6 @@ pub(crate) fn get_terminal_width() -> Option<usize> {
 /// Handles help interception, output flag, topic rendering, command hooks,
 /// and template rendering.
 ///
-/// # Single-Threaded Design
-///
-/// CLI applications are single-threaded: parse args → run one handler → output → exit.
-/// Handlers use `&mut self` and `FnMut`, allowing natural Rust patterns without
-/// forcing interior mutability wrappers (`Arc<Mutex<_>>`).
-///
 /// # Rendering Templates
 ///
 /// When configured with templates and styles, `App` can render templates
@@ -49,32 +46,37 @@ pub(crate) fn get_terminal_width() -> Option<usize> {
 /// use standout::cli::App;
 /// use standout::OutputMode;
 ///
-/// let app = App::builder()
+/// let app = App::<standout::cli::ThreadSafe>::builder()
 ///     .templates(embed_templates!("src/templates"))
 ///     .styles(embed_styles!("src/styles"))
 ///     .build()?;
 ///
 /// let output = app.render("list", &data, OutputMode::Term)?;
 /// ```
-pub struct App {
+pub struct App<M: HandlerMode = ThreadSafe> {
     /// Shared core configuration and functionality.
     pub(crate) core: AppCore,
     /// Topic registry for help topics (App-specific).
     pub(crate) registry: TopicRegistry,
     /// Registered command handlers.
-    pub(crate) commands: HashMap<String, DispatchFn>,
-    /// Expected arguments for each command (for verification).
-    pub(crate) expected_args: HashMap<String, Vec<ExpectedArg>>,
+    pub(crate) commands: HashMap<String, M::DispatchFn>,
 }
 
-impl App {
+impl App<ThreadSafe> {
     /// Creates a new builder for constructing an App instance.
     pub fn builder() -> super::AppBuilder {
         super::AppBuilder::new()
     }
 }
 
-impl App {
+impl App<Local> {
+    /// Creates a new builder for constructing a LocalApp instance.
+    pub fn builder() -> LocalAppBuilder {
+        LocalAppBuilder::new()
+    }
+}
+
+impl<M: HandlerMode> App<M> {
     /// Creates a new App instance with default settings.
     ///
     /// By default:
@@ -87,7 +89,6 @@ impl App {
             core: AppCore::new(),
             registry: TopicRegistry::new(),
             commands: HashMap::new(),
-            expected_args: HashMap::new(),
         }
     }
 
@@ -97,7 +98,6 @@ impl App {
             core: AppCore::new(),
             registry,
             commands: HashMap::new(),
-            expected_args: HashMap::new(),
         }
     }
 
@@ -213,7 +213,7 @@ impl App {
         let path = extract_command_path(&matches);
         let path_str = path.join(".");
 
-        if let Some(dispatch_fn) = self.commands.get(&path_str) {
+        if let Some(dispatch) = self.commands.get(&path_str) {
             let mut ctx = CommandContext::new(path, self.core.app_state.clone());
 
             let hooks = self.core.get_hooks(&path_str);
@@ -228,20 +228,14 @@ impl App {
             let sub_matches = get_deepest_matches(&matches);
 
             // Run the handler (output_mode passed separately as CommandContext is render-agnostic)
-            // Late binding: theme is resolved here at dispatch time, not when commands were registered
-            let default_theme = Theme::default();
-            let theme = self.core.theme().unwrap_or(&default_theme);
-            let dispatch_output =
-                match dispatch(dispatch_fn, sub_matches, &ctx, hooks, output_mode, theme) {
-                    Ok(output) => output,
-                    Err(e) => return RunResult::Handled(e),
-                };
+            let dispatch_output = match dispatch.dispatch(sub_matches, &ctx, hooks, output_mode) {
+                Ok(output) => output,
+                Err(e) => return RunResult::Handled(e),
+            };
 
             // Convert to RenderedOutput for post-output hooks
             let output = match dispatch_output {
-                DispatchOutput::Text { formatted, raw } => {
-                    RenderedOutput::Text(TextOutput::new(formatted, raw))
-                }
+                DispatchOutput::Text(s) => RenderedOutput::Text(s),
                 DispatchOutput::Binary(b, f) => RenderedOutput::Binary(b, f),
                 DispatchOutput::Silent => RenderedOutput::Silent,
             };
@@ -257,7 +251,7 @@ impl App {
             };
 
             match final_output {
-                RenderedOutput::Text(t) => RunResult::Handled(t.formatted),
+                RenderedOutput::Text(s) => RunResult::Handled(s),
                 RenderedOutput::Binary(b, f) => RunResult::Binary(b, f),
                 RenderedOutput::Silent => RunResult::Handled(String::new()),
             }
@@ -431,12 +425,9 @@ impl App {
                 }
 
                 // Render the (potentially modified) data
-                // Note: For inline handlers, we use TextOutput::plain since we don't
-                // have access to the split rendering path here. The main dispatch
-                // path uses render_auto_with_engine_split for proper raw/formatted split.
                 let theme = self.core.theme().cloned().unwrap_or_default();
                 match render_auto(template, &json_data, &theme, self.core.output_mode()) {
-                    Ok(rendered) => RenderedOutput::Text(TextOutput::plain(rendered)),
+                    Ok(rendered) => RenderedOutput::Text(rendered),
                     Err(e) => return Err(HookError::post_output("Render error").with_source(e)),
                 }
             }
@@ -647,46 +638,6 @@ impl App {
         );
         HelpResult::Error(err)
     }
-
-    /// Verifies that registered handlers match the CLI command definition.
-    ///
-    /// This checks that all required arguments expected by handlers are present
-    /// in the clap Command definition with compatible types and configurations.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// use clap::{Arg, Command};
-    /// use standout::cli::App;
-    ///
-    /// #[handler]
-    /// fn list_handler(#[arg] filter: Option<String>) -> Result<Output<Data>, Error> {
-    ///     // ...
-    /// }
-    ///
-    /// // Build your app with handlers
-    /// let app = App::builder()
-    ///     .command_handler("list", list_handler_Handler, "list_template")
-    ///     .unwrap()
-    ///     .build()?;
-    ///
-    /// // Define your CLI structure
-    /// let cmd = Command::new("myapp")
-    ///     .subcommand(Command::new("list")
-    ///         .arg(Arg::new("filter").long("filter")));
-    ///
-    /// // Verify they match - fails fast with helpful error if not
-    /// app.verify_command(&cmd)?;
-    /// ```
-    ///
-    /// # Errors
-    ///
-    /// Returns a `SetupError::VerificationFailed` if any mismatches are found.
-    /// The error contains detailed information about what doesn't match and
-    /// how to fix it.
-    pub fn verify_command(&self, cmd: &Command) -> Result<(), SetupError> {
-        verify_recursive(cmd, &self.expected_args, &[], true)
-    }
 }
 
 impl Default for App {
@@ -712,38 +663,13 @@ fn find_subcommand<'a>(cmd: &'a Command, name: &str) -> Option<&'a Command> {
         .find(|s| s.get_name() == name || s.get_aliases().any(|a| a == name))
 }
 
-fn verify_recursive(
-    cmd: &Command,
-    expected_args: &HashMap<String, Vec<ExpectedArg>>,
-    parent_path: &[&str],
-    is_root: bool,
-) -> Result<(), SetupError> {
-    let mut current_path = parent_path.to_vec();
-    if !is_root && !cmd.get_name().is_empty() {
-        current_path.push(cmd.get_name());
-    }
-
-    // Check current command
-    let path_str = current_path.join(".");
-    if let Some(expected) = expected_args.get(&path_str) {
-        verify_handler_args(cmd, &path_str, expected)?;
-    }
-
-    // Check subcommands
-    for sub in cmd.get_subcommands() {
-        verify_recursive(sub, expected_args, &current_path, false)?;
-    }
-
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_output_flag_enabled_by_default() {
-        let standout = App::new();
+        let standout = App::<ThreadSafe>::new();
         assert!(standout.core.output_flag.is_some());
         assert_eq!(standout.core.output_flag.as_deref(), Some("output"));
     }

@@ -1,13 +1,13 @@
 use clap::Command;
 use serde_json::json;
-use standout::cli::{App, HandlerResult, Output};
+use standout::cli::{App, HandlerResult, LocalApp, Output};
 use std::cell::RefCell;
 use std::rc::Rc;
 
-// Test App with closure handlers
+// Test App<ThreadSafe> (default)
 #[test]
-fn test_app_integration() {
-    let app = App::builder()
+fn test_app_thread_safe_integration() {
+    let app = App::<standout::cli::ThreadSafe>::builder()
         .command(
             "test",
             |_m, _ctx| Ok(Output::Render(json!({"msg": "success"}))),
@@ -26,13 +26,13 @@ fn test_app_integration() {
     }
 }
 
-// Test App with mutable state (FnMut closures)
+// Test App<Local> via LocalApp alias
 #[test]
-fn test_app_with_mutable_state() {
+fn test_local_app_integration() {
     let counter = Rc::new(RefCell::new(0));
     let counter_clone = counter.clone();
 
-    let app = App::builder()
+    let app = LocalApp::builder()
         .command(
             "inc",
             move |_m, _ctx| {
@@ -56,14 +56,14 @@ fn test_app_with_mutable_state() {
     assert_eq!(*counter.borrow(), 1);
 }
 
-// Test stateful struct handler
+// Test stateful struct handler with LocalApp
 #[test]
-fn test_struct_handler_with_state() {
+fn test_local_struct_handler() {
     struct StatefulHandler {
         count: i32,
     }
 
-    impl standout::cli::Handler for StatefulHandler {
+    impl standout::cli::LocalHandler for StatefulHandler {
         type Output = serde_json::Value;
 
         fn handle(
@@ -76,7 +76,7 @@ fn test_struct_handler_with_state() {
         }
     }
 
-    let app = App::builder()
+    let app = LocalApp::builder()
         .command_handler("add", StatefulHandler { count: 0 }, "{{ val }}")
         .unwrap()
         .build()
@@ -91,7 +91,10 @@ fn test_struct_handler_with_state() {
         panic!("Expected RunResult::Handled, got {:?}", result1);
     }
 
-    // State persists across calls because handlers are stored in Rc<RefCell>
+    // Note: In the current architecture for LocalApp, handlers are closures in Rc<RefCell>.
+    // Each run re-uses the SAME closure instance because we build the App once.
+    // So state should persist across calls if we reuse the App instance.
+
     let result2 = app.run_to_string(cmd, vec!["test", "add"]);
     if let standout::cli::RunResult::Handled(output) = result2 {
         assert_eq!(output, "20");

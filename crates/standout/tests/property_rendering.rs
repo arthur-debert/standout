@@ -3,7 +3,7 @@ use console::Style;
 use proptest::prelude::*;
 use serde_json::{json, Value};
 use serde_yaml;
-use standout::cli::{App, Output};
+use standout::cli::{App, Local, Output, ThreadSafe};
 use standout::{OutputMode, Theme};
 
 // Strategy for generating arbitrary OutputMode values
@@ -96,15 +96,15 @@ fn validate_structured_output(output: &str, mode: OutputMode) {
 }
 
 proptest! {
-    /// Property test for rendering invariants across all output modes
+    /// Property test for ThreadSafe handler mode
     #[test]
-    fn test_rendering_invariants(
+    fn test_threadsafe_rendering_invariants(
         mode in output_mode_strategy(),
         theme in theme_strategy(),
         template in template_strategy(),
         data in json_data_strategy()
     ) {
-        let builder = App::builder()
+        let builder = App::<ThreadSafe>::builder()
             .command(
                 "test",
                 move |_m, _ctx| Ok(Output::Render(data.clone())),
@@ -125,6 +125,42 @@ proptest! {
         let result = app.dispatch(matches, mode);
 
         // Invariants
+        assert!(result.is_handled());
+        if let Some(output) = result.output() {
+            validate_structured_output(output, mode);
+        }
+    }
+
+    /// Property test for Local handler mode
+    /// Per design guidelines: both handler modes must be tested
+    #[test]
+    fn test_local_rendering_invariants(
+        mode in output_mode_strategy(),
+        theme in theme_strategy(),
+        template in template_strategy(),
+        data in json_data_strategy()
+    ) {
+        let builder = App::<Local>::builder()
+            .command(
+                "test",
+                move |_m, _ctx| Ok(Output::Render(data.clone())),
+                template,
+            ).unwrap();
+
+        let builder = if let Some(t) = theme {
+            builder.theme(t)
+        } else {
+            builder
+        };
+
+        let app = builder.build().expect("Failed to build app");
+
+        let cmd = Command::new("app").subcommand(Command::new("test"));
+        let matches = cmd.try_get_matches_from(["app", "test"]).unwrap();
+
+        let result = app.dispatch(matches, mode);
+
+        // Same invariants as ThreadSafe - feature parity
         assert!(result.is_handled());
         if let Some(output) = result.output() {
             validate_structured_output(output, mode);

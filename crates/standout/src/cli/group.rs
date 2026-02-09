@@ -5,16 +5,16 @@
 
 use crate::context::ContextRegistry;
 
+use crate::Theme;
+
 use clap::ArgMatches;
 use serde::Serialize;
-use std::cell::RefCell;
 use std::collections::HashMap;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use super::dispatch::{render_handler_output, DispatchFn};
 use crate::cli::handler::{CommandContext, FnHandler, Handler, HandlerResult};
-use crate::cli::hooks::{Hooks, RenderedOutput, TextOutput};
-use standout_dispatch::verify::ExpectedArg;
+use crate::cli::hooks::Hooks;
 use standout_pipe::PipeTarget;
 
 // ============================================================================
@@ -24,17 +24,10 @@ use standout_pipe::PipeTarget;
 /// A recipe for creating a dispatch closure.
 ///
 /// Unlike `ErasedCommandConfig::register` which consumes self, this trait
-/// takes `&self` to allow deferred closure creation. This enables late binding
-/// where the theme is passed at dispatch time rather than captured at registration.
-///
-/// # Implementation Notes
-///
-/// Most implementations (`ClosureRecipe`, `StructRecipe`) can be called multiple
-/// times since they clone their Rc-wrapped handlers. However, `ErasedConfigRecipe`
-/// is single-use due to type erasure constraints - it will panic if called twice.
-/// This is acceptable because `ensure_commands_finalized()` is guarded to run
-/// only once per builder.
-pub(crate) trait CommandRecipe {
+/// allows creating dispatch closures on demand without consuming the recipe.
+/// This enables deferred closure creation where the theme and context_registry
+/// are captured at dispatch time rather than at registration time.
+pub(crate) trait CommandRecipe: Send + Sync {
     /// Returns the template for this command, if explicitly set.
     #[allow(dead_code)]
     fn template(&self) -> Option<&str>;
@@ -49,39 +42,35 @@ pub(crate) trait CommandRecipe {
 
     /// Creates a dispatch closure with the given configuration.
     ///
-    /// # Panics
-    ///
-    /// `ErasedConfigRecipe` will panic if called more than once (see trait docs).
+    /// This can be called multiple times (unlike ErasedCommandConfig::register).
     fn create_dispatch(
         &self,
         template: &str,
         context_registry: &ContextRegistry,
-        template_engine: Rc<Box<dyn standout_render::template::TemplateEngine>>,
+        theme: &Theme,
+        template_engine: Arc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn;
-
-    /// Returns the arguments expected by this command handler.
-    fn expected_args(&self) -> Vec<ExpectedArg>;
 }
 
 /// Recipe for closure-based command handlers.
 pub(crate) struct ClosureRecipe<F, T>
 where
-    F: FnMut(&ArgMatches, &CommandContext) -> HandlerResult<T> + 'static,
-    T: Serialize + 'static,
+    F: Fn(&ArgMatches, &CommandContext) -> HandlerResult<T> + Send + Sync + 'static,
+    T: Serialize + Send + Sync + 'static,
 {
-    handler: Rc<RefCell<FnHandler<F, T>>>,
+    handler: Arc<FnHandler<F, T>>,
     template: Option<String>,
     hooks: Option<Hooks>,
 }
 
 impl<F, T> ClosureRecipe<F, T>
 where
-    F: FnMut(&ArgMatches, &CommandContext) -> HandlerResult<T> + 'static,
-    T: Serialize + 'static,
+    F: Fn(&ArgMatches, &CommandContext) -> HandlerResult<T> + Send + Sync + 'static,
+    T: Serialize + Send + Sync + 'static,
 {
     pub fn new(handler: FnHandler<F, T>) -> Self {
         Self {
-            handler: Rc::new(RefCell::new(handler)),
+            handler: Arc::new(handler),
             template: None,
             hooks: None,
         }
@@ -102,8 +91,8 @@ where
 
 impl<F, T> CommandRecipe for ClosureRecipe<F, T>
 where
-    F: FnMut(&ArgMatches, &CommandContext) -> HandlerResult<T> + 'static,
-    T: Serialize + 'static,
+    F: Fn(&ArgMatches, &CommandContext) -> HandlerResult<T> + Send + Sync + 'static,
+    T: Serialize + Send + Sync + 'static,
 {
     fn template(&self) -> Option<&str> {
         self.template.as_deref()
@@ -121,49 +110,43 @@ where
         &self,
         template: &str,
         context_registry: &ContextRegistry,
-        template_engine: Rc<Box<dyn standout_render::template::TemplateEngine>>,
+        theme: &Theme,
+        template_engine: Arc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn {
         let handler = self.handler.clone();
         let template = template.to_string();
         let context_registry = context_registry.clone();
+        let theme = theme.clone();
 
-        Rc::new(RefCell::new(
+        Arc::new(
             move |matches: &ArgMatches,
                   ctx: &CommandContext,
                   hooks: Option<&Hooks>,
-                  output_mode: crate::OutputMode,
-                  theme: &crate::Theme| {
-                let result = handler
-                    .borrow_mut()
-                    .handle(matches, ctx)
-                    .map_err(|e| e.to_string());
+                  output_mode: crate::OutputMode| {
+                let result = handler.handle(matches, ctx).map_err(|e| e.to_string());
                 render_handler_output(
                     result,
                     matches,
                     ctx,
                     hooks,
                     &template,
-                    theme,
+                    &theme,
                     &context_registry,
                     &**template_engine,
                     output_mode,
                 )
             },
-        ))
-    }
-
-    fn expected_args(&self) -> Vec<ExpectedArg> {
-        self.handler.borrow().expected_args()
+        )
     }
 }
 
 /// Recipe for struct-based command handlers.
 pub(crate) struct StructRecipe<H, T>
 where
-    H: Handler<Output = T> + 'static,
-    T: Serialize + 'static,
+    H: Handler<Output = T> + Send + Sync + 'static,
+    T: Serialize + Send + Sync + 'static,
 {
-    handler: Rc<RefCell<H>>,
+    handler: Arc<H>,
     #[allow(dead_code)]
     template: Option<String>,
     hooks: Option<Hooks>,
@@ -172,12 +155,12 @@ where
 
 impl<H, T> StructRecipe<H, T>
 where
-    H: Handler<Output = T> + 'static,
-    T: Serialize + 'static,
+    H: Handler<Output = T> + Send + Sync + 'static,
+    T: Serialize + Send + Sync + 'static,
 {
     pub fn new(handler: H) -> Self {
         Self {
-            handler: Rc::new(RefCell::new(handler)),
+            handler: Arc::new(handler),
             template: None,
             hooks: None,
             _phantom: std::marker::PhantomData,
@@ -199,8 +182,8 @@ where
 
 impl<H, T> CommandRecipe for StructRecipe<H, T>
 where
-    H: Handler<Output = T> + 'static,
-    T: Serialize + 'static,
+    H: Handler<Output = T> + Send + Sync + 'static,
+    T: Serialize + Send + Sync + 'static,
 {
     fn template(&self) -> Option<&str> {
         self.template.as_deref()
@@ -218,73 +201,57 @@ where
         &self,
         template: &str,
         context_registry: &ContextRegistry,
-        template_engine: Rc<Box<dyn standout_render::template::TemplateEngine>>,
+        theme: &Theme,
+        template_engine: Arc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn {
         let handler = self.handler.clone();
         let template = template.to_string();
         let context_registry = context_registry.clone();
+        let theme = theme.clone();
 
-        Rc::new(RefCell::new(
+        Arc::new(
             move |matches: &ArgMatches,
                   ctx: &CommandContext,
                   hooks: Option<&Hooks>,
-                  output_mode: crate::OutputMode,
-                  theme: &crate::Theme| {
-                let result = handler
-                    .borrow_mut()
-                    .handle(matches, ctx)
-                    .map_err(|e| e.to_string());
+                  output_mode: crate::OutputMode| {
+                let result = handler.handle(matches, ctx).map_err(|e| e.to_string());
                 render_handler_output(
                     result,
                     matches,
                     ctx,
                     hooks,
                     &template,
-                    theme,
+                    &theme,
                     &context_registry,
                     &**template_engine,
                     output_mode,
                 )
             },
-        ))
-    }
-
-    fn expected_args(&self) -> Vec<ExpectedArg> {
-        self.handler.borrow().expected_args()
+        )
     }
 }
 
 /// Wrapper around ErasedCommandConfig that implements CommandRecipe.
 ///
 /// This allows group-registered commands to use the deferred closure pattern.
-/// The inner config is wrapped in RefCell to allow interior mutability.
-///
-/// # Single-Use Constraint
-///
-/// Unlike `ClosureRecipe` and `StructRecipe`, this implementation can only
-/// have `create_dispatch` called once. This is because `ErasedCommandConfig::register`
-/// consumes `Box<Self>`, so we must use `.take()` to extract it from the RefCell.
-///
-/// This constraint is safe because `ensure_commands_finalized()` in `AppBuilder`
-/// is guarded to run only once, so each recipe's `create_dispatch` is called
-/// exactly once during the builder's lifecycle.
+/// The inner config is wrapped in a Mutex to allow interior mutability.
 pub(crate) struct ErasedConfigRecipe {
-    config: RefCell<Option<Box<dyn ErasedCommandConfig>>>,
+    config: std::sync::Mutex<Option<Box<dyn ErasedCommandConfig + Send>>>,
     #[allow(dead_code)]
     template: Option<String>,
     #[allow(dead_code)]
-    hooks: RefCell<Option<Hooks>>,
+    hooks: std::sync::Mutex<Option<Hooks>>,
 }
 
 impl ErasedConfigRecipe {
     /// Creates a new recipe from an existing boxed handler (for group registration).
-    pub fn from_handler(mut handler: Box<dyn ErasedCommandConfig>) -> Self {
+    pub fn from_handler(mut handler: Box<dyn ErasedCommandConfig + Send>) -> Self {
         let template = handler.template().map(String::from);
         let hooks = handler.take_hooks();
         Self {
-            config: RefCell::new(Some(handler)),
+            config: std::sync::Mutex::new(Some(handler)),
             template,
-            hooks: RefCell::new(hooks),
+            hooks: std::sync::Mutex::new(hooks),
         }
     }
 }
@@ -295,40 +262,34 @@ impl CommandRecipe for ErasedConfigRecipe {
     }
 
     fn hooks(&self) -> Option<&Hooks> {
-        // Can't return reference through RefCell, but hooks are extracted during construction
+        // Can't return reference through mutex, but hooks are extracted during construction
         None
     }
 
     fn take_hooks(&mut self) -> Option<Hooks> {
-        self.hooks.borrow_mut().take()
+        self.hooks.lock().unwrap().take()
     }
 
     fn create_dispatch(
         &self,
         template: &str,
         context_registry: &ContextRegistry,
-        template_engine: Rc<Box<dyn standout_render::template::TemplateEngine>>,
+        theme: &Theme,
+        template_engine: Arc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn {
         let config = self
             .config
-            .borrow_mut()
+            .lock()
+            .unwrap()
             .take()
             .expect("ErasedConfigRecipe::create_dispatch called more than once");
         config.register(
             "",
             template.to_string(),
             context_registry.clone(),
+            theme.clone(),
             template_engine,
         )
-    }
-
-    fn expected_args(&self) -> Vec<ExpectedArg> {
-        // See implementation note in prev step thought: we check if config is present
-        if let Some(config) = self.config.borrow().as_ref() {
-            config.expected_args()
-        } else {
-            Vec::new()
-        }
     }
 }
 
@@ -374,6 +335,8 @@ impl<H> CommandConfig<H> {
     pub fn pre_dispatch<F>(mut self, f: F) -> Self
     where
         F: Fn(&ArgMatches, &mut CommandContext) -> Result<(), crate::cli::hooks::HookError>
+            + Send
+            + Sync
             + 'static,
     {
         let hooks = self.hooks.take().unwrap_or_default();
@@ -389,6 +352,8 @@ impl<H> CommandConfig<H> {
                 &CommandContext,
                 serde_json::Value,
             ) -> Result<serde_json::Value, crate::cli::hooks::HookError>
+            + Send
+            + Sync
             + 'static,
     {
         let hooks = self.hooks.take().unwrap_or_default();
@@ -405,6 +370,8 @@ impl<H> CommandConfig<H> {
                 crate::cli::hooks::RenderedOutput,
             )
                 -> Result<crate::cli::hooks::RenderedOutput, crate::cli::hooks::HookError>
+            + Send
+            + Sync
             + 'static,
     {
         let hooks = self.hooks.take().unwrap_or_default();
@@ -435,8 +402,6 @@ impl<H> CommandConfig<H> {
     /// # Note
     ///
     /// Only [`RenderedOutput::Text`] is piped. Binary and silent outputs pass through unchanged.
-    /// The raw output (without ANSI codes) is piped to the command, matching shell semantics.
-    /// The terminal still displays the formatted output with colors.
     pub fn pipe_to_with_timeout(
         self,
         command: impl Into<String>,
@@ -444,13 +409,12 @@ impl<H> CommandConfig<H> {
     ) -> Self {
         let command = command.into();
         self.post_output(move |_matches, _ctx, output| {
-            if let RenderedOutput::Text(ref text_output) = output {
+            if let crate::cli::hooks::RenderedOutput::Text(ref text) = output {
                 let pipe = standout_pipe::SimplePipe::new(command.clone()).with_timeout(timeout);
-                // Pipe the raw output (no ANSI codes) - matches shell semantics
-                pipe.pipe(&text_output.raw)
+                let result = pipe
+                    .pipe(text)
                     .map_err(|e| crate::cli::hooks::HookError::post_output(e.to_string()))?;
-                // Passthrough: return original output (formatted for terminal)
-                Ok(output)
+                Ok(crate::cli::hooks::RenderedOutput::Text(result))
             } else {
                 Ok(output)
             }
@@ -479,8 +443,6 @@ impl<H> CommandConfig<H> {
     /// # Note
     ///
     /// Only [`RenderedOutput::Text`] is piped. Binary and silent outputs pass through unchanged.
-    /// The raw output (without ANSI codes) is piped to the command, matching shell semantics.
-    /// The command's stdout becomes the new output.
     pub fn pipe_through_with_timeout(
         self,
         command: impl Into<String>,
@@ -488,16 +450,14 @@ impl<H> CommandConfig<H> {
     ) -> Self {
         let command = command.into();
         self.post_output(move |_matches, _ctx, output| {
-            if let RenderedOutput::Text(ref text_output) = output {
+            if let crate::cli::hooks::RenderedOutput::Text(ref text) = output {
                 let pipe = standout_pipe::SimplePipe::new(command.clone())
                     .capture()
                     .with_timeout(timeout);
-                // Pipe the raw output (no ANSI codes) - matches shell semantics
                 let result = pipe
-                    .pipe(&text_output.raw)
+                    .pipe(text)
                     .map_err(|e| crate::cli::hooks::HookError::post_output(e.to_string()))?;
-                // Capture: command's output becomes the new output (plain text)
-                Ok(RenderedOutput::Text(TextOutput::plain(result)))
+                Ok(crate::cli::hooks::RenderedOutput::Text(result))
             } else {
                 Ok(output)
             }
@@ -511,8 +471,6 @@ impl<H> CommandConfig<H> {
     /// - Linux: `xclip -selection clipboard`
     ///
     /// This consumes the output (nothing is printed to terminal).
-    /// The raw output (without ANSI codes) is copied to the clipboard,
-    /// so you get clean text without escape sequences.
     ///
     /// # Errors
     ///
@@ -524,14 +482,12 @@ impl<H> CommandConfig<H> {
     /// Only [`RenderedOutput::Text`] is piped. Binary and silent outputs pass through unchanged.
     pub fn pipe_to_clipboard(self) -> Self {
         self.post_output(move |_matches, _ctx, output| {
-            if let RenderedOutput::Text(ref text_output) = output {
+            if let crate::cli::hooks::RenderedOutput::Text(ref text) = output {
                 if let Some(pipe) = standout_pipe::clipboard() {
-                    // Pipe the raw output (no ANSI codes) to clipboard
                     let result = pipe
-                        .pipe(&text_output.raw)
+                        .pipe(text)
                         .map_err(|e| crate::cli::hooks::HookError::post_output(e.to_string()))?;
-                    // Consume mode: return empty (clipboard() uses .consume())
-                    Ok(RenderedOutput::Text(TextOutput::plain(result)))
+                    Ok(crate::cli::hooks::RenderedOutput::Text(result))
                 } else {
                     Err(crate::cli::hooks::HookError::post_output(
                         "Clipboard not supported on this platform. \
@@ -552,19 +508,17 @@ impl<H> CommandConfig<H> {
     /// # Note
     ///
     /// Only [`RenderedOutput::Text`] is piped. Binary and silent outputs pass through unchanged.
-    /// The raw output (without ANSI codes) is piped to the target.
     pub fn pipe_with<P>(self, target: P) -> Self
     where
-        P: standout_pipe::PipeTarget + 'static,
+        P: standout_pipe::PipeTarget + Send + Sync + 'static,
     {
-        let target = Rc::new(target);
+        let target = std::sync::Arc::new(target);
         self.post_output(move |_matches, _ctx, output| {
-            if let RenderedOutput::Text(ref text_output) = output {
-                // Pipe the raw output (no ANSI codes)
+            if let crate::cli::hooks::RenderedOutput::Text(ref text) = output {
                 let result = target
-                    .pipe(&text_output.raw)
+                    .pipe(text)
                     .map_err(|e| crate::cli::hooks::HookError::post_output(e.to_string()))?;
-                Ok(RenderedOutput::Text(TextOutput::plain(result)))
+                Ok(crate::cli::hooks::RenderedOutput::Text(result))
             } else {
                 Ok(output)
             }
@@ -576,7 +530,7 @@ impl<H> CommandConfig<H> {
 pub(crate) enum GroupEntry {
     /// A leaf command with handler, optional template, and optional hooks
     Command {
-        handler: Box<dyn ErasedCommandConfig>,
+        handler: Box<dyn ErasedCommandConfig + Send + Sync>,
     },
     /// A nested group
     Group { builder: GroupBuilder },
@@ -593,10 +547,9 @@ pub(crate) trait ErasedCommandConfig {
         path: &str,
         template: String,
         context_registry: ContextRegistry,
-        template_engine: Rc<Box<dyn standout_render::template::TemplateEngine>>,
+        theme: Theme,
+        template_engine: Arc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn;
-
-    fn expected_args(&self) -> Vec<ExpectedArg>;
 }
 
 /// Builder for a group of related commands.
@@ -625,7 +578,7 @@ pub struct GroupBuilder {
 impl GroupBuilder {
     /// Creates a new empty group builder.
     pub fn new() -> Self {
-        Self::default()
+        <Self as Default>::default()
     }
 
     /// Returns true if a command or group with the given name is registered.
@@ -662,8 +615,8 @@ impl GroupBuilder {
     /// ```
     pub fn command<F, T>(self, name: &str, handler: F) -> Self
     where
-        F: FnMut(&ArgMatches, &CommandContext) -> HandlerResult<T> + 'static,
-        T: Serialize + 'static,
+        F: Fn(&ArgMatches, &CommandContext) -> HandlerResult<T> + Send + Sync + 'static,
+        T: Serialize + Send + Sync + 'static,
     {
         self.command_with(name, handler, |cfg| cfg)
     }
@@ -680,8 +633,8 @@ impl GroupBuilder {
     /// ```
     pub fn command_with<F, T, C>(mut self, name: &str, handler: F, configure: C) -> Self
     where
-        F: FnMut(&ArgMatches, &CommandContext) -> HandlerResult<T> + 'static,
-        T: Serialize + 'static,
+        F: Fn(&ArgMatches, &CommandContext) -> HandlerResult<T> + Send + Sync + 'static,
+        T: Serialize + Send + Sync + 'static,
         C: FnOnce(CommandConfig<FnHandler<F, T>>) -> CommandConfig<FnHandler<F, T>>,
     {
         let config = CommandConfig::new(FnHandler::new(handler));
@@ -690,7 +643,7 @@ impl GroupBuilder {
             name.to_string(),
             GroupEntry::Command {
                 handler: Box::new(ClosureCommandConfig {
-                    handler: Rc::new(RefCell::new(config.handler)),
+                    handler: config.handler,
                     template: config.template,
                     hooks: config.hooks,
                 }),
@@ -721,7 +674,7 @@ impl GroupBuilder {
             name.to_string(),
             GroupEntry::Command {
                 handler: Box::new(StructCommandConfig {
-                    handler: Rc::new(RefCell::new(config.handler)),
+                    handler: config.handler,
                     template: config.template,
                     hooks: config.hooks,
                 }),
@@ -750,15 +703,15 @@ impl GroupBuilder {
         self
     }
 
-    /// Sets a command as the default command for this group.
+    /// Sets a command as the default for this group.
     ///
-    /// When the CLI is invoked without a subcommand (a "naked" invocation),
-    /// the default command is automatically used.
+    /// When the group is invoked without a subcommand, the default
+    /// command runs automatically.
     ///
     /// # Panics
     ///
-    /// Panics if a default command has already been set, as only one
-    /// default command can be defined.
+    /// Panics if a default has already been set, as only one
+    /// default can be defined.
     ///
     /// # Example
     ///
@@ -766,12 +719,12 @@ impl GroupBuilder {
     /// .group("app", |g| g
     ///     .command("list", list_handler)
     ///     .command("add", add_handler)
-    ///     .default_command("list"))  // "list" is used when no command specified
+    ///     .default("list"))  // "list" is used when no command specified
     /// ```
-    pub fn default_command(mut self, name: &str) -> Self {
+    pub fn default(mut self, name: &str) -> Self {
         if let Some(existing) = &self.default_command {
             panic!(
-                "Only one default command can be defined. '{}' is already set as default.",
+                "Only one default can be defined. '{}' is already set.",
                 existing
             );
         }
@@ -783,18 +736,18 @@ impl GroupBuilder {
 /// Internal: closure-based command config that implements ErasedCommandConfig
 struct ClosureCommandConfig<F, T>
 where
-    F: FnMut(&ArgMatches, &CommandContext) -> HandlerResult<T> + 'static,
-    T: Serialize + 'static,
+    F: Fn(&ArgMatches, &CommandContext) -> HandlerResult<T> + Send + Sync + 'static,
+    T: Serialize + Send + Sync + 'static,
 {
-    handler: Rc<RefCell<FnHandler<F, T>>>,
+    handler: FnHandler<F, T>,
     template: Option<String>,
     hooks: Option<Hooks>,
 }
 
 impl<F, T> ErasedCommandConfig for ClosureCommandConfig<F, T>
 where
-    F: FnMut(&ArgMatches, &CommandContext) -> HandlerResult<T> + 'static,
-    T: Serialize + 'static,
+    F: Fn(&ArgMatches, &CommandContext) -> HandlerResult<T> + Send + Sync + 'static,
+    T: Serialize + Send + Sync + 'static,
 {
     fn template(&self) -> Option<&str> {
         self.template.as_deref()
@@ -813,37 +766,30 @@ where
         _path: &str,
         template: String,
         context_registry: ContextRegistry,
-        template_engine: Rc<Box<dyn standout_render::template::TemplateEngine>>,
+        theme: Theme,
+        template_engine: Arc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn {
-        let handler = self.handler;
+        let handler = Arc::new(self.handler);
 
-        Rc::new(RefCell::new(
+        Arc::new(
             move |matches: &ArgMatches,
                   ctx: &CommandContext,
                   hooks: Option<&Hooks>,
-                  output_mode: crate::OutputMode,
-                  theme: &crate::Theme| {
-                let result = handler
-                    .borrow_mut()
-                    .handle(matches, ctx)
-                    .map_err(|e| e.to_string());
+                  output_mode: crate::OutputMode| {
+                let result = handler.handle(matches, ctx).map_err(|e| e.to_string());
                 render_handler_output(
                     result,
                     matches,
                     ctx,
                     hooks,
                     &template,
-                    theme,
+                    &theme,
                     &context_registry,
                     &**template_engine,
                     output_mode,
                 )
             },
-        ))
-    }
-
-    fn expected_args(&self) -> Vec<ExpectedArg> {
-        self.handler.borrow().expected_args()
+        )
     }
 }
 
@@ -853,7 +799,7 @@ where
     H: Handler<Output = T> + 'static,
     T: Serialize + 'static,
 {
-    handler: Rc<RefCell<H>>,
+    handler: H,
     template: Option<String>,
     hooks: Option<Hooks>,
 }
@@ -880,37 +826,30 @@ where
         _path: &str,
         template: String,
         context_registry: ContextRegistry,
-        template_engine: Rc<Box<dyn standout_render::template::TemplateEngine>>,
+        theme: Theme,
+        template_engine: Arc<Box<dyn standout_render::template::TemplateEngine>>,
     ) -> DispatchFn {
-        let handler = self.handler;
+        let handler = Arc::new(self.handler);
 
-        Rc::new(RefCell::new(
+        Arc::new(
             move |matches: &ArgMatches,
                   ctx: &CommandContext,
                   hooks: Option<&Hooks>,
-                  output_mode: crate::OutputMode,
-                  theme: &crate::Theme| {
-                let result = handler
-                    .borrow_mut()
-                    .handle(matches, ctx)
-                    .map_err(|e| e.to_string());
+                  output_mode: crate::OutputMode| {
+                let result = handler.handle(matches, ctx).map_err(|e| e.to_string());
                 render_handler_output(
                     result,
                     matches,
                     ctx,
                     hooks,
                     &template,
-                    theme,
+                    &theme,
                     &context_registry,
                     &**template_engine,
                     output_mode,
                 )
             },
-        ))
-    }
-
-    fn expected_args(&self) -> Vec<ExpectedArg> {
-        self.handler.borrow().expected_args()
+        )
     }
 }
 
@@ -970,22 +909,22 @@ mod tests {
     }
 
     #[test]
-    fn test_group_builder_default_command() {
+    fn test_group_builder_default() {
         let group = GroupBuilder::new()
             .command("list", |_m, _ctx| Ok(HandlerOutput::Render(json!({}))))
             .command("add", |_m, _ctx| Ok(HandlerOutput::Render(json!({}))))
-            .default_command("list");
+            .default("list");
 
         assert_eq!(group.default_command, Some("list".to_string()));
     }
 
     #[test]
-    #[should_panic(expected = "Only one default command can be defined")]
-    fn test_group_builder_duplicate_default_command_panics() {
+    #[should_panic(expected = "Only one default can be defined")]
+    fn test_group_builder_duplicate_default_panics() {
         let _ = GroupBuilder::new()
             .command("list", |_m, _ctx| Ok(HandlerOutput::Render(json!({}))))
             .command("add", |_m, _ctx| Ok(HandlerOutput::Render(json!({}))))
-            .default_command("list")
-            .default_command("add");
+            .default("list")
+            .default("add");
     }
 }

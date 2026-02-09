@@ -32,9 +32,8 @@
 //!         })
 //!         .post_output(|_m, _ctx, output| {
 //!             // Copy to clipboard (pseudo-code)
-//!             if let RenderedOutput::Text(ref text_output) = output {
-//!                 // Use text_output.raw for piping (no ANSI codes)
-//!                 // clipboard::copy(&text_output.raw)?;
+//!             if let RenderedOutput::Text(ref text) = output {
+//!                 // clipboard::copy(text)?;
 //!             }
 //!             Ok(output)
 //!         }))
@@ -49,7 +48,6 @@
 // These types are render-agnostic and focus on hook execution.
 pub use standout_dispatch::{
     HookError, HookPhase, Hooks, PostDispatchFn, PostOutputFn, PreDispatchFn, RenderedOutput,
-    TextOutput,
 };
 
 // Tests for these types are in the standout-dispatch crate.

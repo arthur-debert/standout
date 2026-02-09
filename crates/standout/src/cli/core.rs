@@ -1,16 +1,20 @@
-//! Shared core state and functionality for App.
+//! Shared core state and functionality for App and LocalApp.
 //!
 //! This module contains [`AppCore`], which holds the common configuration
-//! and behavior for [`App`](super::App).
+//! and behavior shared between thread-safe [`App`](super::App) and
+//! single-threaded [`LocalApp`](super::LocalApp).
+//!
+//! By extracting shared logic here, we avoid code duplication and ensure
+//! feature parity between both app types.
 //!
 //! # App State
 //!
-//! `AppCore` holds app-level state via `app_state: Rc<Extensions>`. This state
+//! `AppCore` holds app-level state via `app_state: Arc<Extensions>`. This state
 //! is injected into every `CommandContext` during dispatch, allowing handlers
 //! to access shared resources like database connections and configuration.
 
 use std::collections::HashMap;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use clap::{Arg, ArgAction, ArgMatches, Command};
 use serde::Serialize;
@@ -23,9 +27,11 @@ use standout_dispatch::Extensions;
 use super::app::get_terminal_width;
 use super::hooks::Hooks;
 
-/// Shared core state for App.
+/// Shared core state for App and LocalApp.
 ///
-/// This struct contains all configuration and state for the App.
+/// This struct contains all configuration and state that is common between
+/// the thread-safe `App` and single-threaded `LocalApp`. By sharing this
+/// core, we ensure feature parity and avoid code duplication.
 ///
 /// # Fields
 ///
@@ -58,8 +64,8 @@ pub struct AppCore {
     pub(crate) default_command: Option<String>,
 
     /// Template registry for embedded/file-based templates.
-    /// Wrapped in Rc for efficient sharing across dispatch closures.
-    pub(crate) template_registry: Option<Rc<TemplateRegistry>>,
+    /// Wrapped in Arc for efficient sharing across dispatch closures.
+    pub(crate) template_registry: Option<Arc<TemplateRegistry>>,
 
     /// Stylesheet registry for runtime theme access.
     pub(crate) stylesheet_registry: Option<StylesheetRegistry>,
@@ -69,14 +75,14 @@ pub struct AppCore {
 
     /// App-level state shared across all dispatches.
     ///
-    /// This is immutable and wrapped in Rc for efficient sharing.
+    /// This is immutable and wrapped in Arc for efficient sharing.
     /// Handlers access it via `ctx.app_state.get::<T>()`.
-    pub(crate) app_state: Rc<Extensions>,
+    pub(crate) app_state: Arc<Extensions>,
 
     /// Template engine for rendering commands.
     ///
     /// Wraps the engine execution logic (minijinja or custom).
-    pub(crate) template_engine: Rc<Box<dyn standout_render::template::TemplateEngine>>,
+    pub(crate) template_engine: Arc<Box<dyn standout_render::template::TemplateEngine>>,
 }
 
 impl Default for AppCore {
@@ -110,8 +116,8 @@ impl AppCore {
             template_registry: None,
             stylesheet_registry: None,
             context_registry: ContextRegistry::new(),
-            app_state: Rc::new(Extensions::new()),
-            template_engine: Rc::new(Box::new(standout_render::template::MiniJinjaEngine::new())),
+            app_state: Arc::new(Extensions::new()),
+            template_engine: Arc::new(Box::new(standout_render::template::MiniJinjaEngine::new())),
         }
     }
 
@@ -120,7 +126,7 @@ impl AppCore {
     /// App state contains long-lived resources like database connections
     /// and configuration that are shared across all dispatches.
     #[allow(dead_code)] // Public API for external use
-    pub fn app_state(&self) -> &Rc<Extensions> {
+    pub fn app_state(&self) -> &Arc<Extensions> {
         &self.app_state
     }
 
@@ -592,14 +598,14 @@ mod tests {
         let mut core = AppCore::new();
 
         // Populate engine manually for test
-        if let Some(engine_box) = Rc::get_mut(&mut core.template_engine) {
+        if let Some(engine_box) = Arc::get_mut(&mut core.template_engine) {
             for name in registry.names() {
                 let content = registry.get_content(name).unwrap();
                 engine_box.add_template(name, &content).unwrap();
             }
         }
 
-        core.template_registry = Some(Rc::new(registry));
+        core.template_registry = Some(Arc::new(registry));
 
         let data = serde_json::json!({"title": "My Title", "body": "Content here"});
 
@@ -632,14 +638,14 @@ mod tests {
         let mut core = AppCore::new();
 
         // Populate engine manually for test
-        if let Some(engine_box) = Rc::get_mut(&mut core.template_engine) {
+        if let Some(engine_box) = Arc::get_mut(&mut core.template_engine) {
             for name in registry.names() {
                 let content = registry.get_content(name).unwrap();
                 engine_box.add_template(name, &content).unwrap();
             }
         }
 
-        core.template_registry = Some(Rc::new(registry));
+        core.template_registry = Some(Arc::new(registry));
 
         let data = serde_json::json!({
             "items": [
@@ -684,7 +690,7 @@ mod tests {
         registry.add_inline("bar.j2", "bar");
 
         let mut core = AppCore::new();
-        core.template_registry = Some(Rc::new(registry));
+        core.template_registry = Some(Arc::new(registry));
 
         let names: Vec<_> = core.template_names().collect();
         assert_eq!(names.len(), 2);

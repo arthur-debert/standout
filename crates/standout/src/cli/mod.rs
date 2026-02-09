@@ -14,14 +14,33 @@
 //! If you only need template rendering without CLI integration, use the
 //! [`render`](crate::render) functions directly.
 //!
-//! ## Single-Threaded Design
+//! ## Handler Modes
 //!
-//! CLI applications are single-threaded: parse args → run one handler → output → exit.
-//! Handlers use `&mut self` and `FnMut`, allowing natural Rust patterns without
-//! forcing interior mutability wrappers (`Arc<Mutex<_>>`).
+//! Standout supports two handler modes:
+//!
+//! ### Thread-safe handlers (default)
+//!
+//! Use [`App`] with [`Handler`] for the default mode. Handlers must implement
+//! `Send + Sync` and use `&self` (not `&mut self`):
 //!
 //! ```rust,ignore
-//! use standout::cli::{App, Output};
+//! use standout::cli::{App, Output, ThreadSafe};
+//!
+//! // Stateless closure - works naturally
+//! App::<ThreadSafe>::builder()
+//!     .command("list", |m, ctx| Ok(Output::Render(get_items()?)), "{{ items }}")
+//!
+//! // Stateful handler requires interior mutability
+//! let cache = Arc::new(Mutex::new(HashMap::new()));
+//! ```
+//!
+//! ### Local handlers (mutable state)
+//!
+//! Use [`LocalApp`] with [`LocalHandler`] when handlers need `&mut self` access
+//! without interior mutability wrappers:
+//!
+//! ```rust,ignore
+//! use standout::cli::{LocalApp, Output};
 //!
 //! struct MyApi {
 //!     index: HashMap<Uuid, Item>,
@@ -33,13 +52,13 @@
 //!
 //! let mut api = MyApi::new();
 //!
-//! // FnMut handlers can capture mutable state
-//! App::builder()
+//! // LocalApp allows FnMut handlers that capture &mut api
+//! LocalApp::builder()
 //!     .command("add", |m, ctx| {
 //!         let item = Item::from(m);
 //!         api.add(item);  // &mut self works!
 //!         Ok(Output::Silent)
-//!     }, "")?
+//!     }, "")
 //!     .build()?
 //!     .run(cmd, args);
 //! ```
@@ -70,13 +89,14 @@
 //! ## Quick Start
 //!
 //! ```rust,ignore
-//! use standout::cli::{App, Output, HandlerResult};
+//! use standout::cli::{App, Output, HandlerResult, ThreadSafe};
 //!
-//! App::builder()
+//! App::<ThreadSafe>::builder()
 //!     .command("list", |matches, ctx| {
 //!         let items = load_items()?;
 //!         Ok(Output::Render(items))
-//!     }, "{% for item in items %}{{ item }}\n{% endfor %}")?
+//!     })
+//!     .template("list", "{% for item in items %}{{ item }}\n{% endfor %}")
 //!     .build()?
 //!     .run(cmd, std::env::args());
 //! ```
@@ -97,14 +117,25 @@
 //!
 //! ## Key Types
 //!
+//! ### Thread-safe (default)
+//!
 //! - [`App`] / [`AppBuilder`]: Main entry point and configuration
-//! - [`Handler`]: Trait for command handlers (`&mut self`)
-//! - [`FnHandler`]: Wrapper for `FnMut` closures
+//! - [`Handler`]: Trait for thread-safe handlers (`Send + Sync`, `&self`)
+//! - [`FnHandler`]: Wrapper for `Fn` closures
+//!
+//! ### Local (mutable state)
+//!
+//! - [`LocalApp`] / [`LocalAppBuilder`]: Single-threaded app with `FnMut` handlers
+//! - [`LocalHandler`]: Trait for local handlers (no `Send + Sync`, `&mut self`)
+//! - [`LocalFnHandler`]: Wrapper for `FnMut` closures
+//!
+//! ### Shared
+//!
 //! - [`Output`]: What handlers produce (render data, silent, binary)
 //! - [`HandlerResult`]: `Result<Output<T>, Error>` — enables `?` for error handling
 //! - [`RunResult`]: Dispatch outcome (handled, binary, or no match)
 //! - [`Hooks`]: Pre/post execution hooks for validation and transformation
-//! - [`CommandContext`]: Runtime info passed to handlers (command path, app state)
+//! - [`CommandContext`]: Runtime info passed to handlers (output mode, command path)
 //!
 //! ## See Also
 //!
@@ -112,29 +143,40 @@
 //! - [`handler`]: Handler types and the Handler trait
 //! - [`hooks`]: Hook system for intercepting execution
 //! - [`help`]: Help rendering and topic system
+//! - [`mode`]: Handler execution modes (ThreadSafe, Local)
 
 // Internal modules
 mod dispatch;
 mod result;
 
-// Shared core for App
+// Shared core for App and LocalApp
 mod core;
 
 // Split from former standout module
 mod app;
 mod builder;
 
+// Local (mutable) handler support
+// Local (mutable) handler support
+mod local_builder;
+
 // Public modules
 pub mod group;
 pub mod handler;
 pub mod help;
 pub mod hooks;
+pub mod mode;
 #[macro_use]
 pub mod macros;
 
 // Re-export main types from app and builder modules
 pub use app::App;
 pub use builder::AppBuilder;
+
+// Re-export local app types
+// Re-export local app types
+pub type LocalApp = App<Local>;
+pub use local_builder::LocalAppBuilder;
 
 // Re-export group types for declarative dispatch
 pub use group::{CommandConfig, GroupBuilder};
@@ -145,8 +187,14 @@ pub use result::HelpResult;
 // Re-export help types
 pub use help::{default_help_theme, render_help, render_help_with_topics, HelpConfig};
 
-// Re-export handler types
+// Re-export handler types (thread-safe)
 pub use handler::{CommandContext, FnHandler, Handler, HandlerResult, Output, RunResult};
+
+// Re-export local handler types
+pub use handler::{LocalFnHandler, LocalHandler};
+
+// Re-export mode types
+pub use mode::{HandlerMode, Local, ThreadSafe};
 
 // Re-export hook types
 pub use hooks::{HookError, HookPhase, Hooks, RenderedOutput};
@@ -162,11 +210,20 @@ pub use dispatch::{
     extract_command_path, get_deepest_matches, has_subcommand, insert_default_command,
 };
 
+// Re-export Resource types from standout-dispatch
+pub use standout_dispatch::{ResourceQuery, ResourceStore};
+
+// Re-export pipeline types from standout-dispatch
+pub use standout_dispatch::{
+    app_logic_identity, validate_identity, AppLogicError, IdResolutionError, ResourcePipelineError,
+    ValidationError,
+};
+
 /// Parses a clap command with styled help output.
 ///
 /// This is the simplest entry point for basic CLIs without topics.
 pub fn parse(cmd: clap::Command) -> clap::ArgMatches {
-    App::parse(cmd)
+    App::<ThreadSafe>::parse(cmd)
 }
 
 /// Like `parse`, but takes arguments from an iterator.
@@ -175,5 +232,5 @@ where
     I: IntoIterator<Item = T>,
     T: Into<std::ffi::OsString> + Clone,
 {
-    App::new().parse_from(cmd, itr)
+    App::<ThreadSafe>::new().parse_from(cmd, itr)
 }

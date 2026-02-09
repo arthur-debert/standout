@@ -1,6 +1,5 @@
 //! Error types for setup operations.
 
-use standout_dispatch::verify::HandlerMismatchError;
 use standout_render::{RegistryError, RenderError};
 
 /// Error type for setup operations.
@@ -16,10 +15,20 @@ pub enum SetupError {
     Config(String),
     /// Duplicate command registered.
     DuplicateCommand(String),
+    /// Command conflict when using default group.
+    ///
+    /// Occurs when a group is set as default and one of its subcommands
+    /// has the same name as a root-level command.
+    CommandConflict {
+        /// The default group name
+        default_group: String,
+        /// The conflicting subcommand
+        subcommand: String,
+        /// The root command that conflicts
+        root_command: String,
+    },
     /// I/O error during setup (e.g., loading templates/styles).
     Io(std::io::Error),
-    /// Verification failed (handler vs command mismatch).
-    VerificationFailed(HandlerMismatchError),
 }
 
 impl std::fmt::Display for SetupError {
@@ -30,8 +39,18 @@ impl std::fmt::Display for SetupError {
             SetupError::ThemeNotFound(name) => write!(f, "theme not found: {}", name),
             SetupError::Config(msg) => write!(f, "configuration error: {}", msg),
             SetupError::DuplicateCommand(cmd) => write!(f, "duplicate command: {}", cmd),
+            SetupError::CommandConflict {
+                default_group,
+                subcommand,
+                root_command,
+            } => {
+                write!(
+                    f,
+                    "Cannot set '{}' as default: its subcommand '{}' conflicts with existing root command '{}'",
+                    default_group, subcommand, root_command
+                )
+            }
             SetupError::Io(err) => write!(f, "setup I/O error: {}", err),
-            SetupError::VerificationFailed(err) => write!(f, "verification failed:\n{}", err),
         }
     }
 }
@@ -53,12 +72,6 @@ impl From<RenderError> for SetupError {
 impl From<RegistryError> for SetupError {
     fn from(e: RegistryError) -> Self {
         SetupError::Template(e.to_string())
-    }
-}
-
-impl From<HandlerMismatchError> for SetupError {
-    fn from(e: HandlerMismatchError) -> Self {
-        SetupError::VerificationFailed(e)
     }
 }
 

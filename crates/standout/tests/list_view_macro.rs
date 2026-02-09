@@ -58,7 +58,7 @@ fn test_list_view_macro_injection() {
     // standout::cli::AppBuilder employs GroupBuilder logic.
 
     use standout::cli::App;
-    let app = App::builder()
+    let app = App::<standout::cli::ThreadSafe>::builder()
         .commands(Commands::dispatch_config())
         .expect("Failed to set commands")
         .build()

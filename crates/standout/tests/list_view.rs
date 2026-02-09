@@ -2,7 +2,7 @@
 
 use clap::Command;
 use serde::Serialize;
-use standout::cli::{App, Output, RunResult};
+use standout::cli::{App, Output, RunResult, ThreadSafe};
 use standout::views::{list_view, ListViewResult, MessageLevel};
 
 #[derive(Clone, Serialize)]
@@ -82,7 +82,7 @@ fn test_list_view_with_filter_info() {
 #[test]
 fn test_list_view_renders_with_framework_template() {
     // Create an app with a list command using the framework template
-    let app = App::builder()
+    let app = App::<ThreadSafe>::builder()
         .command(
             "list",
             |_m, _ctx| {
@@ -120,7 +120,7 @@ fn test_list_view_renders_with_framework_template() {
 
 #[test]
 fn test_list_view_empty_list() {
-    let app = App::builder()
+    let app = App::<ThreadSafe>::builder()
         .command(
             "list",
             |_m, _ctx| {
@@ -148,7 +148,7 @@ fn test_list_view_empty_list() {
 
 #[test]
 fn test_list_view_with_filter_summary_renders() {
-    let app = App::builder()
+    let app = App::<ThreadSafe>::builder()
         .command(
             "list",
             |_m, _ctx| {
@@ -188,15 +188,17 @@ fn test_list_view_with_filter_summary_renders() {
 #[test]
 fn test_framework_template_can_be_disabled() {
     // Build an app without framework templates
-    let result = App::builder().include_framework_templates(false).command(
-        "list",
-        |_m, _ctx| {
-            let tasks = test_tasks();
-            Ok(Output::Render(list_view(tasks).build()))
-        },
-        // This template won't exist
-        "standout/list-view",
-    );
+    let result = App::<ThreadSafe>::builder()
+        .include_framework_templates(false)
+        .command(
+            "list",
+            |_m, _ctx| {
+                let tasks = test_tasks();
+                Ok(Output::Render(list_view(tasks).build()))
+            },
+            // This template won't exist
+            "standout/list-view",
+        );
 
     // The command registration might succeed but the template won't be found
     // This depends on when template resolution happens

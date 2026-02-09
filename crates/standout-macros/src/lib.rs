@@ -42,10 +42,10 @@
 //! [`EmbeddedSource`]: standout::EmbeddedSource
 //! [`RenderSetup`]: standout::RenderSetup
 
-mod command;
 mod dispatch;
 mod embed;
 mod handler;
+mod resource;
 mod seeker;
 mod tabular;
 
@@ -478,92 +478,76 @@ pub fn handler(attr: TokenStream, item: TokenStream) -> TokenStream {
         .into()
 }
 
-/// Defines a complete command with handler, clap Command, and template from a single source.
+/// Derives Resource commands and handlers for a struct.
 ///
-/// This macro extends `#[handler]` to generate both the handler wrapper AND the complete
-/// clap `Command` definition. This eliminates mismatches between handler expectations
-/// and CLI definitions since everything is derived from one source.
+/// This macro generates a complete Resource CLI interface for the annotated struct,
+/// including list, view, create, update, and delete commands with corresponding
+/// handlers.
 ///
-/// # Command Attributes
+/// # Required Attributes
 ///
-/// | Attribute | Type | Required | Description |
-/// |-----------|------|----------|-------------|
-/// | `name` | string | Yes | Command name |
-/// | `about` | string | No | Short description |
-/// | `long_about` | string | No | Detailed description |
-/// | `visible_alias` | string | No | Command alias |
-/// | `hide` | bool | No | Hide from help |
-/// | `template` | string | No | Template name (defaults to command name) |
+/// | Attribute | Description |
+/// |-----------|-------------|
+/// | `object = "name"` | Singular name for the object (e.g., "task") |
+/// | `store = Type` | Type implementing `ResourceStore` trait |
 ///
-/// # Parameter Annotations
+/// # Optional Attributes
 ///
-/// ## Flags (`#[flag(...)]`)
+/// | Attribute | Description | Default |
+/// |-----------|-------------|---------|
+/// | `plural = "name"` | Plural name for the object | `"{object}s"` |
+/// | `operations = [...]` | Subset of operations to generate | All operations |
 ///
-/// | Attribute | Type | Description |
-/// |-----------|------|-------------|
-/// | `short` | char | Short flag (e.g., `-a`) |
-/// | `long` | string | Long flag, defaults to param name with `_` → `-` |
-/// | `help` | string | Help text |
-/// | `hide` | bool | Hide from help |
+/// # Field Attributes
 ///
-/// ## Arguments (`#[arg(...)]`)
-///
-/// | Attribute | Type | Description |
-/// |-----------|------|-------------|
-/// | `short` | char | Short option (e.g., `-f`) |
-/// | `long` | string | Long option, defaults to param name with `_` → `-` |
-/// | `help` | string | Help text |
-/// | `value_name` | string | Placeholder in help |
-/// | `default` | string | Default value |
-/// | `hide` | bool | Hide from help |
-/// | `positional` | bool | Positional argument (no `--` prefix) |
-///
-/// ## Pass-through
-///
-/// | Annotation | Type | Description |
-/// |------------|------|-------------|
-/// | `#[ctx]` | `&CommandContext` | Access command context |
-/// | `#[matches]` | `&ArgMatches` | Access raw matches |
+/// | Attribute | Description |
+/// |-----------|-------------|
+/// | `id` | Marks field as primary identifier (required) |
+/// | `readonly` | Excludes field from create/update |
+/// | `skip` | Excludes field from all Resource operations |
+/// | `default = "expr"` | Default value for create |
+/// | `choices = ["a", "b"]` | Constrained values |
 ///
 /// # Generated Code
 ///
-/// For a function `fn foo(...)`, the macro generates:
+/// For `#[resource(object = "task", store = TaskStore)]` on `Task`:
 ///
-/// - `fn foo(...)` - original function (preserved for testing)
-/// - `fn foo__handler(...)` - wrapper for dispatch
-/// - `fn foo__expected_args()` - verification metadata
-/// - `fn foo__command()` - clap `Command` definition
-/// - `fn foo__template()` - template name
-/// - `struct foo_Handler` - implements `Handler` trait
-///
-/// # Template Convention
-///
-/// The `template` attribute is optional. When omitted, it defaults to the command name.
-/// For example, `#[command(name = "list")]` will use template `"list"`.
+/// - `TaskCommands` enum with List, View, Create, Update, Delete variants
+/// - `TaskCommands::dispatch_config()` for use with `App::builder().group()`
+/// - Handler functions in `__task_resource_handlers` module
 ///
 /// # Example
 ///
 /// ```rust,ignore
-/// use standout_macros::command;
+/// use standout_macros::Resource;
 ///
-/// #[command(name = "list", about = "List all items")]
-/// fn list_items(
-///     #[flag(short = 'a', help = "Show all")] all: bool,
-///     #[arg(short = 'f', help = "Filter")] filter: Option<String>,
-/// ) -> Result<Vec<Item>, Error> {
-///     storage::list(all, filter)
+/// #[derive(Clone, Resource)]
+/// #[resource(object = "task", store = TaskStore)]
+/// pub struct Task {
+///     #[resource(id)]
+///     pub id: String,
+///
+///     #[resource(arg(short, long))]
+///     pub title: String,
+///
+///     #[resource(choices = ["pending", "done"])]
+///     pub status: String,
+///
+///     #[resource(readonly)]
+///     pub created_at: String,
 /// }
 ///
-/// // Use:
-/// // - list_items__command() returns the clap Command
-/// // - list_items__template() returns "list"
-/// // - list_items_Handler implements Handler
+/// // In main.rs:
+/// App::builder()
+///     .app_state(TaskStore::new())
+///     .group("task", TaskCommands::dispatch_config())
+///     .build()?
+///     .run(Cli::command(), std::env::args_os());
 /// ```
-#[proc_macro_attribute]
-pub fn command(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let attr = proc_macro2::TokenStream::from(attr);
-    let item = proc_macro2::TokenStream::from(item);
-    command::command_impl(attr, item)
+#[proc_macro_derive(Resource, attributes(resource))]
+pub fn resource_derive(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    resource::resource_derive_impl(input)
         .unwrap_or_else(|e| e.to_compile_error())
         .into()
 }

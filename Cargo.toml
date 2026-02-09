@@ -4,7 +4,6 @@ members = [
     "crates/standout",
     "crates/standout-bbparser",
     "crates/standout-dispatch",
-    "crates/standout-input",
     "crates/standout-macros",
     "crates/standout-render",
     "crates/standout-pipe",

@@ -30,53 +30,19 @@
 //!   Use for: logging, clipboard copy, output filtering.
 
 use std::fmt;
-use std::rc::Rc;
+use std::sync::Arc;
 use thiserror::Error;
 
 use crate::handler::CommandContext;
 use clap::ArgMatches;
-
-/// Text output with both formatted and raw versions.
-///
-/// This struct carries both the terminal-formatted output (with ANSI codes)
-/// and the raw output (with style tags but no ANSI codes). This allows
-/// post-output hooks like piping to choose the appropriate version.
-#[derive(Debug, Clone)]
-pub struct TextOutput {
-    /// The formatted output with ANSI codes applied (for terminal display)
-    pub formatted: String,
-    /// The raw output with `[tag]...[/tag]` markers but no ANSI codes.
-    /// This is the intermediate output after template rendering but before
-    /// style tag processing. Piping uses this by default.
-    pub raw: String,
-}
-
-impl TextOutput {
-    /// Creates a new TextOutput with both formatted and raw versions.
-    pub fn new(formatted: String, raw: String) -> Self {
-        Self { formatted, raw }
-    }
-
-    /// Creates a TextOutput where formatted and raw are the same.
-    /// Use this for output that doesn't go through style tag processing
-    /// (e.g., JSON output, error messages).
-    pub fn plain(text: String) -> Self {
-        Self {
-            formatted: text.clone(),
-            raw: text,
-        }
-    }
-}
 
 /// Output from a command, used in post-output hooks.
 ///
 /// This represents the final output from a command handler after rendering.
 #[derive(Debug, Clone)]
 pub enum RenderedOutput {
-    /// Text output with both formatted (ANSI) and raw versions.
-    /// The `formatted` field contains ANSI codes for terminal display.
-    /// The `raw` field contains the intermediate output for piping.
-    Text(TextOutput),
+    /// Text output (rendered template or error message)
+    Text(String),
     /// Binary output with suggested filename
     Binary(Vec<u8>, String),
     /// No output (silent command)
@@ -99,27 +65,10 @@ impl RenderedOutput {
         matches!(self, RenderedOutput::Silent)
     }
 
-    /// Returns the formatted text content (with ANSI codes) if this is text output.
+    /// Returns the text content if this is text output.
     pub fn as_text(&self) -> Option<&str> {
         match self {
-            RenderedOutput::Text(t) => Some(&t.formatted),
-            _ => None,
-        }
-    }
-
-    /// Returns the raw text content (without ANSI codes) if this is text output.
-    /// This is the intermediate output suitable for piping.
-    pub fn as_raw_text(&self) -> Option<&str> {
-        match self {
-            RenderedOutput::Text(t) => Some(&t.raw),
-            _ => None,
-        }
-    }
-
-    /// Returns the full TextOutput if this is text output.
-    pub fn as_text_output(&self) -> Option<&TextOutput> {
-        match self {
-            RenderedOutput::Text(t) => Some(t),
+            RenderedOutput::Text(s) => Some(s),
             _ => None,
         }
     }
@@ -209,16 +158,22 @@ impl HookError {
 ///
 /// Pre-dispatch hooks receive mutable access to [`CommandContext`], allowing them
 /// to inject state into `ctx.extensions` that handlers can retrieve.
-pub type PreDispatchFn = Rc<dyn Fn(&ArgMatches, &mut CommandContext) -> Result<(), HookError>>;
+pub type PreDispatchFn =
+    Arc<dyn Fn(&ArgMatches, &mut CommandContext) -> Result<(), HookError> + Send + Sync>;
 
 /// Type alias for post-dispatch hook functions.
-pub type PostDispatchFn = Rc<
-    dyn Fn(&ArgMatches, &CommandContext, serde_json::Value) -> Result<serde_json::Value, HookError>,
+pub type PostDispatchFn = Arc<
+    dyn Fn(&ArgMatches, &CommandContext, serde_json::Value) -> Result<serde_json::Value, HookError>
+        + Send
+        + Sync,
 >;
 
 /// Type alias for post-output hook functions.
-pub type PostOutputFn =
-    Rc<dyn Fn(&ArgMatches, &CommandContext, RenderedOutput) -> Result<RenderedOutput, HookError>>;
+pub type PostOutputFn = Arc<
+    dyn Fn(&ArgMatches, &CommandContext, RenderedOutput) -> Result<RenderedOutput, HookError>
+        + Send
+        + Sync,
+>;
 
 /// Per-command hook configuration.
 ///
@@ -263,9 +218,9 @@ impl Hooks {
     /// ```
     pub fn pre_dispatch<F>(mut self, f: F) -> Self
     where
-        F: Fn(&ArgMatches, &mut CommandContext) -> Result<(), HookError> + 'static,
+        F: Fn(&ArgMatches, &mut CommandContext) -> Result<(), HookError> + Send + Sync + 'static,
     {
-        self.pre_dispatch.push(Rc::new(f));
+        self.pre_dispatch.push(Arc::new(f));
         self
     }
 
@@ -277,9 +232,11 @@ impl Hooks {
                 &CommandContext,
                 serde_json::Value,
             ) -> Result<serde_json::Value, HookError>
+            + Send
+            + Sync
             + 'static,
     {
-        self.post_dispatch.push(Rc::new(f));
+        self.post_dispatch.push(Arc::new(f));
         self
     }
 
@@ -287,9 +244,11 @@ impl Hooks {
     pub fn post_output<F>(mut self, f: F) -> Self
     where
         F: Fn(&ArgMatches, &CommandContext, RenderedOutput) -> Result<RenderedOutput, HookError>
+            + Send
+            + Sync
             + 'static,
     {
-        self.post_output.push(Rc::new(f));
+        self.post_output.push(Arc::new(f));
         self
     }
 
@@ -363,17 +322,11 @@ mod tests {
 
     #[test]
     fn test_rendered_output_variants() {
-        let text = RenderedOutput::Text(TextOutput::new("formatted".into(), "raw".into()));
+        let text = RenderedOutput::Text("hello".into());
         assert!(text.is_text());
         assert!(!text.is_binary());
         assert!(!text.is_silent());
-        assert_eq!(text.as_text(), Some("formatted"));
-        assert_eq!(text.as_raw_text(), Some("raw"));
-
-        // Test plain constructor (formatted == raw)
-        let plain = RenderedOutput::Text(TextOutput::plain("hello".into()));
-        assert_eq!(plain.as_text(), Some("hello"));
-        assert_eq!(plain.as_raw_text(), Some("hello"));
+        assert_eq!(text.as_text(), Some("hello"));
 
         let binary = RenderedOutput::Binary(vec![1, 2, 3], "file.bin".into());
         assert!(!binary.is_text());
@@ -399,14 +352,11 @@ mod tests {
 
     #[test]
     fn test_pre_dispatch_success() {
-        use std::cell::Cell;
-        use std::rc::Rc;
-
-        let called = Rc::new(Cell::new(false));
+        let called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let called_clone = called.clone();
 
         let hooks = Hooks::new().pre_dispatch(move |_, _| {
-            called_clone.set(true);
+            called_clone.store(true, std::sync::atomic::Ordering::SeqCst);
             Ok(())
         });
 
@@ -415,7 +365,7 @@ mod tests {
         let result = hooks.run_pre_dispatch(&matches, &mut ctx);
 
         assert!(result.is_ok());
-        assert!(called.get());
+        assert!(called.load(std::sync::atomic::Ordering::SeqCst));
     }
 
     #[test]
@@ -507,11 +457,8 @@ mod tests {
     #[test]
     fn test_post_output_transformation() {
         let hooks = Hooks::new().post_output(|_, _, output| {
-            if let RenderedOutput::Text(text_output) = output {
-                Ok(RenderedOutput::Text(TextOutput::new(
-                    text_output.formatted.to_uppercase(),
-                    text_output.raw.to_uppercase(),
-                )))
+            if let RenderedOutput::Text(text) = output {
+                Ok(RenderedOutput::Text(text.to_uppercase()))
             } else {
                 Ok(output)
             }
@@ -519,8 +466,7 @@ mod tests {
 
         let ctx = test_context();
         let matches = test_matches();
-        let input = RenderedOutput::Text(TextOutput::plain("hello".into()));
-        let result = hooks.run_post_output(&matches, &ctx, input);
+        let result = hooks.run_post_output(&matches, &ctx, RenderedOutput::Text("hello".into()));
 
         assert!(result.is_ok());
         assert_eq!(result.unwrap().as_text(), Some("HELLO"));

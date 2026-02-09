@@ -67,8 +67,8 @@ impl AppBuilder {
         configure: C,
     ) -> Result<Self, SetupError>
     where
-        F: FnMut(&ArgMatches, &CommandContext) -> HandlerResult<T> + 'static,
-        T: Serialize + 'static,
+        F: Fn(&ArgMatches, &CommandContext) -> HandlerResult<T> + Send + Sync + 'static,
+        T: Serialize + Send + Sync + 'static,
         C: FnOnce(CommandConfig<FnHandler<F, T>>) -> CommandConfig<FnHandler<F, T>>,
     {
         let config = CommandConfig::new(FnHandler::new(handler));
@@ -205,8 +205,8 @@ impl AppBuilder {
     /// ```
     pub fn command<F, T>(self, path: &str, handler: F, template: &str) -> Result<Self, SetupError>
     where
-        F: FnMut(&ArgMatches, &CommandContext) -> HandlerResult<T> + 'static,
-        T: Serialize + 'static,
+        F: Fn(&ArgMatches, &CommandContext) -> HandlerResult<T> + Send + Sync + 'static,
+        T: Serialize + Send + Sync + 'static,
     {
         self.command_handler(path, FnHandler::new(handler), template)
     }
@@ -248,8 +248,8 @@ impl AppBuilder {
         template: &str,
     ) -> Result<Self, SetupError>
     where
-        H: Handler<Output = T> + 'static,
-        T: Serialize + 'static,
+        H: Handler<Output = T> + Send + Sync + 'static,
+        T: Serialize + Send + Sync + 'static,
     {
         let template = template.to_string();
 

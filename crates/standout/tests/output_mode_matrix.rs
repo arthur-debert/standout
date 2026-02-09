@@ -1,11 +1,12 @@
-//! Matrix tests for output mode combinations.
+//! Matrix tests for output mode × handler mode combinations.
 //!
-//! These tests ensure that all output modes work correctly with App.
+//! These tests ensure that all output modes work correctly with both
+//! App (thread-safe) and LocalApp (single-threaded) handler modes.
 
 use clap::ArgMatches;
 use serde::Serialize;
 use standout::cli::handler::{CommandContext, Output};
-use standout::cli::App;
+use standout::cli::{App, LocalApp};
 use standout::OutputMode;
 
 #[derive(Serialize)]
@@ -30,12 +31,12 @@ fn simple_template() -> &'static str {
 }
 
 // ============================================================================
-// App Output Mode Tests
+// App (Thread-Safe) Output Mode Tests
 // ============================================================================
 
 #[test]
 fn test_app_output_mode_auto() {
-    let app = App::builder()
+    let app = App::<standout::cli::ThreadSafe>::builder()
         .command(
             "run",
             |_m: &ArgMatches, _ctx: &CommandContext| Ok(Output::Render(TestData::sample())),
@@ -55,7 +56,7 @@ fn test_app_output_mode_auto() {
 
 #[test]
 fn test_app_output_mode_term() {
-    let app = App::builder()
+    let app = App::<standout::cli::ThreadSafe>::builder()
         .command(
             "run",
             |_m: &ArgMatches, _ctx: &CommandContext| Ok(Output::Render(TestData::sample())),
@@ -75,7 +76,7 @@ fn test_app_output_mode_term() {
 
 #[test]
 fn test_app_output_mode_text() {
-    let app = App::builder()
+    let app = App::<standout::cli::ThreadSafe>::builder()
         .command(
             "run",
             |_m: &ArgMatches, _ctx: &CommandContext| Ok(Output::Render(TestData::sample())),
@@ -95,7 +96,7 @@ fn test_app_output_mode_text() {
 
 #[test]
 fn test_app_output_mode_json() {
-    let app = App::builder()
+    let app = App::<standout::cli::ThreadSafe>::builder()
         .command(
             "run",
             |_m: &ArgMatches, _ctx: &CommandContext| Ok(Output::Render(TestData::sample())),
@@ -117,7 +118,7 @@ fn test_app_output_mode_json() {
 
 #[test]
 fn test_app_output_mode_yaml() {
-    let app = App::builder()
+    let app = App::<standout::cli::ThreadSafe>::builder()
         .command(
             "run",
             |_m: &ArgMatches, _ctx: &CommandContext| Ok(Output::Render(TestData::sample())),
@@ -138,7 +139,7 @@ fn test_app_output_mode_yaml() {
 
 #[test]
 fn test_app_output_mode_csv() {
-    let app = App::builder()
+    let app = App::<standout::cli::ThreadSafe>::builder()
         .command(
             "run",
             |_m: &ArgMatches, _ctx: &CommandContext| Ok(Output::Render(TestData::sample())),
@@ -160,12 +161,12 @@ fn test_app_output_mode_csv() {
 }
 
 // ============================================================================
-// Additional Output Mode Tests
+// LocalApp (Single-Threaded) Output Mode Tests
 // ============================================================================
 
 #[test]
 fn test_local_app_output_mode_auto() {
-    let app = App::builder()
+    let app = LocalApp::builder()
         .command(
             "run",
             |_m: &ArgMatches, _ctx: &CommandContext| Ok(Output::Render(TestData::sample())),
@@ -185,7 +186,7 @@ fn test_local_app_output_mode_auto() {
 
 #[test]
 fn test_local_app_output_mode_term() {
-    let app = App::builder()
+    let app = LocalApp::builder()
         .command(
             "run",
             |_m: &ArgMatches, _ctx: &CommandContext| Ok(Output::Render(TestData::sample())),
@@ -205,7 +206,7 @@ fn test_local_app_output_mode_term() {
 
 #[test]
 fn test_local_app_output_mode_text() {
-    let app = App::builder()
+    let app = LocalApp::builder()
         .command(
             "run",
             |_m: &ArgMatches, _ctx: &CommandContext| Ok(Output::Render(TestData::sample())),
@@ -225,7 +226,7 @@ fn test_local_app_output_mode_text() {
 
 #[test]
 fn test_local_app_output_mode_json() {
-    let app = App::builder()
+    let app = LocalApp::builder()
         .command(
             "run",
             |_m: &ArgMatches, _ctx: &CommandContext| Ok(Output::Render(TestData::sample())),
@@ -247,7 +248,7 @@ fn test_local_app_output_mode_json() {
 
 #[test]
 fn test_local_app_output_mode_yaml() {
-    let app = App::builder()
+    let app = LocalApp::builder()
         .command(
             "run",
             |_m: &ArgMatches, _ctx: &CommandContext| Ok(Output::Render(TestData::sample())),
@@ -268,7 +269,7 @@ fn test_local_app_output_mode_yaml() {
 
 #[test]
 fn test_local_app_output_mode_csv() {
-    let app = App::builder()
+    let app = LocalApp::builder()
         .command(
             "run",
             |_m: &ArgMatches, _ctx: &CommandContext| Ok(Output::Render(TestData::sample())),
@@ -290,14 +291,15 @@ fn test_local_app_output_mode_csv() {
 }
 
 // ============================================================================
-// Consistency Tests
+// Feature Parity Tests
 // ============================================================================
 
 #[test]
-fn test_render_inline_json_consistency() {
+fn test_app_and_local_app_produce_same_json() {
     let data = TestData::sample();
 
-    let app = App::builder()
+    // App output
+    let app = App::<standout::cli::ThreadSafe>::builder()
         .command(
             "run",
             |_m: &ArgMatches, _ctx: &CommandContext| Ok(Output::Render(TestData::sample())),
@@ -306,26 +308,38 @@ fn test_render_inline_json_consistency() {
         .unwrap()
         .build()
         .expect("Failed to build app");
-
-    // Render same data twice - should be identical
-    let output1 = app
+    let app_output = app
         .render_inline(simple_template(), &data, OutputMode::Json)
-        .expect("First render failed");
-    let output2 = app
+        .expect("App render failed");
+
+    // LocalApp output
+    let local_app = LocalApp::builder()
+        .command(
+            "run",
+            |_m: &ArgMatches, _ctx: &CommandContext| Ok(Output::Render(TestData::sample())),
+            simple_template(),
+        )
+        .unwrap()
+        .build()
+        .expect("Failed to build local app");
+    let local_output = local_app
         .render_inline(simple_template(), &data, OutputMode::Json)
-        .expect("Second render failed");
+        .expect("LocalApp render failed");
 
-    let json1: serde_json::Value = serde_json::from_str(&output1).expect("Invalid JSON");
-    let json2: serde_json::Value = serde_json::from_str(&output2).expect("Invalid JSON");
+    // Both should produce identical JSON
+    let app_json: serde_json::Value = serde_json::from_str(&app_output).expect("Invalid App JSON");
+    let local_json: serde_json::Value =
+        serde_json::from_str(&local_output).expect("Invalid LocalApp JSON");
 
-    assert_eq!(json1, json2);
+    assert_eq!(app_json, local_json);
 }
 
 #[test]
-fn test_render_inline_text_consistency() {
+fn test_app_and_local_app_produce_same_text() {
     let data = TestData::sample();
 
-    let app = App::builder()
+    // App output
+    let app = App::<standout::cli::ThreadSafe>::builder()
         .command(
             "run",
             |_m: &ArgMatches, _ctx: &CommandContext| Ok(Output::Render(TestData::sample())),
@@ -334,16 +348,26 @@ fn test_render_inline_text_consistency() {
         .unwrap()
         .build()
         .expect("Failed to build app");
-
-    // Render same data twice - should be identical
-    let output1 = app
+    let app_output = app
         .render_inline(simple_template(), &data, OutputMode::Text)
-        .expect("First render failed");
-    let output2 = app
-        .render_inline(simple_template(), &data, OutputMode::Text)
-        .expect("Second render failed");
+        .expect("App render failed");
 
-    assert_eq!(output1, output2);
+    // LocalApp output
+    let local_app = LocalApp::builder()
+        .command(
+            "run",
+            |_m: &ArgMatches, _ctx: &CommandContext| Ok(Output::Render(TestData::sample())),
+            simple_template(),
+        )
+        .unwrap()
+        .build()
+        .expect("Failed to build local app");
+    let local_output = local_app
+        .render_inline(simple_template(), &data, OutputMode::Text)
+        .expect("LocalApp render failed");
+
+    // Both should produce identical text output
+    assert_eq!(app_output, local_output);
 }
 
 // ============================================================================
@@ -360,7 +384,7 @@ fn test_style_tags_in_term_mode() {
     let style = Style::new().blue().bold().force_styling(true);
     let theme = Theme::new().add("title", style);
 
-    let app = App::builder()
+    let app = App::<standout::cli::ThreadSafe>::builder()
         .theme(theme)
         .command(
             "run",
@@ -389,7 +413,7 @@ fn test_style_tags_stripped_in_text_mode() {
     let style = Style::new().blue().bold().force_styling(true);
     let theme = Theme::new().add("title", style);
 
-    let app = App::builder()
+    let app = App::<standout::cli::ThreadSafe>::builder()
         .theme(theme)
         .command(
             "run",
@@ -420,7 +444,7 @@ fn test_style_tags_kept_in_term_debug_mode() {
     let style = Style::new().blue().bold().force_styling(true);
     let theme = Theme::new().add("title", style);
 
-    let app = App::builder()
+    let app = App::<standout::cli::ThreadSafe>::builder()
         .theme(theme)
         .command(
             "run",
