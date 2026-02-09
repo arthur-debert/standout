@@ -13,6 +13,7 @@ For explanation's sake, we will show a hypothetical list command for tdoo, a tod
 - [Styling System](../crates/render/topics/styling-system.md) - themes and styles in depth
 - [Output Modes](../topics/output-modes.md) - all output format options
 - [Partial Adoption](../crates/dispatch/topics/partial-adoption.md) - migrating incrementally
+- [Input Collection](../crates/input/guides/intro-to-input.md) - declarative input from multiple sources
 
 ## 1. Start: The Argument Parsing
 
@@ -693,14 +694,39 @@ Three piping modes:
 
 See [Output Piping](../crates/standout-pipe/docs/topics/piping.md) for the full API.
 
-Aside from exposing the library primitives, Standout leverages best-in-breed crates like MiniJinja and console::Style under the hood. The lock-in is really negligible: you can use Standout's BB parser or swap it, manually dispatch handlers, and use the renderers directly in your clap dispatch.
+## Bonus: Declarative Input Collection
 
-## Mutable Handlers (LocalApp)
-
-If your application logic uses `&mut self` methods—common with database connections, file caches, or in-memory indices—you can use `LocalApp` instead of `App`:
+Need to accept input from CLI arguments, piped stdin, environment variables, or interactive prompts? `standout-input` provides declarative input chains:
 
 ```rust
-use standout::cli::{LocalApp, Output};
+use standout_input::{InputChain, ArgSource, StdinSource, EnvSource, EditorSource};
+
+// Try each source in order until one provides input
+let body = InputChain::<String>::new()
+    .try_source(ArgSource::new("body"))           // 1. --body argument
+    .try_source(StdinSource::new())                // 2. Piped stdin
+    .try_source(EnvSource::new("PR_BODY"))         // 3. Environment variable
+    .try_source(EditorSource::new().extension(".md"))  // 4. Open editor
+    .validate(|s| !s.is_empty(), "Body cannot be empty")
+    .resolve(&matches)?;
+```
+
+Features:
+- **Declarative priority**: Source order is explicit in the chain
+- **Testable**: All sources accept mocks for CI-safe testing
+- **Validated**: Chain-level validation with retry support for interactive sources
+- **Feature-gated**: Control dependencies (editor, prompts, inquire TUI)
+
+See [Introduction to Input](../crates/input/guides/intro-to-input.md) for the full guide.
+
+Aside from exposing the library primitives, Standout leverages best-in-breed crates like MiniJinja and console::Style under the hood. The lock-in is really negligible: you can use Standout's BB parser or swap it, manually dispatch handlers, and use the renderers directly in your clap dispatch.
+
+## Mutable Handlers
+
+`App` supports `FnMut` closures and mutable handler state directly—no wrappers needed. This is common with database connections, file caches, or in-memory indices:
+
+```rust
+use standout::cli::{App, Output};
 use standout::embed_templates;
 
 struct PadStore {
@@ -718,37 +744,29 @@ impl PadStore {
 fn main() -> anyhow::Result<()> {
     let mut store = PadStore::load()?;
 
-    LocalApp::builder()
-        .app_state(Config::load()?)  // app_state works with LocalApp too
+    App::builder()
+        .app_state(Config::load()?)
         .templates(embed_templates!("src/templates"))
         .command("complete", |m, ctx| {
             let id = m.get_one::<Uuid>("id").unwrap();
             store.complete(*id)?;  // &mut store works!
             Ok(Output::Silent)
-        }, "")
+        }, "")?
         .command("list", |m, ctx| {
-            // Even read-only handlers work with LocalApp
             Ok(Output::Render(store.list()))
-        }, "{{ items }}")
+        }, "{{ items }}")?
         .build()?
         .run(Cli::command(), std::env::args());
     Ok(())
 }
 ```
 
-**Key differences from `App`:**
+**Handler capabilities:**
 
-- `LocalApp::builder()` accepts `FnMut` closures (not just `Fn`)
+- `App::builder()` accepts `FnMut` closures
 - Handlers can capture `&mut` references to state
-- No `Send + Sync` requirement on handlers
-- `app.run()` takes `&mut self` instead of `&self`
-
-Use `LocalApp` when:
-- Your API has `&mut self` methods
-- You want to avoid `Arc<Mutex<_>>` wrappers
-- Your CLI is single-threaded (the common case)
-
-See [Handler Contract](../crates/dispatch/topics/handler-contract.md) for the full comparison.
+- The `Handler` trait uses `&mut self` for struct-based handlers
+- No `Send + Sync` requirements—CLI apps are single-threaded
 
 ## Appendix: Common Errors and Troubleshooting
 

@@ -7,6 +7,116 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.0.0] - 2026-02-03
+
+### Fixed
+
+- **Fixed command sequencing sensitivity (Late Binding)** - Refactored command dispatch to resolve dependencies (like `Theme`) at runtime rather than build time. This fixes an issue where configuring the theme after registering commands resulted in commands using the default theme (Issue #89).
+  - Updated internal `DispatchFn` signature to accept `&Theme` at runtime.
+  - Commands now correctly use the final configured theme regardless of registration order.
+  - Works with all registration methods: `.command()`, `.commands()` (dispatch! macro), and nested `.group()` calls.
+
+
+## [5.0.0] - 2026-02-03
+
+### Added
+
+- **New `standout-input` crate** - Declarative input collection from multiple sources with automatic fallback chains.
+
+  ```rust
+  use standout_input::{InputChain, ArgSource, StdinSource, EditorSource};
+
+  let message = InputChain::<String>::new()
+      .try_source(ArgSource::new("message"))
+      .try_source(StdinSource::new())
+      .try_source(EditorSource::new())
+      .resolve(&matches)?;
+  ```
+
+  **Core sources (always available):**
+  - `ArgSource`, `FlagSource` - CLI arguments and flags
+  - `StdinSource` - Piped stdin (skipped when terminal)
+  - `EnvSource` - Environment variables
+  - `ClipboardSource` - System clipboard (macOS/Linux)
+  - `DefaultSource<T>` - Fallback values
+
+  **Feature-gated sources:**
+  | Feature | Dependencies | Provides |
+  |---------|--------------|----------|
+  | `editor` (default) | tempfile, which | `EditorSource` - Opens $VISUAL/$EDITOR |
+  | `simple-prompts` (default) | none | `TextPromptSource`, `ConfirmPromptSource` |
+  | `inquire` | inquire (~29 deps) | Rich TUI: `InquireText`, `InquireConfirm`, `InquireSelect`, `InquireMultiSelect`, `InquirePassword`, `InquireEditor` |
+
+  **Features:**
+  - Chain-level validation with retry support for interactive sources
+  - Mock implementations for all sources (testable without real terminal/env)
+  - `resolve_with_source()` returns which source provided the input
+
+  See [Introduction to Input](crates/standout-input/docs/guides/intro-to-input.md) for the full guide.
+
+## [4.0.0] - 2026-02-02
+
+### Changed
+
+- **BREAKING: Unified `App` and `LocalApp` into single-threaded `App`** - The dual architecture has been removed in favor of a simpler, single-threaded design. CLI applications are fundamentally single-threaded (parse → run one handler → output → exit), so thread-safety bounds were unnecessary complexity.
+
+  **Removed types:**
+  - `LocalApp`, `LocalAppBuilder` (merged into `App`, `AppBuilder`)
+  - `LocalHandler` (merged into `Handler`)
+  - `Local`, `ThreadSafe` marker types
+  - `HandlerMode` trait
+
+  **Key changes:**
+  - `App` now uses `Rc<RefCell<...>>` instead of `Arc<...>`
+  - `Handler::handle()` takes `&mut self` instead of `&self`
+  - Handler functions use `FnMut` instead of `Fn`
+  - `App::builder()` no longer requires generic type parameter
+  - Removed all `Send + Sync` bounds from handler system
+
+  **Migration:**
+  ```rust
+  // Before
+  use standout::cli::{App, ThreadSafe, LocalApp, LocalHandler};
+  App::<ThreadSafe>::builder()
+      .command("list", handler, template)?
+      .build()?
+
+  // After
+  use standout::cli::{App, Handler};
+  App::builder()
+      .command("list", handler, template)?
+      .build()?
+
+  // Handler trait: &self → &mut self
+  impl Handler for MyHandler {
+      fn handle(&mut self, m: &ArgMatches, ctx: &CommandContext) -> HandlerResult<T> {
+          // ...
+      }
+  }
+  ```
+
+  This simplifies the API for the common case (single-threaded CLI apps) while supporting mutable handler state directly without `Arc<Mutex<_>>` wrappers.
+
+## [3.8.0] - 2026-02-02
+
+### Changed
+
+- **Piped content is now automatically plain text** - When using `pipe_to()`, `pipe_through()`, `pipe_to_clipboard()`, or custom `PipeTarget` implementations, ANSI escape codes are automatically stripped from the piped content. This matches standard shell semantics where `command | other_command` receives unformatted output.
+
+  ```rust
+  // Template with styled output
+  cfg.template("[bold]{{ title }}[/bold]: [green]{{ count }}[/green]")
+     .pipe_through("jq .")
+
+  // Terminal sees formatted output with colors
+  // jq receives plain text: "Report: 42"
+  ```
+
+  **Implementation details:**
+  - `TextOutput` struct now has both `formatted` (ANSI codes for terminal) and `raw` (plain text for piping) fields
+  - All piping methods use `raw` for external commands while returning `formatted` for terminal display
+  - Uses existing `OutputMode::Text` rendering path to strip style tags cleanly
+
 ## [3.7.0] - 2026-01-31
 
 ## [3.6.1] - 2026-01-31
@@ -250,7 +360,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **BREAKING: `CommandContext` now includes `app_state` field** - The struct now has three fields: `command_path`, `app_state`, and `extensions`. Code that constructs `CommandContext` manually needs to include `app_state: Arc::new(Extensions::new())` or use `..Default::default()`.
+- **BREAKING: `CommandContext` now includes `app_state` field** - The struct now has three fields: `command_path`, `app_state`, and `extensions`. Code that constructs `CommandContext` manually needs to include `app_state: Rc::new(Extensions::new())` or use `..Default::default()`.
 
 ## [3.3.0] - 2026-01-30
 
@@ -896,7 +1006,11 @@ let output = render_with_output(template, &data, &theme, OutputMode::Term)?;
   - Command handler system with `dispatch_from` convenience method
   - Archive variant support in clap integration
 
-[Unreleased]: https://github.com/arthur-debert/standout/compare/standout-v3.7.0...HEAD
+[Unreleased]: https://github.com/arthur-debert/standout/compare/standout-v6.0.0...HEAD
+[6.0.0]: https://github.com/arthur-debert/standout/compare/standout-v5.0.0...standout-v6.0.0
+[5.0.0]: https://github.com/arthur-debert/standout/compare/standout-v4.0.0...standout-v5.0.0
+[4.0.0]: https://github.com/arthur-debert/standout/compare/standout-v3.8.0...standout-v4.0.0
+[3.8.0]: https://github.com/arthur-debert/standout/compare/standout-v3.7.0...standout-v3.8.0
 [3.7.0]: https://github.com/arthur-debert/standout/compare/standout-v3.6.1...standout-v3.7.0
 [3.6.1]: https://github.com/arthur-debert/standout/compare/standout-v3.6.0...standout-v3.6.1
 [3.6.0]: https://github.com/arthur-debert/standout/compare/standout-v3.5.0...standout-v3.6.0
