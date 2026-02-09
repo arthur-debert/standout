@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.0.1] - 2026-02-09
+
 ### Fixed
 
 - **Fixed `col` filter truncating content with BBCode markup tags** (Issue #98) - The `col` filter (and related filters `display_width`, `pad_left`, `pad_right`, `pad_center`, `truncate_at`) now correctly treats BBCode-style tags as zero-width when measuring and formatting text. Previously, tags like `[additions]+32[/additions]` were counted as visible characters, causing premature truncation.
@@ -1013,7 +1015,8 @@ let output = render_with_output(template, &data, &theme, OutputMode::Term)?;
   - Command handler system with `dispatch_from` convenience method
   - Archive variant support in clap integration
 
-[Unreleased]: https://github.com/arthur-debert/standout/compare/standout-v6.0.0...HEAD
+[Unreleased]: https://github.com/arthur-debert/standout/compare/standout-v6.0.1...HEAD
+[6.0.1]: https://github.com/arthur-debert/standout/compare/standout-v6.0.0...standout-v6.0.1
 [6.0.0]: https://github.com/arthur-debert/standout/compare/standout-v5.0.0...standout-v6.0.0
 [5.0.0]: https://github.com/arthur-debert/standout/compare/standout-v4.0.0...standout-v5.0.0
 [4.0.0]: https://github.com/arthur-debert/standout/compare/standout-v3.8.0...standout-v4.0.0
