@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Fixed `col` filter truncating content with BBCode markup tags** (Issue #98) - The `col` filter (and related filters `display_width`, `pad_left`, `pad_right`, `pad_center`, `truncate_at`) now correctly treats BBCode-style tags as zero-width when measuring and formatting text. Previously, tags like `[additions]+32[/additions]` were counted as visible characters, causing premature truncation.
+  - Added `strip_tags()` convenience function to `standout-bbparser` for stripping all BBCode tags from text.
+  - Width measurement uses `strip_tags()` to compute visible width before formatting.
+  - Padding preserves BBCode tags in output; truncation operates on stripped text.
+
 ## [6.0.0] - 2026-02-03
 
 ### Fixed

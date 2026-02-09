@@ -189,6 +189,28 @@ impl<'a> IntoIterator for &'a UnknownTagErrors {
     }
 }
 
+/// Strips all BBCode-style tags from input, returning only visible content.
+///
+/// This is a convenience function that creates a parser in [`TagTransform::Remove`] mode
+/// with [`UnknownTagBehavior::Strip`] to remove all tags (both known and unknown).
+///
+/// Useful for measuring the visible width of text that may contain inline markup.
+///
+/// # Example
+///
+/// ```rust
+/// use standout_bbparser::strip_tags;
+///
+/// assert_eq!(strip_tags("[bold]hello[/bold]"), "hello");
+/// assert_eq!(strip_tags("[additions]+32[/additions]/[deletions]-0[/deletions]/32"), "+32/-0/32");
+/// assert_eq!(strip_tags("no tags here"), "no tags here");
+/// ```
+pub fn strip_tags(input: &str) -> String {
+    let parser = BBParser::new(HashMap::new(), TagTransform::Remove)
+        .unknown_behavior(UnknownTagBehavior::Strip);
+    parser.parse(input)
+}
+
 /// A BBCode-style tag parser for terminal styling.
 ///
 /// The parser processes `[tag]content[/tag]` patterns and transforms them
@@ -733,6 +755,45 @@ mod tests {
         styles.insert("my_style".to_string(), Style::new().green());
         styles.insert("style-with-dash".to_string(), Style::new().yellow());
         styles
+    }
+
+    // ==================== strip_tags Tests ====================
+
+    mod strip_tags_tests {
+        use super::super::strip_tags;
+
+        #[test]
+        fn strips_known_style_tags() {
+            assert_eq!(strip_tags("[bold]hello[/bold]"), "hello");
+        }
+
+        #[test]
+        fn strips_unknown_tags() {
+            assert_eq!(strip_tags("[additions]+32[/additions]"), "+32");
+        }
+
+        #[test]
+        fn strips_multiple_tags() {
+            assert_eq!(
+                strip_tags("[additions]+32[/additions]/[deletions]-0[/deletions]/32"),
+                "+32/-0/32"
+            );
+        }
+
+        #[test]
+        fn plain_text_unchanged() {
+            assert_eq!(strip_tags("no tags here"), "no tags here");
+        }
+
+        #[test]
+        fn empty_string() {
+            assert_eq!(strip_tags(""), "");
+        }
+
+        #[test]
+        fn nested_tags() {
+            assert_eq!(strip_tags("[a][b]text[/b][/a]"), "text");
+        }
     }
 
     // ==================== TagTransform::Keep Tests ====================
