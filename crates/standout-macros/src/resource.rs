@@ -601,6 +601,24 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
         )
     })?;
 
+    // Validate shortcut field names against actual struct fields
+    let all_field_names: Vec<String> = fields.iter().map(|f| f.ident.to_string()).collect();
+    for shortcut in &shortcuts {
+        for (field_name, _value) in &shortcut.sets {
+            if !all_field_names.contains(field_name) {
+                return Err(Error::new(
+                    input.span(),
+                    format!(
+                        "shortcut '{}' references unknown field '{}'. Available fields: {}",
+                        shortcut.name,
+                        field_name,
+                        all_field_names.join(", ")
+                    ),
+                ));
+            }
+        }
+    }
+
     // Generate names
     let commands_enum_name = format_ident!("{}Commands", struct_name);
     let handlers_module_name = format_ident!("__{}_resource_handlers", object_name);
@@ -1126,19 +1144,19 @@ pub fn resource_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                     let updated_count = updated.len();
                     let error_count = errors.len();
 
-                    let mut result = ::#crate_ident::views::list_view(updated)
+                    let mut builder = ::#crate_ident::views::list_view(updated)
                         .total_count(updated_count)
-                        .tabular_spec(<#struct_name as ::#crate_ident::tabular::Tabular>::tabular_spec())
-                        .build();
+                        .tabular_spec(<#struct_name as ::#crate_ident::tabular::Tabular>::tabular_spec());
 
                     if error_count == 0 {
-                        result = result.success(format!("{} {}(s) updated", updated_count, #object_name));
+                        builder = builder.success(format!("{} {}(s) updated", updated_count, #object_name));
                     } else {
-                        result = result.info(format!("{} updated, {} failed", updated_count, error_count));
+                        builder = builder.info(format!("{} updated, {} failed", updated_count, error_count));
                     }
                     for err in errors {
-                        result = result.warning(err);
+                        builder = builder.warning(err);
                     }
+                    let result = builder.build();
 
                     Ok(::#crate_ident::cli::Output::Render(
                         ::serde_json::to_value(result).map_err(|e| ::#crate_ident::cli::ValidationError::general(format!("Serialization failed: {}", e)))?

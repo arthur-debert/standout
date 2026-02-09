@@ -164,7 +164,7 @@ impl<T> DetailViewBuilder<T> {
     /// Related items are displayed in a separate section keyed by their
     /// relationship name (e.g., "author", "assignees", "parent_task").
     pub fn related(mut self, name: impl Into<String>, value: impl Serialize) -> Self {
-        let json_value = serde_json::to_value(value).unwrap_or(serde_json::Value::Null);
+        let json_value = serde_json::to_value(&value).expect("related value must be serializable");
         self.related.insert(name.into(), json_value);
         self
     }
