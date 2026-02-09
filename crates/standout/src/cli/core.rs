@@ -212,7 +212,7 @@ impl AppCore {
                         "csv",
                     ])
                     .default_value("auto")
-                    .help("Output mode: auto, term, text, term-debug, json, yaml, xml, or csv"),
+                    .help("Output format"),
             );
         }
 

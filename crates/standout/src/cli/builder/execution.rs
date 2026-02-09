@@ -389,7 +389,7 @@ impl AppBuilder {
                     .global(true)
                     .value_parser(["auto", "term", "text", "term-debug", "json"])
                     .default_value("auto")
-                    .help("Output mode: auto, term, text, term-debug, or json"),
+                    .help("Output format"),
             );
         }
 
