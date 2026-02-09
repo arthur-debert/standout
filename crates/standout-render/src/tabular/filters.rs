@@ -42,6 +42,7 @@
 //! ```
 
 use minijinja::{Environment, Value};
+use standout_bbparser::strip_tags;
 
 use super::decorator::{BorderStyle, Table};
 use super::formatter::TabularFormatter;
@@ -119,21 +120,49 @@ pub fn register_tabular_filters(env: &mut Environment<'static>) {
     );
 
     // pad_left filter: {{ value | pad_left(width) }}
+    // BBCode tags are stripped for width measurement; padding preserves tags.
     env.add_filter("pad_left", |value: Value, width: usize| -> String {
-        pad_left(&value.to_string(), width)
+        let text = value.to_string();
+        let stripped = strip_tags(&text);
+        let visible_width = display_width(&stripped);
+        if visible_width >= width {
+            text
+        } else {
+            format!("{}{}", " ".repeat(width - visible_width), text)
+        }
     });
 
     // pad_right filter: {{ value | pad_right(width) }}
+    // BBCode tags are stripped for width measurement; padding preserves tags.
     env.add_filter("pad_right", |value: Value, width: usize| -> String {
-        pad_right(&value.to_string(), width)
+        let text = value.to_string();
+        let stripped = strip_tags(&text);
+        let visible_width = display_width(&stripped);
+        if visible_width >= width {
+            text
+        } else {
+            format!("{}{}", text, " ".repeat(width - visible_width))
+        }
     });
 
     // pad_center filter: {{ value | pad_center(width) }}
+    // BBCode tags are stripped for width measurement; padding preserves tags.
     env.add_filter("pad_center", |value: Value, width: usize| -> String {
-        pad_center(&value.to_string(), width)
+        let text = value.to_string();
+        let stripped = strip_tags(&text);
+        let visible_width = display_width(&stripped);
+        if visible_width >= width {
+            text
+        } else {
+            let padding = width - visible_width;
+            let left_pad = padding / 2;
+            let right_pad = padding - left_pad;
+            format!("{}{}{}", " ".repeat(left_pad), text, " ".repeat(right_pad))
+        }
     });
 
     // truncate_at filter: {{ value | truncate_at(width, "middle") }}
+    // BBCode tags are stripped before truncation.
     env.add_filter(
         "truncate_at",
         |value: Value,
@@ -142,20 +171,23 @@ pub fn register_tabular_filters(env: &mut Environment<'static>) {
          ellipsis: Option<String>|
          -> String {
             let text = value.to_string();
+            let stripped = strip_tags(&text);
             let pos = position.as_deref().unwrap_or("end");
             let ell = ellipsis.as_deref().unwrap_or("…");
 
             match pos {
-                "start" => truncate_start(&text, width, ell),
-                "middle" => truncate_middle(&text, width, ell),
-                _ => truncate_end(&text, width, ell),
+                "start" => truncate_start(&stripped, width, ell),
+                "middle" => truncate_middle(&stripped, width, ell),
+                _ => truncate_end(&stripped, width, ell),
             }
         },
     );
 
     // display_width filter: {{ value | display_width }}
+    // BBCode tags are stripped before measuring width.
     env.add_filter("display_width", |value: Value| -> usize {
-        display_width(&value.to_string())
+        let stripped = strip_tags(&value.to_string());
+        display_width(&stripped)
     });
 
     // style_as filter: {{ value | style_as("error") }} => [error]value[/error]
@@ -582,29 +614,48 @@ pub fn table_from_type<T: Tabular>(width: usize, border: BorderStyle, use_header
 }
 
 /// Format a value for a column with specified width, alignment, and truncation.
+///
+/// BBCode-style markup tags (e.g., `[bold]...[/bold]`) are treated as zero-width:
+/// width measurement is done on the stripped text, and tags are preserved in the
+/// output when padding. When truncation is needed, tags are stripped first since
+/// the visible content exceeds the available width.
 fn format_col(text: &str, width: usize, align: &str, truncate: &str, ellipsis: &str) -> String {
     if width == 0 {
         return String::new();
     }
 
-    let current_width = display_width(text);
+    // Strip BBCode tags to measure visible width
+    let stripped = strip_tags(text);
+    let visible_width = display_width(&stripped);
 
-    // Truncate if needed
-    let truncated = if current_width > width {
-        match truncate {
-            "start" => truncate_start(text, width, ellipsis),
-            "middle" => truncate_middle(text, width, ellipsis),
-            _ => truncate_end(text, width, ellipsis),
+    if visible_width > width {
+        // Content is genuinely too wide — truncate the stripped text
+        let truncated = match truncate {
+            "start" => truncate_start(&stripped, width, ellipsis),
+            "middle" => truncate_middle(&stripped, width, ellipsis),
+            _ => truncate_end(&stripped, width, ellipsis),
+        };
+        // Pad the truncated (tag-free) text
+        match align {
+            "right" => pad_left(&truncated, width),
+            "center" => pad_center(&truncated, width),
+            _ => pad_right(&truncated, width),
         }
     } else {
-        text.to_string()
-    };
-
-    // Pad to width
-    match align {
-        "right" => pad_left(&truncated, width),
-        "center" => pad_center(&truncated, width),
-        _ => pad_right(&truncated, width),
+        // Content fits — pad the original text, preserving BBCode tags
+        let padding = width - visible_width;
+        if padding == 0 {
+            return text.to_string();
+        }
+        match align {
+            "right" => format!("{}{}", " ".repeat(padding), text),
+            "center" => {
+                let left_pad = padding / 2;
+                let right_pad = padding - left_pad;
+                format!("{}{}{}", " ".repeat(left_pad), text, " ".repeat(right_pad))
+            }
+            _ => format!("{}{}", text, " ".repeat(padding)),
+        }
     }
 }
 
@@ -904,6 +955,175 @@ mod tests {
             .render(context!(value => "Name"))
             .unwrap();
         assert_eq!(result, "[header]Name      [/header]");
+    }
+
+    // ============================================================================
+    // BBCode-aware filter tests (Issue #98)
+    // ============================================================================
+
+    #[test]
+    fn filter_col_bbcode_no_truncation() {
+        // The exact scenario from issue #98
+        let mut env = setup_env();
+        env.add_template("test", "{{ value | col(16, align='center') }}")
+            .unwrap();
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(context!(value => "[additions]+32[/additions]/[deletions]-0[/deletions]/32"))
+            .unwrap();
+        // Visible text is "+32/-0/32" (9 chars), centered in 16
+        // Tags should be preserved, not counted toward width
+        assert!(result.contains("+32"));
+        assert!(result.contains("-0"));
+        assert!(result.contains("[additions]"));
+        assert!(result.contains("[/deletions]"));
+        // Total visible width (after stripping tags) should be 16
+        let stripped = standout_bbparser::strip_tags(&result);
+        assert_eq!(display_width(&stripped), 16);
+    }
+
+    #[test]
+    fn filter_col_bbcode_padding_left_align() {
+        let mut env = setup_env();
+        env.add_template("test", "{{ value | col(10) }}").unwrap();
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(context!(value => "[bold]hi[/bold]"))
+            .unwrap();
+        // Visible "hi" = 2 chars, padded to 10, tags preserved
+        assert!(result.contains("[bold]hi[/bold]"));
+        let stripped = standout_bbparser::strip_tags(&result);
+        assert_eq!(stripped, "hi        ");
+        assert_eq!(display_width(&stripped), 10);
+    }
+
+    #[test]
+    fn filter_col_bbcode_padding_right_align() {
+        let mut env = setup_env();
+        env.add_template("test", "{{ value | col(10, align='right') }}")
+            .unwrap();
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(context!(value => "[bold]hi[/bold]"))
+            .unwrap();
+        // Right-aligned: spaces before the tagged text
+        assert!(result.starts_with("        "));
+        assert!(result.contains("[bold]hi[/bold]"));
+        let stripped = standout_bbparser::strip_tags(&result);
+        assert_eq!(stripped, "        hi");
+    }
+
+    #[test]
+    fn filter_col_bbcode_truncation() {
+        let mut env = setup_env();
+        env.add_template("test", "{{ value | col(5) }}").unwrap();
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(context!(value => "[bold]hello world[/bold]"))
+            .unwrap();
+        // Visible "hello world" = 11 chars, truncated to 5
+        let stripped = standout_bbparser::strip_tags(&result);
+        assert_eq!(display_width(&stripped), 5);
+    }
+
+    #[test]
+    fn filter_col_bbcode_exact_fit() {
+        let mut env = setup_env();
+        env.add_template("test", "{{ value | col(5) }}").unwrap();
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(context!(value => "[bold]hello[/bold]"))
+            .unwrap();
+        // Visible "hello" = 5 chars, exact fit, tags preserved
+        assert_eq!(result, "[bold]hello[/bold]");
+    }
+
+    #[test]
+    fn filter_col_no_tags_unchanged() {
+        // Ensure plain text still works correctly
+        let mut env = setup_env();
+        env.add_template("test", "{{ value | col(10) }}").unwrap();
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(context!(value => "hello"))
+            .unwrap();
+        assert_eq!(result, "hello     ");
+    }
+
+    #[test]
+    fn filter_display_width_bbcode() {
+        let mut env = setup_env();
+        env.add_template("test", "{{ value | display_width }}")
+            .unwrap();
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(context!(value => "[bold]hello[/bold]"))
+            .unwrap();
+        assert_eq!(result, "5");
+    }
+
+    #[test]
+    fn filter_pad_left_bbcode() {
+        let mut env = setup_env();
+        env.add_template("test", "{{ value | pad_left(8) }}")
+            .unwrap();
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(context!(value => "[bold]hi[/bold]"))
+            .unwrap();
+        assert!(result.starts_with("      "));
+        assert!(result.contains("[bold]hi[/bold]"));
+    }
+
+    #[test]
+    fn filter_pad_right_bbcode() {
+        let mut env = setup_env();
+        env.add_template("test", "{{ value | pad_right(8) }}")
+            .unwrap();
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(context!(value => "[bold]hi[/bold]"))
+            .unwrap();
+        assert!(result.contains("[bold]hi[/bold]"));
+        let stripped = standout_bbparser::strip_tags(&result);
+        assert_eq!(display_width(&stripped), 8);
+    }
+
+    #[test]
+    fn filter_pad_center_bbcode() {
+        let mut env = setup_env();
+        env.add_template("test", "{{ value | pad_center(8) }}")
+            .unwrap();
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(context!(value => "[bold]hi[/bold]"))
+            .unwrap();
+        assert!(result.contains("[bold]hi[/bold]"));
+        let stripped = standout_bbparser::strip_tags(&result);
+        assert_eq!(display_width(&stripped), 8);
+    }
+
+    #[test]
+    fn filter_truncate_at_bbcode() {
+        let mut env = setup_env();
+        env.add_template("test", "{{ value | truncate_at(8) }}")
+            .unwrap();
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(context!(value => "[bold]hello world[/bold]"))
+            .unwrap();
+        assert_eq!(display_width(&result), 8);
     }
 
     // ============================================================================
