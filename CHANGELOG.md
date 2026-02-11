@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.1.0] - 2026-02-11
+
 ### Added
 
 - **Subcommand group support in help rendering** (Issue #102) — CLIs with many commands can now organize them into titled sections in help output instead of a single flat "COMMANDS" list.
@@ -1063,7 +1065,8 @@ let output = render_with_output(template, &data, &theme, OutputMode::Term)?;
   - Command handler system with `dispatch_from` convenience method
   - Archive variant support in clap integration
 
-[Unreleased]: https://github.com/arthur-debert/standout/compare/standout-v6.0.2...HEAD
+[Unreleased]: https://github.com/arthur-debert/standout/compare/standout-v6.1.0...HEAD
+[6.1.0]: https://github.com/arthur-debert/standout/compare/standout-v6.0.2...standout-v6.1.0
 [6.0.2]: https://github.com/arthur-debert/standout/compare/standout-v6.0.1...standout-v6.0.2
 [6.0.1]: https://github.com/arthur-debert/standout/compare/standout-v6.0.0...standout-v6.0.1
 [6.0.0]: https://github.com/arthur-debert/standout/compare/standout-v5.0.0...standout-v6.0.0
