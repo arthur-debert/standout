@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Subcommand group support in help rendering** (Issue #102) — CLIs with many commands can now organize them into titled sections in help output instead of a single flat "COMMANDS" list.
+
+  ```rust
+  use standout::cli::{App, CommandGroup, HelpConfig};
+
+  let groups = vec![
+      CommandGroup {
+          title: "Project".into(),
+          help: Some("Commands for managing projects".into()),
+          commands: vec![Some("init".into()), Some("build".into()), None, Some("clean".into())],
+      },
+      CommandGroup {
+          title: "Config".into(),
+          help: None,
+          commands: vec![Some("get".into()), Some("set".into())],
+      },
+  ];
+
+  App::builder()
+      .command_groups(groups)
+      .command("init", handler, template)?
+      // ...
+      .build()?
+  ```
+
+  **Features:**
+  - `CommandGroup` struct with `title`, optional `help` text, and ordered command list
+  - `None` entries in `commands` produce blank-line separators between commands
+  - Ungrouped commands auto-append to an "Other" group
+  - Each group renders its own uppercased header (e.g., `PROJECT`, `CONFIG`)
+  - `validate_command_groups()` for test-time validation of group references
+  - Full `AppBuilder` integration via `.command_groups()` method
+  - Backward-compatible: no groups configured produces identical "COMMANDS" output
+
+  See [Help System](docs/topics/standout-help.md) for full documentation.
+
 ## [6.0.2] - 2026-02-09
 
 ### Fixed
