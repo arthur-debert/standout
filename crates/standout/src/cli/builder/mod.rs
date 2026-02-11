@@ -43,6 +43,7 @@ use super::app::App;
 use super::dispatch::DispatchFn;
 use super::group::CommandRecipe;
 use super::handler::Extensions;
+use super::help::CommandGroup;
 use super::hooks::Hooks;
 
 /// Stores a pending command recipe along with its resolved template.
@@ -123,6 +124,9 @@ pub struct AppBuilder {
     ///
     /// If not provided, a default MiniJinja engine will be created.
     pub(crate) template_engine: Rc<Box<dyn standout_render::template::TemplateEngine>>,
+
+    /// Command groups for organized help display.
+    pub(crate) help_command_groups: Option<Vec<CommandGroup>>,
 }
 
 impl Default for AppBuilder {
@@ -156,6 +160,7 @@ impl AppBuilder {
             include_framework_styles: true,
             app_state: Rc::new(Extensions::new()),
             template_engine: Rc::new(Box::new(standout_render::template::MiniJinjaEngine::new())),
+            help_command_groups: None,
         }
     }
 
@@ -400,6 +405,7 @@ impl AppBuilder {
             registry: self.registry,
             commands,
             expected_args,
+            help_command_groups: self.help_command_groups,
         })
     }
 

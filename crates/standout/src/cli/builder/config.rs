@@ -387,6 +387,40 @@ impl AppBuilder {
         self.include_framework_styles = include;
         self
     }
+
+    /// Sets command groups for organized help display.
+    ///
+    /// When set, subcommands in help output are organized into the specified
+    /// groups instead of a single "Commands" section. Commands not listed in
+    /// any group are auto-appended to an "Other" group.
+    ///
+    /// Use [`validate_command_groups`](crate::cli::validate_command_groups) in
+    /// a `#[test]` to catch typos and stale configs.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use standout::cli::{App, CommandGroup};
+    ///
+    /// App::builder()
+    ///     .command_groups(vec![
+    ///         CommandGroup {
+    ///             title: "Commands".into(),
+    ///             help: None,
+    ///             commands: vec![Some("init".into()), Some("list".into())],
+    ///         },
+    ///         CommandGroup {
+    ///             title: "Danger Zone".into(),
+    ///             help: Some("These commands are destructive.".into()),
+    ///             commands: vec![Some("delete".into()), Some("purge".into())],
+    ///         },
+    ///     ])
+    ///     .build()?;
+    /// ```
+    pub fn command_groups(mut self, groups: Vec<super::super::help::CommandGroup>) -> Self {
+        self.help_command_groups = Some(groups);
+        self
+    }
 }
 
 #[cfg(test)]

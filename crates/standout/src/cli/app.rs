@@ -16,7 +16,7 @@ use super::dispatch::{
     dispatch, extract_command_path, get_deepest_matches, has_subcommand, insert_default_command,
     DispatchFn, DispatchOutput,
 };
-use super::help::{render_help, render_help_with_topics, HelpConfig};
+use super::help::{render_help, render_help_with_topics, CommandGroup, HelpConfig};
 use super::hooks::Hooks;
 use super::result::HelpResult;
 use crate::cli::handler::{CommandContext, HandlerResult, Output as HandlerOutput, RunResult};
@@ -65,6 +65,8 @@ pub struct App {
     pub(crate) commands: HashMap<String, DispatchFn>,
     /// Expected arguments for each command (for verification).
     pub(crate) expected_args: HashMap<String, Vec<ExpectedArg>>,
+    /// Command groups for organized help display.
+    pub(crate) help_command_groups: Option<Vec<CommandGroup>>,
 }
 
 impl App {
@@ -88,6 +90,7 @@ impl App {
             registry: TopicRegistry::new(),
             commands: HashMap::new(),
             expected_args: HashMap::new(),
+            help_command_groups: None,
         }
     }
 
@@ -98,6 +101,7 @@ impl App {
             registry,
             commands: HashMap::new(),
             expected_args: HashMap::new(),
+            help_command_groups: None,
         }
     }
 
@@ -549,6 +553,7 @@ impl App {
         let config = HelpConfig {
             output_mode: Some(output_mode),
             theme: self.core.theme().cloned(),
+            command_groups: self.help_command_groups.clone(),
             ..Default::default()
         };
 

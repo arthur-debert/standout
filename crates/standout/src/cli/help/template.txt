@@ -2,15 +2,20 @@
 
 [header]USAGE[/header]
   [usage]{{ usage }}[/usage]
-{%- if subcommands %}
-
-[header]COMMANDS[/header]
 {%- for group in subcommands %}
+
+[header]{{ group.title | upper }}[/header]
+{%- if group.help %}
+  [desc]{{ group.help }}[/desc]
+{% endif %}
 {%- for cmd in group.commands %}
+{%- if cmd.separator %}
+{{ "" }}
+{%- else %}
   [item]{{ cmd.name }}[/item]:{{ cmd.padding }}[desc]{{ cmd.about }}[/desc]
-{%- endfor %}
-{%- endfor %}
 {%- endif %}
+{%- endfor %}
+{%- endfor %}
 {%- if options %}
 
 [header]OPTIONS[/header]

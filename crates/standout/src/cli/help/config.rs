@@ -1,7 +1,28 @@
 //! Help rendering configuration.
 
+use crate::setup::SetupError;
 use crate::{OutputMode, Theme};
+use clap::Command;
 use console::Style;
+use std::collections::HashSet;
+
+/// Defines a group of subcommands for help display.
+///
+/// When provided via [`HelpConfig::command_groups`], subcommands are organized
+/// into named sections instead of appearing in a single "Commands" group.
+///
+/// Use `None` entries in [`commands`](CommandGroup::commands) to insert blank
+/// line separators for visual sub-grouping within a section.
+#[derive(Debug, Clone, Default)]
+pub struct CommandGroup {
+    /// Section header (e.g., "Commands", "Per Pad(s)").
+    pub title: String,
+    /// Optional help text displayed below the title, before the command list.
+    pub help: Option<String>,
+    /// Command names in display order.
+    /// Use `None` to insert a blank line separator between commands.
+    pub commands: Vec<Option<String>>,
+}
 
 /// Configuration for clap help rendering.
 #[derive(Debug, Clone, Default)]
@@ -12,6 +33,9 @@ pub struct HelpConfig {
     pub theme: Option<Theme>,
     /// Output mode. If None, uses Auto (auto-detects).
     pub output_mode: Option<OutputMode>,
+    /// Subcommand grouping for help display. If None, all subcommands
+    /// appear in a single "Commands" group (default behavior).
+    pub command_groups: Option<Vec<CommandGroup>>,
 }
 
 /// Returns the default theme for help rendering.
@@ -23,4 +47,135 @@ pub fn default_help_theme() -> Theme {
         .add("usage", Style::new())
         .add("example", Style::new())
         .add("about", Style::new())
+}
+
+/// Validates command groups against the actual clap Command tree.
+///
+/// Checks for phantom references: command names in groups that don't exist
+/// as subcommands in the Command. Ungrouped commands are OK — they will be
+/// auto-appended to an "Other" group at render time.
+///
+/// Call this from a `#[test]` to catch misconfigurations in CI.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// #[test]
+/// fn test_help_groups_match_commands() {
+///     let cmd = Cli::command();
+///     let groups = my_command_groups();
+///     validate_command_groups(&cmd, &groups).unwrap();
+/// }
+/// ```
+pub fn validate_command_groups(cmd: &Command, groups: &[CommandGroup]) -> Result<(), SetupError> {
+    let known: HashSet<&str> = cmd
+        .get_subcommands()
+        .filter(|s| !s.is_hide_set())
+        .map(|s| s.get_name())
+        .collect();
+
+    let mut phantoms = Vec::new();
+    for group in groups {
+        for name in group.commands.iter().flatten() {
+            if !known.contains(name.as_str()) {
+                phantoms.push(format!(
+                    "group \"{}\": command \"{}\" does not exist",
+                    group.title, name
+                ));
+            }
+        }
+    }
+
+    if phantoms.is_empty() {
+        Ok(())
+    } else {
+        Err(SetupError::Config(format!(
+            "command group validation failed:\n  {}",
+            phantoms.join("\n  ")
+        )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_ok() {
+        let cmd = Command::new("root")
+            .subcommand(Command::new("init"))
+            .subcommand(Command::new("list"));
+
+        let groups = vec![CommandGroup {
+            title: "Main".into(),
+            help: None,
+            commands: vec![Some("init".into()), Some("list".into())],
+        }];
+
+        assert!(validate_command_groups(&cmd, &groups).is_ok());
+    }
+
+    #[test]
+    fn test_validate_phantom_reference() {
+        let cmd = Command::new("root").subcommand(Command::new("init"));
+
+        let groups = vec![CommandGroup {
+            title: "Main".into(),
+            help: None,
+            commands: vec![Some("init".into()), Some("nonexistent".into())],
+        }];
+
+        let err = validate_command_groups(&cmd, &groups).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("nonexistent"));
+        assert!(msg.contains("does not exist"));
+    }
+
+    #[test]
+    fn test_validate_ungrouped_commands_ok() {
+        let cmd = Command::new("root")
+            .subcommand(Command::new("init"))
+            .subcommand(Command::new("list"))
+            .subcommand(Command::new("extra"));
+
+        let groups = vec![CommandGroup {
+            title: "Main".into(),
+            help: None,
+            commands: vec![Some("init".into())],
+        }];
+
+        assert!(validate_command_groups(&cmd, &groups).is_ok());
+    }
+
+    #[test]
+    fn test_validate_with_separators() {
+        let cmd = Command::new("root")
+            .subcommand(Command::new("a"))
+            .subcommand(Command::new("b"));
+
+        let groups = vec![CommandGroup {
+            title: "Main".into(),
+            help: None,
+            commands: vec![Some("a".into()), None, Some("b".into())],
+        }];
+
+        assert!(validate_command_groups(&cmd, &groups).is_ok());
+    }
+
+    #[test]
+    fn test_validate_hidden_commands_not_checked() {
+        let cmd = Command::new("root")
+            .subcommand(Command::new("visible"))
+            .subcommand(Command::new("hidden").hide(true));
+
+        let groups = vec![CommandGroup {
+            title: "Main".into(),
+            help: None,
+            commands: vec![Some("visible".into()), Some("hidden".into())],
+        }];
+
+        let err = validate_command_groups(&cmd, &groups).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("hidden"));
+    }
 }

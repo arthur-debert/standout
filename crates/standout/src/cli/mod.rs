@@ -143,7 +143,10 @@ pub use group::{CommandConfig, GroupBuilder};
 pub use result::HelpResult;
 
 // Re-export help types
-pub use help::{default_help_theme, render_help, render_help_with_topics, HelpConfig};
+pub use help::{
+    default_help_theme, render_help, render_help_with_topics, validate_command_groups,
+    CommandGroup, HelpConfig,
+};
 
 // Re-export handler types
 pub use handler::{CommandContext, FnHandler, Handler, HandlerResult, Output, RunResult};
