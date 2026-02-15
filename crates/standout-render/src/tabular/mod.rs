@@ -156,5 +156,5 @@ pub use types::{
 // Re-export utility functions
 pub use util::{
     display_width, pad_center, pad_left, pad_right, truncate_end, truncate_middle, truncate_start,
-    wrap, wrap_indent,
+    visible_width, wrap, wrap_indent,
 };

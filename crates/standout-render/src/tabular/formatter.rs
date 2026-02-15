@@ -49,7 +49,7 @@ use super::types::{
 };
 use super::util::{
     display_width, pad_center, pad_left, pad_right, truncate_end, truncate_middle, truncate_start,
-    wrap_indent,
+    visible_width, wrap_indent,
 };
 
 /// Formats table rows according to a specification.
@@ -802,6 +802,8 @@ fn format_cell(value: &str, width: usize, col: &Column) -> String {
 /// Format a value with the given width, alignment, overflow, and optional style.
 ///
 /// This is the core formatting function used by both regular cells and sub-cells.
+/// It correctly handles BBCode tags in `value`: tags are stripped for width
+/// measurement and truncation, but preserved in the output when the content fits.
 fn format_value(
     value: &str,
     width: usize,
@@ -813,47 +815,48 @@ fn format_value(
         return String::new();
     }
 
-    let current_width = display_width(value);
+    let stripped = standout_bbparser::strip_tags(value);
+    let current_width = display_width(&stripped);
 
-    // Handle overflow
-    let processed = if current_width > width {
-        match overflow {
+    if current_width > width {
+        // Content overflows — truncate the stripped text (tags are lost)
+        let truncated = match overflow {
             Overflow::Truncate { at, marker } => match at {
-                TruncateAt::End => truncate_end(value, width, marker),
-                TruncateAt::Start => truncate_start(value, width, marker),
-                TruncateAt::Middle => truncate_middle(value, width, marker),
+                TruncateAt::End => truncate_end(&stripped, width, marker),
+                TruncateAt::Start => truncate_start(&stripped, width, marker),
+                TruncateAt::Middle => truncate_middle(&stripped, width, marker),
             },
-            Overflow::Clip => {
-                // Hard cut with no marker
-                truncate_end(value, width, "")
-            }
+            Overflow::Clip => truncate_end(&stripped, width, ""),
             Overflow::Expand => {
-                // Don't truncate, let it overflow
-                value.to_string()
+                // Don't truncate — pad is also skipped below
+                return apply_style(value, style);
             }
             Overflow::Wrap { .. } => {
-                // For single-line format_value, truncate as fallback
-                // Multi-line wrapping is handled by format_cell_lines
-                truncate_end(value, width, "…")
+                // Single-line fallback; multi-line wrapping handled by format_cell_lines
+                truncate_end(&stripped, width, "…")
             }
-        }
-    } else {
-        value.to_string()
-    };
+        };
 
-    // Pad to width (skip if Expand mode overflowed)
-    let padded = if matches!(overflow, Overflow::Expand) && current_width > width {
-        processed
+        let padded = match align {
+            Align::Left => pad_right(&truncated, width),
+            Align::Right => pad_left(&truncated, width),
+            Align::Center => pad_center(&truncated, width),
+        };
+        apply_style(&padded, style)
     } else {
-        match align {
-            Align::Left => pad_right(&processed, width),
-            Align::Right => pad_left(&processed, width),
-            Align::Center => pad_center(&processed, width),
-        }
-    };
-
-    // Apply style wrapping
-    apply_style(&padded, style)
+        // Content fits — pad the original value (preserving tags) using manual spacing
+        let padding = width - current_width;
+        let padded = match align {
+            Align::Left => format!("{}{}", value, " ".repeat(padding)),
+            Align::Right => format!("{}{}", " ".repeat(padding), value),
+            Align::Center => {
+                let left_pad = padding / 2;
+                let right_pad = padding - left_pad;
+                format!("{}{}{}", " ".repeat(left_pad), value, " ".repeat(right_pad))
+            }
+        };
+        apply_style(&padded, style)
+    }
 }
 
 // ============================================================================
@@ -909,7 +912,7 @@ fn resolve_sub_widths(sub_cols: &SubColumns, values: &[&str], parent_width: usiz
                 widths[i] = *w;
             }
             Width::Bounded { min, max } => {
-                let content_w = values.get(i).map(|v| display_width(v)).unwrap_or(0);
+                let content_w = values.get(i).map(|v| visible_width(v)).unwrap_or(0);
                 let min_w = min.unwrap_or(0);
                 let max_w = max.unwrap_or(usize::MAX);
                 widths[i] = content_w.max(min_w).min(max_w);
@@ -1032,6 +1035,9 @@ impl CellOutput {
     }
 
     /// Get a specific line, padding to width if needed.
+    ///
+    /// Content may contain BBCode from `apply_style`, so we use `visible_width`
+    /// for measurement and manual padding to avoid miscounting tags.
     pub fn line(&self, index: usize, width: usize, align: Align) -> String {
         let content = match self {
             CellOutput::Single(s) if index == 0 => s.as_str(),
@@ -1039,11 +1045,24 @@ impl CellOutput {
             _ => "",
         };
 
-        // Pad to width
+        let content_width = visible_width(content);
+        if content_width >= width {
+            return content.to_string();
+        }
+        let padding = width - content_width;
         match align {
-            Align::Left => pad_right(content, width),
-            Align::Right => pad_left(content, width),
-            Align::Center => pad_center(content, width),
+            Align::Left => format!("{}{}", content, " ".repeat(padding)),
+            Align::Right => format!("{}{}", " ".repeat(padding), content),
+            Align::Center => {
+                let left_pad = padding / 2;
+                let right_pad = padding - left_pad;
+                format!(
+                    "{}{}{}",
+                    " ".repeat(left_pad),
+                    content,
+                    " ".repeat(right_pad)
+                )
+            }
         }
     }
 
@@ -1070,7 +1089,8 @@ fn format_cell_lines(value: &str, width: usize, col: &Column) -> CellOutput {
         return CellOutput::Single(String::new());
     }
 
-    let current_width = display_width(value);
+    let stripped = standout_bbparser::strip_tags(value);
+    let current_width = display_width(&stripped);
 
     // Determine style: style_from_value takes precedence
     let style = if col.style_from_value {
@@ -1082,16 +1102,21 @@ fn format_cell_lines(value: &str, width: usize, col: &Column) -> CellOutput {
     match &col.overflow {
         Overflow::Wrap { indent } => {
             if current_width <= width {
-                // Fits on one line
+                // Fits on one line — pad original value (preserving tags) manually
+                let padding = width - current_width;
                 let padded = match col.align {
-                    Align::Left => pad_right(value, width),
-                    Align::Right => pad_left(value, width),
-                    Align::Center => pad_center(value, width),
+                    Align::Left => format!("{}{}", value, " ".repeat(padding)),
+                    Align::Right => format!("{}{}", " ".repeat(padding), value),
+                    Align::Center => {
+                        let left_pad = padding / 2;
+                        let right_pad = padding - left_pad;
+                        format!("{}{}{}", " ".repeat(left_pad), value, " ".repeat(right_pad))
+                    }
                 };
                 CellOutput::Single(apply_style(&padded, style))
             } else {
-                // Wrap to multiple lines
-                let wrapped = wrap_indent(value, width, *indent);
+                // Wrap to multiple lines — tags are stripped (same as truncation)
+                let wrapped = wrap_indent(&stripped, width, *indent);
                 let padded: Vec<String> = wrapped
                     .into_iter()
                     .map(|line| {
@@ -2472,6 +2497,144 @@ mod tests {
                 output
             );
         }
+    }
+    // ============================================================================
+    // BBCode-aware width tests (issue #104)
+    // ============================================================================
+
+    #[test]
+    fn format_value_bbcode_preserves_tags_when_fitting() {
+        let overflow = Overflow::Truncate {
+            at: TruncateAt::End,
+            marker: "…".to_string(),
+        };
+        // "hello" is 5 visible chars, column is 10 — tags should be preserved
+        let result = format_value("[bold]hello[/bold]", 10, Align::Left, &overflow, None);
+        let stripped = standout_bbparser::strip_tags(&result);
+        assert_eq!(display_width(&stripped), 10, "visible width should be 10");
+        assert!(
+            result.contains("[bold]hello[/bold]"),
+            "tags should be preserved when content fits"
+        );
+    }
+
+    #[test]
+    fn format_value_bbcode_truncation() {
+        let overflow = Overflow::Truncate {
+            at: TruncateAt::End,
+            marker: "…".to_string(),
+        };
+        // "[red]hello world[/red]" has 11 visible chars, column is 8
+        let result = format_value("[red]hello world[/red]", 8, Align::Left, &overflow, None);
+        let stripped = standout_bbparser::strip_tags(&result);
+        assert_eq!(
+            display_width(&stripped),
+            8,
+            "truncated output should be exactly 8 visible columns"
+        );
+    }
+
+    #[test]
+    fn format_value_bbcode_right_align() {
+        let overflow = Overflow::Truncate {
+            at: TruncateAt::End,
+            marker: "…".to_string(),
+        };
+        let result = format_value("[dim]hi[/dim]", 6, Align::Right, &overflow, None);
+        let stripped = standout_bbparser::strip_tags(&result);
+        assert_eq!(display_width(&stripped), 6);
+        // Should have leading spaces then the tagged content
+        assert!(result.contains("[dim]hi[/dim]"));
+        assert!(result.starts_with("    "));
+    }
+
+    #[test]
+    fn format_value_bbcode_with_style() {
+        let overflow = Overflow::Truncate {
+            at: TruncateAt::End,
+            marker: "…".to_string(),
+        };
+        // BBCode input + column style applied
+        let result = format_value("[dim]ok[/dim]", 8, Align::Left, &overflow, Some("green"));
+        let stripped = standout_bbparser::strip_tags(&result);
+        assert_eq!(display_width(&stripped), 8);
+        // Should have outer [green]...[/green] wrapper
+        assert!(result.starts_with("[green]"));
+        assert!(result.ends_with("[/green]"));
+    }
+
+    #[test]
+    fn format_cell_lines_bbcode_wrap() {
+        let col = Column::new(Width::Fixed(10)).overflow(Overflow::Wrap { indent: 0 });
+        // "[bold]hello world foo[/bold]" → 15 visible chars, width 10
+        let result = format_cell_lines("[bold]hello world foo[/bold]", 10, &col);
+        match result {
+            CellOutput::Multi(lines) => {
+                for line in &lines {
+                    let stripped = standout_bbparser::strip_tags(line);
+                    assert!(
+                        display_width(&stripped) <= 10,
+                        "wrapped line '{}' exceeds column width (visible: {})",
+                        line,
+                        display_width(&stripped)
+                    );
+                }
+            }
+            CellOutput::Single(s) => {
+                let stripped = standout_bbparser::strip_tags(&s);
+                assert!(display_width(&stripped) <= 10, "single line should fit");
+            }
+        }
+    }
+
+    #[test]
+    fn format_cell_lines_bbcode_fits_preserves_tags() {
+        let col = Column::new(Width::Fixed(10)).overflow(Overflow::Wrap { indent: 0 });
+        // "hi" is 2 visible chars, fits in 10
+        let result = format_cell_lines("[bold]hi[/bold]", 10, &col);
+        match result {
+            CellOutput::Single(s) => {
+                assert!(
+                    s.contains("[bold]hi[/bold]"),
+                    "tags should be preserved when content fits"
+                );
+                let stripped = standout_bbparser::strip_tags(&s);
+                assert_eq!(display_width(&stripped), 10);
+            }
+            _ => panic!("expected Single output"),
+        }
+    }
+
+    #[test]
+    fn cell_output_line_bbcode_padding() {
+        // Simulate a styled CellOutput with BBCode
+        let output = CellOutput::Single("[green]ok[/green]".to_string());
+        let line = output.line(0, 8, Align::Left);
+        let stripped = standout_bbparser::strip_tags(&line);
+        assert_eq!(
+            display_width(&stripped),
+            8,
+            "CellOutput::line should pad to correct visible width"
+        );
+    }
+
+    #[test]
+    fn resolve_sub_widths_bbcode() {
+        use crate::tabular::{SubCol, SubColumns};
+        let sub_cols =
+            SubColumns::new(vec![SubCol::fill(), SubCol::bounded(0, 30).right()], " ").unwrap();
+        // Second value has BBCode — "[tag]" is 5 visible chars
+        let widths = resolve_sub_widths(&sub_cols, &["Title", "[dim][tag][/dim]"], 30);
+        // [dim][tag][/dim] visible width is 5, so bounded should resolve to 5
+        assert_eq!(
+            widths[1], 5,
+            "bounded sub-col should use visible width, not raw string length"
+        );
+        assert_eq!(
+            widths[0] + widths[1] + 1, // +1 for separator " "
+            30,
+            "widths + separator should equal parent width"
+        );
     }
 }
 

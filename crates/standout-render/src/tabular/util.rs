@@ -4,14 +4,13 @@
 //! preserved in output but don't count toward display width calculations.
 
 use console::{measure_text_width, pad_str, Alignment};
+use standout_bbparser::strip_tags;
 
 /// Returns the display width of a string, ignoring ANSI escape codes.
 ///
-/// This is a convenience wrapper around `console::measure_text_width` that
-/// correctly handles:
-/// - ANSI escape sequences (colors, styles)
-/// - Unicode characters including CJK wide characters
-/// - Zero-width characters and combining marks
+/// **Warning:** This only strips ANSI escape codes, not BBCode tags like
+/// `[bold]...[/bold]`. For user-facing content that may contain BBCode markup,
+/// use [`visible_width`] instead.
 ///
 /// # Example
 ///
@@ -24,6 +23,25 @@ use console::{measure_text_width, pad_str, Alignment};
 /// ```
 pub fn display_width(s: &str) -> usize {
     measure_text_width(s)
+}
+
+/// Returns the visible display width of a string, stripping both BBCode tags
+/// and ANSI escape codes before measurement.
+///
+/// Use this for any text that may contain markup. For strings known to be
+/// tag-free (e.g., separator literals), [`display_width`] avoids the overhead.
+///
+/// # Example
+///
+/// ```rust
+/// use standout_render::tabular::visible_width;
+///
+/// assert_eq!(visible_width("hello"), 5);
+/// assert_eq!(visible_width("[bold]hello[/bold]"), 5);
+/// assert_eq!(visible_width("\x1b[31m[red]hi[/red]\x1b[0m"), 2);
+/// ```
+pub fn visible_width(s: &str) -> usize {
+    display_width(&strip_tags(s))
 }
 
 /// Truncates a string from the end to fit within a maximum display width.
@@ -152,6 +170,10 @@ pub fn truncate_middle(s: &str, max_width: usize, ellipsis: &str) -> String {
 ///
 /// ANSI escape codes are preserved and don't count toward width calculations.
 ///
+/// **Warning:** This does not strip BBCode tags—they will be counted toward
+/// the display width. For tagged content, compute padding manually using
+/// [`visible_width`] and `" ".repeat(padding)`.
+///
 /// # Example
 ///
 /// ```rust
@@ -167,6 +189,10 @@ pub fn pad_left(s: &str, width: usize) -> String {
 /// Pads a string on the right (left-aligns) to reach the target width.
 ///
 /// ANSI escape codes are preserved and don't count toward width calculations.
+///
+/// **Warning:** This does not strip BBCode tags—they will be counted toward
+/// the display width. For tagged content, compute padding manually using
+/// [`visible_width`] and `" ".repeat(padding)`.
 ///
 /// # Example
 ///
@@ -184,6 +210,10 @@ pub fn pad_right(s: &str, width: usize) -> String {
 ///
 /// When the remaining space is odd, the extra space goes on the right.
 /// ANSI escape codes are preserved and don't count toward width calculations.
+///
+/// **Warning:** This does not strip BBCode tags—they will be counted toward
+/// the display width. For tagged content, compute padding manually using
+/// [`visible_width`] and `" ".repeat(padding)`.
 ///
 /// # Example
 ///
