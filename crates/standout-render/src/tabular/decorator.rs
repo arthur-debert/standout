@@ -35,7 +35,7 @@
 //! println!("{}", table.render(&data));
 //! ```
 
-use super::formatter::TabularFormatter;
+use super::formatter::{CellValue, OwnedCellValue, TabularFormatter};
 use super::traits::{Tabular, TabularRow};
 use super::types::{FlatDataSpec, TabularSpec};
 use super::util::display_width;
@@ -304,6 +304,15 @@ impl Table {
         self.wrap_row(&content)
     }
 
+    /// Format a data row with sub-column support.
+    ///
+    /// Cells that correspond to columns with sub-columns should be
+    /// [`CellValue::Sub`]; all others should be [`CellValue::Single`].
+    pub fn row_cells(&self, values: &[CellValue<'_>]) -> String {
+        let content = self.formatter.format_row_cells(values);
+        self.wrap_row(&content)
+    }
+
     /// Format a data row by extracting values from a serializable struct.
     ///
     /// This method extracts field values based on each column's `key` or `name`.
@@ -562,13 +571,61 @@ impl minijinja::value::Object for Table {
                     ));
                 }
 
-                let values: Vec<String> = match args[0].try_iter() {
-                    Ok(iter) => iter.map(|v| v.to_string()).collect(),
-                    Err(_) => vec![args[0].to_string()],
-                };
+                let values_arg = &args[0];
 
-                let formatted = self.row(&values);
-                Ok(minijinja::Value::from(formatted))
+                if self.formatter.has_sub_columns() {
+                    // Sub-column aware path: detect nested arrays
+                    let outer_iter = match values_arg.try_iter() {
+                        Ok(iter) => iter,
+                        Err(_) => {
+                            let values = vec![values_arg.to_string()];
+                            return Ok(minijinja::Value::from(self.row(&values)));
+                        }
+                    };
+
+                    let mut owned_values: Vec<OwnedCellValue> = Vec::new();
+                    for (i, v) in outer_iter.enumerate() {
+                        let is_sub_col = self
+                            .formatter
+                            .columns()
+                            .get(i)
+                            .and_then(|c| c.sub_columns.as_ref())
+                            .is_some();
+
+                        if is_sub_col {
+                            if let Ok(inner_iter) = v.try_iter() {
+                                let sub_vals: Vec<String> =
+                                    inner_iter.map(|iv| iv.to_string()).collect();
+                                owned_values.push(OwnedCellValue::Sub(sub_vals));
+                            } else {
+                                owned_values.push(OwnedCellValue::Single(v.to_string()));
+                            }
+                        } else {
+                            owned_values.push(OwnedCellValue::Single(v.to_string()));
+                        }
+                    }
+
+                    let cell_values: Vec<CellValue<'_>> = owned_values
+                        .iter()
+                        .map(|ov| match ov {
+                            OwnedCellValue::Single(s) => CellValue::Single(s.as_str()),
+                            OwnedCellValue::Sub(v) => {
+                                CellValue::Sub(v.iter().map(|s| s.as_str()).collect())
+                            }
+                        })
+                        .collect();
+
+                    let formatted = self.row_cells(&cell_values);
+                    Ok(minijinja::Value::from(formatted))
+                } else {
+                    let values: Vec<String> = match values_arg.try_iter() {
+                        Ok(iter) => iter.map(|v| v.to_string()).collect(),
+                        Err(_) => vec![values_arg.to_string()],
+                    };
+
+                    let formatted = self.row(&values);
+                    Ok(minijinja::Value::from(formatted))
+                }
             }
             "row_from" => {
                 // row_from(object) - format a row by extracting values from an object

@@ -65,6 +65,35 @@
 //! - [`TruncateAt::Start`] - Keep end: "…o World"
 //! - [`TruncateAt::Middle`] - Keep both: "Hel…orld" (useful for paths)
 //!
+//! ## Sub-Columns
+//!
+//! Columns can contain inner sub-columns for per-row layout within a parent
+//! column. Exactly one sub-column is [`Width::Fill`] (the grower); the rest
+//! are Fixed or Bounded. Widths are resolved per-row from actual content.
+//!
+//! ```rust
+//! use standout_render::tabular::{
+//!     TabularSpec, Col, SubCol, SubColumns, TabularFormatter, CellValue,
+//! };
+//!
+//! let spec = TabularSpec::builder()
+//!     .column(Col::fixed(4))
+//!     .column(Col::fill().sub_columns(
+//!         SubColumns::new(
+//!             vec![SubCol::fill(), SubCol::bounded(0, 30).right()],
+//!             " ",
+//!         ).unwrap(),
+//!     ))
+//!     .separator("  ")
+//!     .build();
+//!
+//! let formatter = TabularFormatter::new(&spec, 60);
+//! let row = formatter.format_row_cells(&[
+//!     CellValue::Single("1."),
+//!     CellValue::Sub(vec!["Title", "[tag]"]),
+//! ]);
+//! ```
+//!
 //! ## Utility Functions
 //!
 //! ```rust
@@ -113,7 +142,7 @@ mod util;
 
 // Re-export types
 pub use decorator::{BorderStyle, Table};
-pub use formatter::{CellOutput, TabularFormatter};
+pub use formatter::{CellOutput, CellValue, TabularFormatter};
 pub use resolve::ResolvedWidths;
 pub use traits::{Tabular, TabularFieldDisplay, TabularFieldOption, TabularRow};
 
@@ -121,11 +150,11 @@ pub use traits::{Tabular, TabularFieldDisplay, TabularFieldOption, TabularRow};
 // when the "macros" feature is enabled.
 pub use types::{
     Align, Anchor, Col, Column, ColumnBuilder, Decorations, FlatDataSpec, FlatDataSpecBuilder,
-    Overflow, TabularSpec, TabularSpecBuilder, TruncateAt, Width,
+    Overflow, SubCol, SubColumn, SubColumns, TabularSpec, TabularSpecBuilder, TruncateAt, Width,
 };
 
 // Re-export utility functions
 pub use util::{
     display_width, pad_center, pad_left, pad_right, truncate_end, truncate_middle, truncate_start,
-    wrap, wrap_indent,
+    visible_width, wrap, wrap_indent,
 };

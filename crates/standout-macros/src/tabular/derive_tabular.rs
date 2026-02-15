@@ -107,6 +107,7 @@ pub fn tabular_derive_impl(input: DeriveInput) -> Result<TokenStream> {
                 style_from_value: #style_from_value,
                 key: #key_tokens,
                 header: #header_tokens,
+                sub_columns: None,
             }
         });
     }

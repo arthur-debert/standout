@@ -44,10 +44,12 @@ use std::sync::Arc;
 
 use super::resolve::ResolvedWidths;
 use super::traits::TabularRow;
-use super::types::{Align, Anchor, Column, FlatDataSpec, Overflow, TabularSpec, TruncateAt};
+use super::types::{
+    Align, Anchor, Column, FlatDataSpec, Overflow, SubColumns, TabularSpec, TruncateAt, Width,
+};
 use super::util::{
     display_width, pad_center, pad_left, pad_right, truncate_end, truncate_middle, truncate_start,
-    wrap_indent,
+    visible_width, wrap_indent,
 };
 
 /// Formats table rows according to a specification.
@@ -221,6 +223,16 @@ impl TabularFormatter {
     /// assert_eq!(output, "Hello      | World   ");
     /// ```
     pub fn format_row<S: AsRef<str>>(&self, values: &[S]) -> String {
+        // If any column has sub-columns, delegate to format_row_cells
+        // wrapping plain strings as CellValue::Single
+        if self.columns.iter().any(|c| c.sub_columns.is_some()) {
+            let cell_values: Vec<CellValue<'_>> = values
+                .iter()
+                .map(|s| CellValue::Single(s.as_ref()))
+                .collect();
+            return self.format_row_cells(&cell_values);
+        }
+
         let mut result = String::new();
         result.push_str(&self.prefix);
 
@@ -243,6 +255,80 @@ impl TabularFormatter {
 
             let formatted = format_cell(value, width, col);
             result.push_str(&formatted);
+        }
+
+        result.push_str(&self.suffix);
+        result
+    }
+
+    /// Format a row with cell values that may include sub-column arrays.
+    ///
+    /// For columns with sub-columns, pass `CellValue::Sub(vec![...])`.
+    /// For regular columns, pass `CellValue::Single("...")`.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use standout_render::tabular::{
+    ///     FlatDataSpec, Column, Width, TabularFormatter, CellValue,
+    ///     SubColumns, SubCol,
+    /// };
+    ///
+    /// let sub_cols = SubColumns::new(
+    ///     vec![SubCol::fill(), SubCol::bounded(0, 20).right()],
+    ///     " ",
+    /// ).unwrap();
+    ///
+    /// let spec = FlatDataSpec::builder()
+    ///     .column(Column::new(Width::Fixed(4)))
+    ///     .column(Column::new(Width::Fill).sub_columns(sub_cols))
+    ///     .column(Column::new(Width::Fixed(6)).right())
+    ///     .separator("  ")
+    ///     .build();
+    ///
+    /// let formatter = TabularFormatter::new(&spec, 60);
+    /// let row = formatter.format_row_cells(&[
+    ///     CellValue::Single("1."),
+    ///     CellValue::Sub(vec!["Gallery Navigation", "[feature]"]),
+    ///     CellValue::Single("4d"),
+    /// ]);
+    /// ```
+    pub fn format_row_cells(&self, values: &[CellValue<'_>]) -> String {
+        let mut result = String::new();
+        result.push_str(&self.prefix);
+
+        let (anchor_gap, anchor_transition) = self.calculate_anchor_gap();
+
+        for (i, col) in self.columns.iter().enumerate() {
+            if i > 0 {
+                if anchor_gap > 0 && i == anchor_transition {
+                    result.push_str(&" ".repeat(anchor_gap));
+                } else {
+                    result.push_str(&self.separator);
+                }
+            }
+
+            let width = self.widths.get(i).copied().unwrap_or(0);
+
+            if let Some(sub_cols) = &col.sub_columns {
+                // Sub-column formatting
+                let sub_values: Vec<&str> = match values.get(i) {
+                    Some(CellValue::Sub(v)) => v.clone(),
+                    Some(CellValue::Single(s)) => vec![s],
+                    None => vec![],
+                };
+                let formatted = format_sub_cells(sub_cols, &sub_values, width);
+                result.push_str(&formatted);
+            } else {
+                // Normal cell formatting
+                let value = match values.get(i) {
+                    Some(CellValue::Single(s)) => *s,
+                    Some(CellValue::Sub(v)) => v.first().copied().unwrap_or(&col.null_repr),
+                    None => &col.null_repr,
+                };
+                let formatted = format_cell(value, width, col);
+                result.push_str(&formatted);
+            }
         }
 
         result.push_str(&self.suffix);
@@ -381,6 +467,16 @@ impl TabularFormatter {
     /// Get the number of columns.
     pub fn num_columns(&self) -> usize {
         self.columns.len()
+    }
+
+    /// Returns `true` if any column has sub-columns defined.
+    pub fn has_sub_columns(&self) -> bool {
+        self.columns.iter().any(|c| c.sub_columns.is_some())
+    }
+
+    /// Get the column specifications.
+    pub fn columns(&self) -> &[Column] {
+        &self.columns
     }
 
     /// Extract headers from column specifications.
@@ -603,18 +699,64 @@ impl Object for TabularFormatter {
                 }
 
                 let values_arg = &args[0];
+                let has_sub_columns = self.columns.iter().any(|c| c.sub_columns.is_some());
 
-                // Handle both array and non-array arguments
-                let values: Vec<String> = match values_arg.try_iter() {
-                    Ok(iter) => iter.map(|v| v.to_string()).collect(),
-                    Err(_) => {
-                        // Single value - wrap in vec
-                        vec![values_arg.to_string()]
+                if has_sub_columns {
+                    // Sub-column aware path: detect nested arrays
+                    let outer_iter = match values_arg.try_iter() {
+                        Ok(iter) => iter,
+                        Err(_) => {
+                            let values = vec![values_arg.to_string()];
+                            let formatted = self.format_row(&values);
+                            return Ok(Value::from(formatted));
+                        }
+                    };
+
+                    // Collect all values, detecting nested arrays for sub-column cells
+                    let mut owned_values: Vec<OwnedCellValue> = Vec::new();
+                    for (i, v) in outer_iter.enumerate() {
+                        let is_sub_col = self
+                            .columns
+                            .get(i)
+                            .and_then(|c| c.sub_columns.as_ref())
+                            .is_some();
+
+                        if is_sub_col {
+                            if let Ok(inner_iter) = v.try_iter() {
+                                let sub_vals: Vec<String> =
+                                    inner_iter.map(|iv| iv.to_string()).collect();
+                                owned_values.push(OwnedCellValue::Sub(sub_vals));
+                            } else {
+                                owned_values.push(OwnedCellValue::Single(v.to_string()));
+                            }
+                        } else {
+                            owned_values.push(OwnedCellValue::Single(v.to_string()));
+                        }
                     }
-                };
 
-                let formatted = self.format_row(&values);
-                Ok(Value::from(formatted))
+                    // Build CellValue references from owned data
+                    let cell_values: Vec<CellValue<'_>> = owned_values
+                        .iter()
+                        .map(|ov| match ov {
+                            OwnedCellValue::Single(s) => CellValue::Single(s.as_str()),
+                            OwnedCellValue::Sub(v) => {
+                                CellValue::Sub(v.iter().map(|s| s.as_str()).collect())
+                            }
+                        })
+                        .collect();
+
+                    let formatted = self.format_row_cells(&cell_values);
+                    Ok(Value::from(formatted))
+                } else {
+                    // Fast path: no sub-columns, flatten all values to strings
+                    let values: Vec<String> = match values_arg.try_iter() {
+                        Ok(iter) => iter.map(|v| v.to_string()).collect(),
+                        Err(_) => vec![values_arg.to_string()],
+                    };
+
+                    let formatted = self.format_row(&values);
+                    Ok(Value::from(formatted))
+                }
             }
             "column_width" => {
                 // column_width(index) - get width of a specific column
@@ -653,68 +795,220 @@ fn format_cell(value: &str, width: usize, col: &Column) -> String {
     } else {
         None
     };
-    format_cell_styled(value, width, col, style_override)
+    let style = style_override.or(col.style.as_deref());
+    format_value(value, width, col.align, &col.overflow, style)
 }
 
-/// Format a single cell with optional style override.
+/// Format a value with the given width, alignment, overflow, and optional style.
 ///
-/// If `style_override` is Some, it takes precedence over column's style.
-/// This is useful for dynamic styling based on cell content.
-fn format_cell_styled(
+/// This is the core formatting function used by both regular cells and sub-cells.
+/// It correctly handles BBCode tags in `value`: tags are stripped for width
+/// measurement and truncation, but preserved in the output when the content fits.
+fn format_value(
     value: &str,
     width: usize,
-    col: &Column,
-    style_override: Option<&str>,
+    align: Align,
+    overflow: &Overflow,
+    style: Option<&str>,
 ) -> String {
     if width == 0 {
         return String::new();
     }
 
-    let current_width = display_width(value);
+    let stripped = standout_bbparser::strip_tags(value);
+    let current_width = display_width(&stripped);
 
-    // Handle overflow
-    let processed = if current_width > width {
-        match &col.overflow {
+    if current_width > width {
+        // Content overflows — truncate the stripped text (tags are lost)
+        let truncated = match overflow {
             Overflow::Truncate { at, marker } => match at {
-                TruncateAt::End => truncate_end(value, width, marker),
-                TruncateAt::Start => truncate_start(value, width, marker),
-                TruncateAt::Middle => truncate_middle(value, width, marker),
+                TruncateAt::End => truncate_end(&stripped, width, marker),
+                TruncateAt::Start => truncate_start(&stripped, width, marker),
+                TruncateAt::Middle => truncate_middle(&stripped, width, marker),
             },
-            Overflow::Clip => {
-                // Hard cut with no marker
-                truncate_end(value, width, "")
-            }
+            Overflow::Clip => truncate_end(&stripped, width, ""),
             Overflow::Expand => {
-                // Don't truncate, let it overflow
-                value.to_string()
+                // Don't truncate — pad is also skipped below
+                return apply_style(value, style);
             }
             Overflow::Wrap { .. } => {
-                // For single-line format_cell, truncate as fallback
-                // Multi-line wrapping is handled by format_cell_lines
-                truncate_end(value, width, "…")
+                // Single-line fallback; multi-line wrapping handled by format_cell_lines
+                truncate_end(&stripped, width, "…")
             }
-        }
-    } else {
-        value.to_string()
-    };
+        };
 
-    // Pad to width (skip if Expand mode overflowed)
-    let padded = if matches!(col.overflow, Overflow::Expand) && current_width > width {
-        processed
+        let padded = match align {
+            Align::Left => pad_right(&truncated, width),
+            Align::Right => pad_left(&truncated, width),
+            Align::Center => pad_center(&truncated, width),
+        };
+        apply_style(&padded, style)
     } else {
-        match col.align {
-            Align::Left => pad_right(&processed, width),
-            Align::Right => pad_left(&processed, width),
-            Align::Center => pad_center(&processed, width),
-        }
-    };
-
-    // Apply style wrapping
-    let style = style_override.or(col.style.as_deref());
-    match style {
-        Some(s) if !s.is_empty() => format!("[{}]{}[/{}]", s, padded, s),
-        _ => padded,
+        // Content fits — pad the original value (preserving tags) using manual spacing
+        let padding = width - current_width;
+        let padded = match align {
+            Align::Left => format!("{}{}", value, " ".repeat(padding)),
+            Align::Right => format!("{}{}", " ".repeat(padding), value),
+            Align::Center => {
+                let left_pad = padding / 2;
+                let right_pad = padding - left_pad;
+                format!("{}{}{}", " ".repeat(left_pad), value, " ".repeat(right_pad))
+            }
+        };
+        apply_style(&padded, style)
     }
+}
+
+// ============================================================================
+// Sub-Column Support
+// ============================================================================
+
+/// A cell value that may be a single string or a list of sub-values.
+///
+/// Used with [`TabularFormatter::format_row_cells`] for columns that have
+/// sub-columns. Regular columns use `Single`, columns with sub-columns use `Sub`.
+#[derive(Clone, Debug)]
+pub enum CellValue<'a> {
+    /// Single string value for a regular column.
+    Single(&'a str),
+    /// Multiple sub-values for a column with sub-columns.
+    Sub(Vec<&'a str>),
+}
+
+impl<'a> From<&'a str> for CellValue<'a> {
+    fn from(s: &'a str) -> Self {
+        CellValue::Single(s)
+    }
+}
+
+/// Owned version of CellValue for use in MiniJinja Object methods
+/// where we need to own the string data before borrowing into CellValue.
+pub(crate) enum OwnedCellValue {
+    Single(String),
+    Sub(Vec<String>),
+}
+
+/// Resolve sub-column widths for a single row.
+///
+/// Non-grower sub-columns get their content width clamped to bounds.
+/// The grower gets all remaining space. Separators between zero-width
+/// sub-columns are skipped.
+///
+/// Returns a Vec of resolved widths such that:
+/// `sum(widths) + separator_overhead == parent_width`
+fn resolve_sub_widths(sub_cols: &SubColumns, values: &[&str], parent_width: usize) -> Vec<usize> {
+    let sep_width = display_width(&sub_cols.separator);
+    let n = sub_cols.columns.len();
+    let mut widths = vec![0usize; n];
+    let mut grower_index = 0;
+
+    // Pass 1: resolve non-grower widths from content
+    for (i, sub_col) in sub_cols.columns.iter().enumerate() {
+        match &sub_col.width {
+            Width::Fill => {
+                grower_index = i;
+            }
+            Width::Fixed(w) => {
+                widths[i] = *w;
+            }
+            Width::Bounded { min, max } => {
+                let content_w = values.get(i).map(|v| visible_width(v)).unwrap_or(0);
+                let min_w = min.unwrap_or(0);
+                let max_w = max.unwrap_or(usize::MAX);
+                widths[i] = content_w.max(min_w).min(max_w);
+            }
+            Width::Fraction(_) => {} // validated away at construction
+        }
+    }
+
+    // Pass 2: compute separator overhead
+    // The grower is always "visible" for separator purposes—even at zero width it
+    // participates in the join so separators flanking it are emitted.  Only truly
+    // zero-width *non-grower* columns are elided.
+    let visible_non_growers = widths
+        .iter()
+        .enumerate()
+        .filter(|&(i, &w)| i != grower_index && w > 0)
+        .count();
+    let visible_count = visible_non_growers + 1; // +1 for grower
+    let sep_overhead = visible_count.saturating_sub(1) * sep_width;
+    let available = parent_width.saturating_sub(sep_overhead);
+
+    // Pass 3: clamp non-grower total if it exceeds available content budget
+    let non_grower_total: usize = widths
+        .iter()
+        .enumerate()
+        .filter(|&(i, _)| i != grower_index)
+        .map(|(_, &w)| w)
+        .sum();
+
+    if non_grower_total > available {
+        let mut excess = non_grower_total - available;
+        // Shrink from the last non-grower backwards
+        for i in (0..n).rev() {
+            if i == grower_index || widths[i] == 0 || excess == 0 {
+                continue;
+            }
+            let reduction = excess.min(widths[i]);
+            widths[i] -= reduction;
+            excess -= reduction;
+        }
+    }
+
+    // Pass 4: grower absorbs remaining space
+    let clamped_total: usize = widths
+        .iter()
+        .enumerate()
+        .filter(|&(i, _)| i != grower_index)
+        .map(|(_, &w)| w)
+        .sum();
+    widths[grower_index] = available.saturating_sub(clamped_total);
+
+    widths
+}
+
+/// Format a cell that has sub-columns, producing a string of exactly
+/// `parent_width` display columns.
+///
+/// Sub-column widths are resolved per-row from actual content. The grower
+/// sub-column absorbs remaining space. Zero-width *non-grower* columns are
+/// skipped entirely (no separator emitted). The grower is always present in
+/// the output—even at zero width—so separator counts stay correct.
+fn format_sub_cells(sub_cols: &SubColumns, values: &[&str], parent_width: usize) -> String {
+    if parent_width == 0 {
+        return String::new();
+    }
+
+    let widths = resolve_sub_widths(sub_cols, values, parent_width);
+    let grower_index = sub_cols
+        .columns
+        .iter()
+        .position(|c| matches!(c.width, Width::Fill))
+        .unwrap_or(0);
+    let sep = &sub_cols.separator;
+    let mut parts: Vec<String> = Vec::new();
+
+    for (i, (sub_col, &width)) in sub_cols.columns.iter().zip(widths.iter()).enumerate() {
+        // Skip zero-width non-grower columns (they produce no output and no separator)
+        if width == 0 && i != grower_index {
+            continue;
+        }
+        if width == 0 {
+            // Grower at zero width: emit empty string so separators flanking it are correct
+            parts.push(String::new());
+        } else {
+            let value = values.get(i).copied().unwrap_or(&sub_col.null_repr);
+            parts.push(format_value(
+                value,
+                width,
+                sub_col.align,
+                &sub_col.overflow,
+                sub_col.style.as_deref(),
+            ));
+        }
+    }
+
+    parts.join(sep)
 }
 
 /// Result of formatting a cell, which may be single or multi-line.
@@ -741,6 +1035,9 @@ impl CellOutput {
     }
 
     /// Get a specific line, padding to width if needed.
+    ///
+    /// Content may contain BBCode from `apply_style`, so we use `visible_width`
+    /// for measurement and manual padding to avoid miscounting tags.
     pub fn line(&self, index: usize, width: usize, align: Align) -> String {
         let content = match self {
             CellOutput::Single(s) if index == 0 => s.as_str(),
@@ -748,11 +1045,24 @@ impl CellOutput {
             _ => "",
         };
 
-        // Pad to width
+        let content_width = visible_width(content);
+        if content_width >= width {
+            return content.to_string();
+        }
+        let padding = width - content_width;
         match align {
-            Align::Left => pad_right(content, width),
-            Align::Right => pad_left(content, width),
-            Align::Center => pad_center(content, width),
+            Align::Left => format!("{}{}", content, " ".repeat(padding)),
+            Align::Right => format!("{}{}", " ".repeat(padding), content),
+            Align::Center => {
+                let left_pad = padding / 2;
+                let right_pad = padding - left_pad;
+                format!(
+                    "{}{}{}",
+                    " ".repeat(left_pad),
+                    content,
+                    " ".repeat(right_pad)
+                )
+            }
         }
     }
 
@@ -779,7 +1089,8 @@ fn format_cell_lines(value: &str, width: usize, col: &Column) -> CellOutput {
         return CellOutput::Single(String::new());
     }
 
-    let current_width = display_width(value);
+    let stripped = standout_bbparser::strip_tags(value);
+    let current_width = display_width(&stripped);
 
     // Determine style: style_from_value takes precedence
     let style = if col.style_from_value {
@@ -791,16 +1102,21 @@ fn format_cell_lines(value: &str, width: usize, col: &Column) -> CellOutput {
     match &col.overflow {
         Overflow::Wrap { indent } => {
             if current_width <= width {
-                // Fits on one line
+                // Fits on one line — pad original value (preserving tags) manually
+                let padding = width - current_width;
                 let padded = match col.align {
-                    Align::Left => pad_right(value, width),
-                    Align::Right => pad_left(value, width),
-                    Align::Center => pad_center(value, width),
+                    Align::Left => format!("{}{}", value, " ".repeat(padding)),
+                    Align::Right => format!("{}{}", " ".repeat(padding), value),
+                    Align::Center => {
+                        let left_pad = padding / 2;
+                        let right_pad = padding - left_pad;
+                        format!("{}{}{}", " ".repeat(left_pad), value, " ".repeat(right_pad))
+                    }
                 };
                 CellOutput::Single(apply_style(&padded, style))
             } else {
-                // Wrap to multiple lines
-                let wrapped = wrap_indent(value, width, *indent);
+                // Wrap to multiple lines — tags are stripped (same as truncation)
+                let wrapped = wrap_indent(&stripped, width, *indent);
                 let padded: Vec<String> = wrapped
                     .into_iter()
                     .map(|line| {
@@ -1875,5 +2191,569 @@ mod tests {
 
         let headers = formatter.extract_headers();
         assert!(headers.is_empty());
+    }
+
+    // ============================================================================
+    // Sub-Column Tests
+    // ============================================================================
+
+    use crate::tabular::{SubCol, SubColumns};
+
+    fn padz_spec() -> (FlatDataSpec, SubColumns) {
+        let sub_cols =
+            SubColumns::new(vec![SubCol::fill(), SubCol::bounded(0, 20).right()], " ").unwrap();
+
+        let spec = FlatDataSpec::builder()
+            .column(Column::new(Width::Fixed(4)))
+            .column(Column::new(Width::Fill).sub_columns(sub_cols.clone()))
+            .column(Column::new(Width::Fixed(6)).right())
+            .separator("  ")
+            .build();
+
+        (spec, sub_cols)
+    }
+
+    #[test]
+    fn sub_column_basic_title_and_tag() {
+        let (spec, _) = padz_spec();
+        let formatter = TabularFormatter::new(&spec, 60);
+
+        let row = formatter.format_row_cells(&[
+            CellValue::Single("1."),
+            CellValue::Sub(vec!["Gallery Navigation", "[feature]"]),
+            CellValue::Single("4d"),
+        ]);
+
+        assert!(row.contains("Gallery Navigation"));
+        assert!(row.contains("[feature]"));
+        assert!(row.contains("1."));
+        assert!(row.contains("4d"));
+        assert_eq!(display_width(&row), 60);
+    }
+
+    #[test]
+    fn sub_column_tag_absent() {
+        let (spec, _) = padz_spec();
+        let formatter = TabularFormatter::new(&spec, 60);
+
+        let row = formatter.format_row_cells(&[
+            CellValue::Single("3."),
+            CellValue::Sub(vec!["Fixing Layout of Image Nav", ""]),
+            CellValue::Single("4d"),
+        ]);
+
+        assert!(row.contains("Fixing Layout of Image Nav"));
+        // With empty tag, title should get all the space
+        assert_eq!(display_width(&row), 60);
+    }
+
+    #[test]
+    fn sub_column_grower_gets_remaining_space() {
+        let sub_cols = SubColumns::new(vec![SubCol::fill(), SubCol::fixed(10)], "  ").unwrap();
+
+        let widths = resolve_sub_widths(&sub_cols, &["title", "fixed"], 50);
+        // fixed=10, sep=2, grower=50-10-2=38
+        assert_eq!(widths[0], 38);
+        assert_eq!(widths[1], 10);
+    }
+
+    #[test]
+    fn sub_column_non_grower_respects_fixed() {
+        let sub_cols = SubColumns::new(vec![SubCol::fill(), SubCol::fixed(15)], " ").unwrap();
+
+        let widths = resolve_sub_widths(&sub_cols, &["x", "y"], 40);
+        assert_eq!(widths[1], 15); // Always exact for Fixed
+        assert_eq!(widths[0], 24); // 40 - 15 - 1
+    }
+
+    #[test]
+    fn sub_column_non_grower_respects_bounded() {
+        let sub_cols = SubColumns::new(vec![SubCol::fill(), SubCol::bounded(5, 20)], " ").unwrap();
+
+        // Content "short" is 5 chars, clamped to [5, 20] = 5
+        let widths = resolve_sub_widths(&sub_cols, &["title", "short"], 40);
+        assert_eq!(widths[1], 5);
+        assert_eq!(widths[0], 34); // 40 - 5 - 1
+
+        // Content "a very long tag value" is 21 chars, clamped to 20
+        let widths2 = resolve_sub_widths(&sub_cols, &["title", "a very long tag value!"], 40);
+        assert_eq!(widths2[1], 20);
+        assert_eq!(widths2[0], 19); // 40 - 20 - 1
+
+        // Content "" is 0 chars, clamped to min=5
+        let widths3 = resolve_sub_widths(&sub_cols, &["title", ""], 40);
+        assert_eq!(widths3[1], 5);
+    }
+
+    #[test]
+    fn sub_column_bounded_min_zero() {
+        let sub_cols = SubColumns::new(vec![SubCol::fill(), SubCol::bounded(0, 20)], " ").unwrap();
+
+        // Empty content, min=0 means the sub-column gets 0 width
+        let widths = resolve_sub_widths(&sub_cols, &["title", ""], 40);
+        assert_eq!(widths[1], 0);
+        // With zero-width non-grower, grower gets all space
+        // visible count = 0 non-zero non-grower + 1 grower = 1, seps = 0
+        assert_eq!(widths[0], 40);
+    }
+
+    #[test]
+    fn sub_column_separator_skipped_for_zero_width() {
+        let sub_cols = SubColumns::new(vec![SubCol::fill(), SubCol::bounded(0, 20)], "  ").unwrap();
+
+        // With non-zero tag
+        let result1 = format_sub_cells(&sub_cols, &["Title", "tag"], 30);
+        assert!(result1.contains("  ")); // Separator present
+        assert_eq!(display_width(&result1), 30);
+
+        // With zero-width tag
+        let result2 = format_sub_cells(&sub_cols, &["Title", ""], 30);
+        assert_eq!(display_width(&result2), 30);
+        // No wasted separator space
+    }
+
+    #[test]
+    fn sub_column_alignment() {
+        let sub_cols = SubColumns::new(
+            vec![
+                SubCol::fill(), // left-aligned by default
+                SubCol::fixed(10).right(),
+            ],
+            " ",
+        )
+        .unwrap();
+
+        let result = format_sub_cells(&sub_cols, &["Left", "Right"], 30);
+        // "Left" should be left-aligned (padded right)
+        assert!(result.starts_with("Left"));
+        // "Right" should be right-aligned (padded left)
+        assert!(result.ends_with("     Right"));
+        assert_eq!(display_width(&result), 30);
+    }
+
+    #[test]
+    fn sub_column_grower_truncation() {
+        let sub_cols = SubColumns::new(vec![SubCol::fill(), SubCol::fixed(15)], " ").unwrap();
+
+        // Parent=25, fixed=15, sep=1, grower=9
+        // Title "A very long title that exceeds" is 30 chars, gets truncated to 9
+        let result = format_sub_cells(
+            &sub_cols,
+            &["A very long title that exceeds", "fixed-col"],
+            25,
+        );
+        assert_eq!(display_width(&result), 25);
+        assert!(result.contains("…")); // Truncation marker
+    }
+
+    #[test]
+    fn sub_column_style_application() {
+        let sub_cols = SubColumns::new(
+            vec![SubCol::fill(), SubCol::bounded(0, 20).right().style("tag")],
+            " ",
+        )
+        .unwrap();
+
+        let result = format_sub_cells(&sub_cols, &["Title", "feature"], 40);
+        assert!(result.contains("[tag]"));
+        assert!(result.contains("[/tag]"));
+        assert!(result.contains("feature"));
+    }
+
+    #[test]
+    fn sub_column_grower_zero_width() {
+        // When non-grower widths eat everything, the fixed col is clamped
+        // so total still fits: grower(0) + sep(1) + fixed(19) = 20
+        let sub_cols = SubColumns::new(vec![SubCol::fill(), SubCol::fixed(20)], " ").unwrap();
+
+        let widths = resolve_sub_widths(&sub_cols, &["title", "fixed"], 20);
+        assert_eq!(widths[0], 0); // Grower gets nothing
+        assert_eq!(widths[1], 19); // Clamped: 20 - 1 sep = 19 available
+
+        // Output still has correct width
+        let result = format_sub_cells(&sub_cols, &["title", "fixed"], 20);
+        assert_eq!(display_width(&result), 20);
+    }
+
+    #[test]
+    fn sub_column_all_empty() {
+        let sub_cols = SubColumns::new(vec![SubCol::fill(), SubCol::bounded(0, 20)], " ").unwrap();
+
+        let result = format_sub_cells(&sub_cols, &["", ""], 30);
+        assert_eq!(display_width(&result), 30);
+    }
+
+    #[test]
+    fn sub_column_plain_string_fallback() {
+        // When format_row gets a plain string for a sub-column column,
+        // it should wrap it as Single and use the grower
+        let (spec, _) = padz_spec();
+        let formatter = TabularFormatter::new(&spec, 60);
+
+        let row = formatter.format_row(&["1.", "Just a title", "4d"]);
+        // Should still produce valid output
+        assert_eq!(display_width(&row), 60);
+        assert!(row.contains("Just a title"));
+    }
+
+    #[test]
+    fn sub_column_format_row_cells_api() {
+        let sub_cols =
+            SubColumns::new(vec![SubCol::fill(), SubCol::bounded(0, 15).right()], " ").unwrap();
+
+        let spec = FlatDataSpec::builder()
+            .column(Column::new(Width::Fixed(3)))
+            .column(Column::new(Width::Fill).sub_columns(sub_cols))
+            .separator("  ")
+            .build();
+
+        let formatter = TabularFormatter::new(&spec, 50);
+
+        // Row with tag
+        let row1 = formatter.format_row_cells(&[
+            CellValue::Single("1."),
+            CellValue::Sub(vec!["Title", "[bug]"]),
+        ]);
+        assert_eq!(display_width(&row1), 50);
+        assert!(row1.contains("Title"));
+        assert!(row1.contains("[bug]"));
+
+        // Row without tag
+        let row2 = formatter.format_row_cells(&[
+            CellValue::Single("2."),
+            CellValue::Sub(vec!["Longer Title Here", ""]),
+        ]);
+        assert_eq!(display_width(&row2), 50);
+        assert!(row2.contains("Longer Title Here"));
+    }
+
+    #[test]
+    fn sub_column_via_template() {
+        use minijinja::Environment;
+
+        let sub_cols =
+            SubColumns::new(vec![SubCol::fill(), SubCol::bounded(0, 15).right()], " ").unwrap();
+
+        let spec = TabularSpec::builder()
+            .column(Column::new(Width::Fixed(4)))
+            .column(Column::new(Width::Fill).sub_columns(sub_cols))
+            .separator("  ")
+            .build();
+        let formatter = TabularFormatter::new(&spec, 50);
+
+        let mut env = Environment::new();
+        env.add_template("test", "{{ t.row(['1.', ['My Title', '[tag]']]) }}")
+            .unwrap();
+
+        let tmpl = env.get_template("test").unwrap();
+        let output = tmpl
+            .render(minijinja::context! { t => Value::from_object(formatter) })
+            .unwrap();
+
+        assert_eq!(display_width(&output), 50);
+        assert!(output.contains("My Title"));
+        assert!(output.contains("[tag]"));
+    }
+
+    #[test]
+    fn sub_column_multiple_rows_alignment() {
+        let sub_cols =
+            SubColumns::new(vec![SubCol::fill(), SubCol::bounded(0, 15).right()], " ").unwrap();
+
+        let spec = FlatDataSpec::builder()
+            .column(Column::new(Width::Fixed(4)))
+            .column(Column::new(Width::Fill).sub_columns(sub_cols))
+            .column(Column::new(Width::Fixed(4)).right())
+            .separator("  ")
+            .build();
+
+        let formatter = TabularFormatter::new(&spec, 60);
+
+        let rows = vec![
+            vec![
+                CellValue::Single("1."),
+                CellValue::Sub(vec!["GitHub integration", "[feature]"]),
+                CellValue::Single("8h"),
+            ],
+            vec![
+                CellValue::Single("2."),
+                CellValue::Sub(vec!["Bug : Static", "[bug]"]),
+                CellValue::Single("4d"),
+            ],
+            vec![
+                CellValue::Single("3."),
+                CellValue::Sub(vec!["Fixing Layout of Image Nav", ""]),
+                CellValue::Single("4d"),
+            ],
+        ];
+
+        for (i, row) in rows.iter().enumerate() {
+            let output = formatter.format_row_cells(row);
+            assert_eq!(
+                display_width(&output),
+                60,
+                "Row {} has wrong width: '{}'",
+                i,
+                output
+            );
+        }
+    }
+    // ============================================================================
+    // BBCode-aware width tests (issue #104)
+    // ============================================================================
+
+    #[test]
+    fn format_value_bbcode_preserves_tags_when_fitting() {
+        let overflow = Overflow::Truncate {
+            at: TruncateAt::End,
+            marker: "…".to_string(),
+        };
+        // "hello" is 5 visible chars, column is 10 — tags should be preserved
+        let result = format_value("[bold]hello[/bold]", 10, Align::Left, &overflow, None);
+        let stripped = standout_bbparser::strip_tags(&result);
+        assert_eq!(display_width(&stripped), 10, "visible width should be 10");
+        assert!(
+            result.contains("[bold]hello[/bold]"),
+            "tags should be preserved when content fits"
+        );
+    }
+
+    #[test]
+    fn format_value_bbcode_truncation() {
+        let overflow = Overflow::Truncate {
+            at: TruncateAt::End,
+            marker: "…".to_string(),
+        };
+        // "[red]hello world[/red]" has 11 visible chars, column is 8
+        let result = format_value("[red]hello world[/red]", 8, Align::Left, &overflow, None);
+        let stripped = standout_bbparser::strip_tags(&result);
+        assert_eq!(
+            display_width(&stripped),
+            8,
+            "truncated output should be exactly 8 visible columns"
+        );
+    }
+
+    #[test]
+    fn format_value_bbcode_right_align() {
+        let overflow = Overflow::Truncate {
+            at: TruncateAt::End,
+            marker: "…".to_string(),
+        };
+        let result = format_value("[dim]hi[/dim]", 6, Align::Right, &overflow, None);
+        let stripped = standout_bbparser::strip_tags(&result);
+        assert_eq!(display_width(&stripped), 6);
+        // Should have leading spaces then the tagged content
+        assert!(result.contains("[dim]hi[/dim]"));
+        assert!(result.starts_with("    "));
+    }
+
+    #[test]
+    fn format_value_bbcode_with_style() {
+        let overflow = Overflow::Truncate {
+            at: TruncateAt::End,
+            marker: "…".to_string(),
+        };
+        // BBCode input + column style applied
+        let result = format_value("[dim]ok[/dim]", 8, Align::Left, &overflow, Some("green"));
+        let stripped = standout_bbparser::strip_tags(&result);
+        assert_eq!(display_width(&stripped), 8);
+        // Should have outer [green]...[/green] wrapper
+        assert!(result.starts_with("[green]"));
+        assert!(result.ends_with("[/green]"));
+    }
+
+    #[test]
+    fn format_cell_lines_bbcode_wrap() {
+        let col = Column::new(Width::Fixed(10)).overflow(Overflow::Wrap { indent: 0 });
+        // "[bold]hello world foo[/bold]" → 15 visible chars, width 10
+        let result = format_cell_lines("[bold]hello world foo[/bold]", 10, &col);
+        match result {
+            CellOutput::Multi(lines) => {
+                for line in &lines {
+                    let stripped = standout_bbparser::strip_tags(line);
+                    assert!(
+                        display_width(&stripped) <= 10,
+                        "wrapped line '{}' exceeds column width (visible: {})",
+                        line,
+                        display_width(&stripped)
+                    );
+                }
+            }
+            CellOutput::Single(s) => {
+                let stripped = standout_bbparser::strip_tags(&s);
+                assert!(display_width(&stripped) <= 10, "single line should fit");
+            }
+        }
+    }
+
+    #[test]
+    fn format_cell_lines_bbcode_fits_preserves_tags() {
+        let col = Column::new(Width::Fixed(10)).overflow(Overflow::Wrap { indent: 0 });
+        // "hi" is 2 visible chars, fits in 10
+        let result = format_cell_lines("[bold]hi[/bold]", 10, &col);
+        match result {
+            CellOutput::Single(s) => {
+                assert!(
+                    s.contains("[bold]hi[/bold]"),
+                    "tags should be preserved when content fits"
+                );
+                let stripped = standout_bbparser::strip_tags(&s);
+                assert_eq!(display_width(&stripped), 10);
+            }
+            _ => panic!("expected Single output"),
+        }
+    }
+
+    #[test]
+    fn cell_output_line_bbcode_padding() {
+        // Simulate a styled CellOutput with BBCode
+        let output = CellOutput::Single("[green]ok[/green]".to_string());
+        let line = output.line(0, 8, Align::Left);
+        let stripped = standout_bbparser::strip_tags(&line);
+        assert_eq!(
+            display_width(&stripped),
+            8,
+            "CellOutput::line should pad to correct visible width"
+        );
+    }
+
+    #[test]
+    fn resolve_sub_widths_bbcode() {
+        use crate::tabular::{SubCol, SubColumns};
+        let sub_cols =
+            SubColumns::new(vec![SubCol::fill(), SubCol::bounded(0, 30).right()], " ").unwrap();
+        // Second value has BBCode — "[tag]" is 5 visible chars
+        let widths = resolve_sub_widths(&sub_cols, &["Title", "[dim][tag][/dim]"], 30);
+        // [dim][tag][/dim] visible width is 5, so bounded should resolve to 5
+        assert_eq!(
+            widths[1], 5,
+            "bounded sub-col should use visible width, not raw string length"
+        );
+        assert_eq!(
+            widths[0] + widths[1] + 1, // +1 for separator " "
+            30,
+            "widths + separator should equal parent width"
+        );
+    }
+}
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use crate::tabular::{SubCol, SubColumns};
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn sub_column_output_width_equals_parent(
+            parent_width in 10usize..100,
+            title_len in 0usize..50,
+            tag_len in 0usize..30,
+            bounded_max in 5usize..30,
+        ) {
+            let sub_cols = SubColumns::new(
+                vec![SubCol::fill(), SubCol::bounded(0, bounded_max)],
+                " ",
+            ).unwrap();
+
+            let title: String = "x".repeat(title_len);
+            let tag: String = "y".repeat(tag_len);
+            let values: Vec<&str> = vec![&title, &tag];
+
+            let result = format_sub_cells(&sub_cols, &values, parent_width);
+            prop_assert_eq!(
+                display_width(&result),
+                parent_width,
+                "sub-cell output must exactly fill parent width. Got '{}' (dw={}), expected {}",
+                result, display_width(&result), parent_width
+            );
+        }
+
+        #[test]
+        fn sub_column_non_grower_respects_bounds(
+            parent_width in 30usize..100,
+            min_w in 0usize..10,
+            max_w_offset in 1usize..20,
+            content_len in 0usize..40,
+        ) {
+            let max_w = min_w + max_w_offset; // ensure max > min
+            let sub_cols = SubColumns::new(
+                vec![SubCol::fill(), SubCol::bounded(min_w, max_w)],
+                " ",
+            ).unwrap();
+
+            let content: String = "z".repeat(content_len);
+            let values = vec!["title", content.as_str()];
+            let widths = resolve_sub_widths(&sub_cols, &values, parent_width);
+
+            let bounded_width = widths[1];
+            prop_assert!(
+                bounded_width >= min_w,
+                "bounded width {} < min {}", bounded_width, min_w
+            );
+            prop_assert!(
+                bounded_width <= max_w,
+                "bounded width {} > max {}", bounded_width, max_w
+            );
+        }
+
+        #[test]
+        fn sub_column_width_arithmetic(
+            parent_width in 10usize..100,
+            fixed_width in 1usize..15,
+            title_len in 0usize..50,
+        ) {
+            let sub_cols = SubColumns::new(
+                vec![SubCol::fill(), SubCol::fixed(fixed_width)],
+                "  ",
+            ).unwrap();
+
+            let title: String = "t".repeat(title_len);
+            let values = vec![title.as_str(), "fixed"];
+            let widths = resolve_sub_widths(&sub_cols, &values, parent_width);
+
+            let sep_width = display_width(&sub_cols.separator);
+            // Grower is always visible; only zero-width non-growers are skipped.
+            // For 2 sub-cols with grower at [0], the visible count includes the
+            // grower plus any non-zero non-grower columns.
+            let visible_non_growers: usize = if widths[1] > 0 { 1 } else { 0 };
+            let visible_count: usize = visible_non_growers + 1; // +1 for grower
+            let sep_overhead = visible_count.saturating_sub(1) * sep_width;
+            let total: usize = widths.iter().sum::<usize>() + sep_overhead;
+
+            prop_assert_eq!(
+                total, parent_width,
+                "widths {:?} + sep_overhead {} != parent {}",
+                widths, sep_overhead, parent_width
+            );
+        }
+
+        #[test]
+        fn sub_column_output_three_sub_cols(
+            parent_width in 20usize..100,
+            prefix_len in 0usize..20,
+            tag_len in 0usize..15,
+        ) {
+            let sub_cols = SubColumns::new(
+                vec![
+                    SubCol::bounded(0, 10),
+                    SubCol::fill(),
+                    SubCol::bounded(0, 15).right(),
+                ],
+                " ",
+            ).unwrap();
+
+            let prefix: String = "p".repeat(prefix_len);
+            let tag: String = "t".repeat(tag_len);
+            let values = vec![prefix.as_str(), "middle content", tag.as_str()];
+
+            let result = format_sub_cells(&sub_cols, &values, parent_width);
+            prop_assert_eq!(
+                display_width(&result),
+                parent_width,
+                "three sub-cols output must fill parent width"
+            );
+        }
     }
 }

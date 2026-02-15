@@ -246,6 +246,12 @@ pub struct Column {
     pub key: Option<String>,
     /// Optional header title (for table headers and CSV export).
     pub header: Option<String>,
+    /// Optional sub-column layout within this column.
+    ///
+    /// When set, cell values for this column should be arrays of sub-values.
+    /// Sub-column widths are resolved per-row within the parent column's
+    /// resolved width.
+    pub sub_columns: Option<SubColumns>,
 }
 
 impl Default for Column {
@@ -261,6 +267,7 @@ impl Default for Column {
             style_from_value: false,
             key: None,
             header: None,
+            sub_columns: None,
         }
     }
 }
@@ -396,6 +403,12 @@ impl Column {
         self.header = Some(header.into());
         self
     }
+
+    /// Set sub-columns for per-row width distribution within this column.
+    pub fn sub_columns(mut self, sub_cols: SubColumns) -> Self {
+        self.sub_columns = Some(sub_cols);
+        self
+    }
 }
 
 /// Builder for constructing `Column` instances.
@@ -411,6 +424,7 @@ pub struct ColumnBuilder {
     style_from_value: bool,
     key: Option<String>,
     header: Option<String>,
+    sub_columns: Option<SubColumns>,
 }
 
 impl ColumnBuilder {
@@ -544,6 +558,12 @@ impl ColumnBuilder {
         self
     }
 
+    /// Set sub-columns for per-row width distribution within this column.
+    pub fn sub_columns(mut self, sub_cols: SubColumns) -> Self {
+        self.sub_columns = Some(sub_cols);
+        self
+    }
+
     /// Build the `Column` instance.
     pub fn build(self) -> Column {
         let default = Column::default();
@@ -558,6 +578,7 @@ impl ColumnBuilder {
             style_from_value: self.style_from_value,
             key: self.key,
             header: self.header,
+            sub_columns: self.sub_columns,
         }
     }
 }
@@ -610,6 +631,210 @@ impl Col {
     /// `Col::fraction(2)` gets twice the space of `Col::fraction(1)` or `Col::fill()`.
     pub fn fraction(n: usize) -> Column {
         Column::new(Width::Fraction(n))
+    }
+}
+
+/// A sub-column within a parent column for per-row width distribution.
+///
+/// Sub-columns partition a parent column's resolved width on a per-row basis.
+/// Within a set of sub-columns, exactly one must use [`Width::Fill`] (the "grower")
+/// which absorbs remaining space after fixed/bounded sub-columns are satisfied.
+///
+/// This enables layouts where a single column contains multiple logical fields
+/// that share space dynamically — for example, a title that grows to fill
+/// available space alongside an optional tag of variable width:
+///
+/// ```text
+/// Gallery Navigation                            [feature]
+/// Bug : Static                                      [bug]
+/// Fixing Layout of Image Nav
+/// ```
+///
+/// Sub-column widths are resolved per-row from actual content, not across all rows.
+/// [`Width::Fraction`] is not supported for sub-columns.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SubColumn {
+    /// Optional name/identifier.
+    pub name: Option<String>,
+    /// Width strategy (Fixed, Bounded, or Fill only — no Fraction).
+    pub width: Width,
+    /// Text alignment within this sub-column.
+    pub align: Align,
+    /// How to handle overflow.
+    pub overflow: Overflow,
+    /// Representation for null/empty values.
+    pub null_repr: String,
+    /// Optional style name.
+    pub style: Option<String>,
+}
+
+impl Default for SubColumn {
+    fn default() -> Self {
+        SubColumn {
+            name: None,
+            width: Width::Fill,
+            align: Align::Left,
+            overflow: Overflow::default(),
+            null_repr: String::new(),
+            style: None,
+        }
+    }
+}
+
+impl SubColumn {
+    /// Create a sub-column with the specified width.
+    pub fn new(width: Width) -> Self {
+        SubColumn {
+            width,
+            ..Default::default()
+        }
+    }
+
+    /// Set the sub-column name/identifier.
+    pub fn named(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+
+    /// Set the text alignment.
+    pub fn align(mut self, align: Align) -> Self {
+        self.align = align;
+        self
+    }
+
+    /// Set alignment to right.
+    pub fn right(self) -> Self {
+        self.align(Align::Right)
+    }
+
+    /// Set alignment to center.
+    pub fn center(self) -> Self {
+        self.align(Align::Center)
+    }
+
+    /// Set the overflow behavior.
+    pub fn overflow(mut self, overflow: Overflow) -> Self {
+        self.overflow = overflow;
+        self
+    }
+
+    /// Set the null/empty value representation.
+    pub fn null_repr(mut self, null_repr: impl Into<String>) -> Self {
+        self.null_repr = null_repr.into();
+        self
+    }
+
+    /// Set the style name.
+    pub fn style(mut self, style: impl Into<String>) -> Self {
+        self.style = Some(style.into());
+        self
+    }
+}
+
+/// Configuration for sub-columns within a parent column.
+///
+/// Wraps a list of [`SubColumn`] definitions with a separator and validates
+/// the configuration: exactly one sub-column must use [`Width::Fill`], and
+/// [`Width::Fraction`] is not allowed.
+///
+/// # Example
+///
+/// ```rust
+/// use standout_render::tabular::{SubColumns, SubCol};
+///
+/// let sub_cols = SubColumns::new(
+///     vec![SubCol::fill(), SubCol::bounded(0, 30).right()],
+///     " ",
+/// ).unwrap();
+/// ```
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SubColumns {
+    /// The sub-column definitions.
+    pub columns: Vec<SubColumn>,
+    /// Separator string between sub-columns.
+    pub separator: String,
+}
+
+impl SubColumns {
+    /// Create and validate a sub-columns configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - No sub-columns are provided
+    /// - There is not exactly one Fill sub-column
+    /// - Any sub-column uses Fraction width
+    pub fn new(columns: Vec<SubColumn>, separator: impl Into<String>) -> Result<Self, String> {
+        if columns.is_empty() {
+            return Err("sub_columns must contain at least one sub-column".into());
+        }
+
+        let fill_count = columns
+            .iter()
+            .filter(|c| matches!(c.width, Width::Fill))
+            .count();
+        if fill_count != 1 {
+            return Err(format!(
+                "sub_columns must have exactly one Fill sub-column, found {}",
+                fill_count
+            ));
+        }
+
+        for (i, col) in columns.iter().enumerate() {
+            if matches!(col.width, Width::Fraction(_)) {
+                return Err(format!(
+                    "sub_column[{}]: Fraction width is not supported for sub-columns",
+                    i
+                ));
+            }
+        }
+
+        Ok(SubColumns {
+            columns,
+            separator: separator.into(),
+        })
+    }
+}
+
+/// Shorthand constructors for creating sub-columns.
+///
+/// ```rust
+/// use standout_render::tabular::SubCol;
+///
+/// let fill = SubCol::fill();                   // Fill remaining space
+/// let fixed = SubCol::fixed(10);               // Fixed width 10
+/// let bounded = SubCol::bounded(0, 30);        // Between 0 and 30
+/// let max = SubCol::max(20);                   // Up to 20
+///
+/// // Chain with fluent methods
+/// let tag = SubCol::bounded(0, 30).right().style("tag");
+/// ```
+pub struct SubCol;
+
+impl SubCol {
+    /// Create a fill sub-column that absorbs remaining space.
+    pub fn fill() -> SubColumn {
+        SubColumn::new(Width::Fill)
+    }
+
+    /// Create a fixed-width sub-column.
+    pub fn fixed(width: usize) -> SubColumn {
+        SubColumn::new(Width::Fixed(width))
+    }
+
+    /// Create a bounded-width sub-column (between min and max).
+    pub fn bounded(min: usize, max: usize) -> SubColumn {
+        SubColumn::new(Width::bounded(min, max))
+    }
+
+    /// Create a sub-column with maximum width.
+    pub fn max(max: usize) -> SubColumn {
+        SubColumn::new(Width::max(max))
+    }
+
+    /// Create a sub-column with minimum width.
+    pub fn min(min: usize) -> SubColumn {
+        SubColumn::new(Width::min(min))
     }
 }
 
@@ -1212,5 +1437,162 @@ mod tests {
         assert_eq!(header[0], "Name");
         assert_eq!(header[1], "age");
         assert_eq!(header[2], "");
+    }
+
+    // --- SubColumn tests ---
+
+    #[test]
+    fn sub_column_defaults() {
+        let sc = SubColumn::default();
+        assert_eq!(sc.width, Width::Fill);
+        assert_eq!(sc.align, Align::Left);
+        assert!(sc.name.is_none());
+        assert!(sc.style.is_none());
+        assert_eq!(sc.null_repr, "");
+    }
+
+    #[test]
+    fn sub_column_fluent_api() {
+        let sc = SubColumn::new(Width::Fixed(10))
+            .named("tag")
+            .right()
+            .style("tag_style")
+            .null_repr("N/A");
+
+        assert_eq!(sc.width, Width::Fixed(10));
+        assert_eq!(sc.name, Some("tag".to_string()));
+        assert_eq!(sc.align, Align::Right);
+        assert_eq!(sc.style, Some("tag_style".to_string()));
+        assert_eq!(sc.null_repr, "N/A");
+    }
+
+    #[test]
+    fn sub_col_shorthand_constructors() {
+        let fill = SubCol::fill();
+        assert_eq!(fill.width, Width::Fill);
+
+        let fixed = SubCol::fixed(10);
+        assert_eq!(fixed.width, Width::Fixed(10));
+
+        let bounded = SubCol::bounded(0, 30);
+        assert_eq!(
+            bounded.width,
+            Width::Bounded {
+                min: Some(0),
+                max: Some(30)
+            }
+        );
+
+        let max = SubCol::max(20);
+        assert_eq!(
+            max.width,
+            Width::Bounded {
+                min: None,
+                max: Some(20)
+            }
+        );
+
+        let min = SubCol::min(5);
+        assert_eq!(
+            min.width,
+            Width::Bounded {
+                min: Some(5),
+                max: None
+            }
+        );
+    }
+
+    #[test]
+    fn sub_col_shorthand_chaining() {
+        let sc = SubCol::bounded(0, 30).right().style("tag");
+        assert_eq!(sc.align, Align::Right);
+        assert_eq!(sc.style, Some("tag".to_string()));
+    }
+
+    // --- SubColumns validation tests ---
+
+    #[test]
+    fn sub_columns_valid_construction() {
+        let result = SubColumns::new(vec![SubCol::fill(), SubCol::bounded(0, 30)], " ");
+        assert!(result.is_ok());
+        let sc = result.unwrap();
+        assert_eq!(sc.columns.len(), 2);
+        assert_eq!(sc.separator, " ");
+    }
+
+    #[test]
+    fn sub_columns_rejects_empty() {
+        let result = SubColumns::new(vec![], " ");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("at least one"));
+    }
+
+    #[test]
+    fn sub_columns_rejects_no_fill() {
+        let result = SubColumns::new(vec![SubCol::fixed(10), SubCol::bounded(0, 30)], " ");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("exactly one Fill"));
+    }
+
+    #[test]
+    fn sub_columns_rejects_two_fills() {
+        let result = SubColumns::new(vec![SubCol::fill(), SubCol::fill()], " ");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("exactly one Fill"));
+    }
+
+    #[test]
+    fn sub_columns_rejects_fraction() {
+        let result = SubColumns::new(
+            vec![SubCol::fill(), SubColumn::new(Width::Fraction(2))],
+            " ",
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Fraction"));
+    }
+
+    #[test]
+    fn sub_columns_serde_roundtrip() {
+        let sc = SubColumns::new(
+            vec![
+                SubCol::fill().named("title"),
+                SubCol::bounded(0, 30).right().named("tag"),
+            ],
+            "  ",
+        )
+        .unwrap();
+
+        let json = serde_json::to_string(&sc).unwrap();
+        let parsed: SubColumns = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.columns.len(), 2);
+        assert_eq!(parsed.separator, "  ");
+        assert_eq!(parsed.columns[0].width, Width::Fill);
+        assert_eq!(
+            parsed.columns[1].width,
+            Width::Bounded {
+                min: Some(0),
+                max: Some(30)
+            }
+        );
+    }
+
+    #[test]
+    fn column_with_sub_columns() {
+        let sub_cols =
+            SubColumns::new(vec![SubCol::fill(), SubCol::bounded(0, 30).right()], " ").unwrap();
+
+        let col = Col::fill().sub_columns(sub_cols);
+        assert!(col.sub_columns.is_some());
+        assert_eq!(col.sub_columns.unwrap().columns.len(), 2);
+    }
+
+    #[test]
+    fn column_builder_with_sub_columns() {
+        let sub_cols = SubColumns::new(vec![SubCol::fill(), SubCol::fixed(8)], " ").unwrap();
+
+        let col = Column::builder().fill().sub_columns(sub_cols).build();
+
+        assert_eq!(col.width, Width::Fill);
+        assert!(col.sub_columns.is_some());
     }
 }

@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Sub-column support for tabular layout** — Columns can now contain inner sub-columns for per-row layout distribution. One sub-column is the "grower" (`Fill`); the rest are `Fixed` or `Bounded`. Widths are resolved per-row from actual content, enabling patterns like `title + padding + tag` where the space between them varies per row.
+
+  ```rust
+  use standout_render::tabular::{Col, SubCol, SubColumns, CellValue};
+
+  let col = Col::fill().sub_columns(
+      SubColumns::new(
+          vec![SubCol::fill(), SubCol::bounded(0, 30).right()],
+          " ",
+      ).unwrap(),
+  );
+
+  // In templates:
+  // {{ fmt.row(["1.", ["Title", "[tag]"], "4d"]) }}
+  ```
+
+  **New types:** `SubColumn`, `SubColumns`, `SubCol`, `CellValue`
+  **New methods:** `TabularFormatter::format_row_cells()`, `Table::row_cells()`
+
+- **`visible_width` utility function** — New `visible_width(s)` that strips both BBCode tags and ANSI escape codes before measuring display width. Use this for any text that may contain markup.
+
+### Fixed
+
+- **BBCode tags miscounted in formatter width calculations** (Issue #104) — `format_value`, `format_cell_lines`, `CellOutput::line`, and `resolve_sub_widths` now correctly strip BBCode tags before measuring display width. Previously, tags like `[bold]...[/bold]` were counted toward column width, causing incorrect truncation and padding.
+
 ## [6.1.0] - 2026-02-11
 
 ### Added
