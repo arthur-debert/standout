@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.2.0] - 2026-02-15
+
 ### Added
 
 - **Sub-column support for tabular layout** — Columns can now contain inner sub-columns for per-row layout distribution. One sub-column is the "grower" (`Fill`); the rest are `Fixed` or `Bounded`. Widths are resolved per-row from actual content, enabling patterns like `title + padding + tag` where the space between them varies per row.
@@ -1092,7 +1094,8 @@ let output = render_with_output(template, &data, &theme, OutputMode::Term)?;
   - Command handler system with `dispatch_from` convenience method
   - Archive variant support in clap integration
 
-[Unreleased]: https://github.com/arthur-debert/standout/compare/standout-v6.1.0...HEAD
+[Unreleased]: https://github.com/arthur-debert/standout/compare/standout-v6.2.0...HEAD
+[6.2.0]: https://github.com/arthur-debert/standout/compare/standout-v6.1.0...standout-v6.2.0
 [6.1.0]: https://github.com/arthur-debert/standout/compare/standout-v6.0.2...standout-v6.1.0
 [6.0.2]: https://github.com/arthur-debert/standout/compare/standout-v6.0.1...standout-v6.0.2
 [6.0.1]: https://github.com/arthur-debert/standout/compare/standout-v6.0.0...standout-v6.0.1
