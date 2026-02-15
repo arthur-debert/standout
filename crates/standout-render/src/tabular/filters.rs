@@ -47,7 +47,9 @@ use standout_bbparser::strip_tags;
 use super::decorator::{BorderStyle, Table};
 use super::formatter::TabularFormatter;
 use super::traits::Tabular;
-use super::types::{Align, Column, Overflow, TabularSpec, TruncateAt, Width};
+use super::types::{
+    Align, Column, Overflow, SubColumn, SubColumns, TabularSpec, TruncateAt, Width,
+};
 use super::util::{
     display_width, pad_center, pad_left, pad_right, truncate_end, truncate_middle, truncate_start,
 };
@@ -378,6 +380,13 @@ fn parse_column(value: &Value) -> Result<Column, minijinja::Error> {
         }
     }
 
+    // Optional: sub_columns
+    if let Ok(sub_val) = value.get_attr("sub_columns") {
+        if !sub_val.is_none() && !sub_val.is_undefined() {
+            col = col.sub_columns(parse_sub_columns(&sub_val)?);
+        }
+    }
+
     Ok(col)
 }
 
@@ -429,6 +438,87 @@ fn parse_overflow(value: &Value) -> Result<Overflow, minijinja::Error> {
 
     // Default to truncate
     Ok(Overflow::default())
+}
+
+/// Parse a sub-columns specification from a template value.
+///
+/// Expected format:
+/// ```jinja
+/// {"columns": [sub_col1, sub_col2, ...], "separator": " "}
+/// ```
+fn parse_sub_columns(value: &Value) -> Result<SubColumns, minijinja::Error> {
+    let cols_val = value.get_attr("columns").map_err(|_| {
+        minijinja::Error::new(
+            minijinja::ErrorKind::InvalidOperation,
+            "sub_columns must have a 'columns' attribute",
+        )
+    })?;
+
+    let iter = cols_val.try_iter().map_err(|_| {
+        minijinja::Error::new(
+            minijinja::ErrorKind::InvalidOperation,
+            "sub_columns.columns must be an array",
+        )
+    })?;
+
+    let mut columns = Vec::new();
+    for col_val in iter {
+        columns.push(parse_sub_column(&col_val)?);
+    }
+
+    let separator = value
+        .get_attr("separator")
+        .ok()
+        .filter(|v| !v.is_none() && !v.is_undefined())
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| " ".to_string());
+
+    SubColumns::new(columns, separator)
+        .map_err(|e| minijinja::Error::new(minijinja::ErrorKind::InvalidOperation, e))
+}
+
+/// Parse a single sub-column definition from a template value.
+///
+/// Sub-columns support: `width`, `align`, `overflow`, `style`, `null_repr`.
+fn parse_sub_column(value: &Value) -> Result<SubColumn, minijinja::Error> {
+    // Width defaults to Fill
+    let width = if let Ok(width_val) = value.get_attr("width") {
+        if !width_val.is_none() && !width_val.is_undefined() {
+            parse_width(&width_val)?
+        } else {
+            Width::Fill
+        }
+    } else {
+        Width::Fill
+    };
+
+    let mut sub_col = SubColumn::new(width);
+
+    if let Ok(align_val) = value.get_attr("align") {
+        if !align_val.is_none() && !align_val.is_undefined() {
+            sub_col = sub_col.align(parse_align(&align_val.to_string()));
+        }
+    }
+
+    if let Ok(overflow_val) = value.get_attr("overflow") {
+        if !overflow_val.is_none() && !overflow_val.is_undefined() {
+            sub_col = sub_col.overflow(parse_overflow(&overflow_val)?);
+        }
+    }
+
+    if let Ok(style_val) = value.get_attr("style") {
+        if !style_val.is_none() && !style_val.is_undefined() {
+            sub_col = sub_col.style(style_val.to_string());
+        }
+    }
+
+    if let Ok(null_val) = value.get_attr("null_repr") {
+        if !null_val.is_none() && !null_val.is_undefined() {
+            sub_col = sub_col.null_repr(null_val.to_string());
+        }
+    }
+
+    Ok(sub_col)
 }
 
 /// Parse a width specification from a template value.
@@ -1561,6 +1651,142 @@ mod tests {
             .unwrap();
         assert!(result.contains("Alice"));
         assert!(result.contains("active"));
+    }
+
+    // ============================================================================
+    // Sub-column Template Tests
+    // ============================================================================
+
+    #[test]
+    fn function_tabular_sub_columns_basic() {
+        let mut env = setup_env();
+        env.add_template(
+            "test",
+            r#"{% set fmt = tabular([
+                {"width": 4},
+                {"width": "fill", "sub_columns": {
+                    "columns": [
+                        {"width": "fill"},
+                        {"width": {"min": 0, "max": 20}, "align": "right"}
+                    ],
+                    "separator": " "
+                }},
+                {"width": 4, "align": "right"}
+            ], separator="  ", width=60) %}{{ fmt.row(["1.", ["Gallery Navigation", "[feature]"], "4d"]) }}"#,
+        )
+        .unwrap();
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(context!())
+            .unwrap();
+        assert!(result.contains("Gallery Navigation"));
+        assert!(result.contains("[feature]"));
+        assert!(result.contains("1."));
+        assert!(result.contains("4d"));
+        assert_eq!(display_width(&result), 60);
+    }
+
+    #[test]
+    fn function_tabular_sub_columns_empty_tag() {
+        let mut env = setup_env();
+        env.add_template(
+            "test",
+            r#"{% set fmt = tabular([
+                {"width": "fill", "sub_columns": {
+                    "columns": [
+                        {"width": "fill"},
+                        {"width": {"min": 0, "max": 20}, "align": "right"}
+                    ],
+                    "separator": " "
+                }}
+            ], width=40) %}{{ fmt.row([["Title only", ""]]) }}"#,
+        )
+        .unwrap();
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(context!())
+            .unwrap();
+        assert!(result.contains("Title only"));
+        assert_eq!(display_width(&result), 40);
+    }
+
+    #[test]
+    fn function_tabular_sub_columns_plain_string_fallback() {
+        // When a plain string is passed for a sub-column cell, it should work
+        let mut env = setup_env();
+        env.add_template(
+            "test",
+            r#"{% set fmt = tabular([
+                {"width": "fill", "sub_columns": {
+                    "columns": [{"width": "fill"}, {"width": {"min": 0, "max": 10}}],
+                    "separator": " "
+                }}
+            ], width=30) %}{{ fmt.row(["just a string"]) }}"#,
+        )
+        .unwrap();
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(context!())
+            .unwrap();
+        assert_eq!(display_width(&result), 30);
+    }
+
+    #[test]
+    fn function_tabular_sub_columns_with_style() {
+        let mut env = setup_env();
+        env.add_template(
+            "test",
+            r#"{% set fmt = tabular([
+                {"width": "fill", "sub_columns": {
+                    "columns": [
+                        {"width": "fill"},
+                        {"width": {"min": 0, "max": 20}, "align": "right", "style": "tag"}
+                    ],
+                    "separator": " "
+                }}
+            ], width=40) %}{{ fmt.row([["Title", "feature"]]) }}"#,
+        )
+        .unwrap();
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(context!())
+            .unwrap();
+        assert!(result.contains("[tag]"));
+        assert!(result.contains("feature"));
+        assert!(result.contains("[/tag]"));
+    }
+
+    #[test]
+    fn function_table_sub_columns_with_border() {
+        let mut env = setup_env();
+        env.add_template(
+            "test",
+            r#"{% set tbl = table([
+                {"width": 4},
+                {"width": "fill", "sub_columns": {
+                    "columns": [
+                        {"width": "fill"},
+                        {"width": {"min": 0, "max": 15}, "align": "right"}
+                    ],
+                    "separator": " "
+                }},
+                {"width": 4}
+            ], border="light", separator="  ", width=50) %}{{ tbl.row(["1.", ["My Title", "[bug]"], "2d"]) }}"#,
+        )
+        .unwrap();
+        let result = env
+            .get_template("test")
+            .unwrap()
+            .render(context!())
+            .unwrap();
+        assert!(result.starts_with('│'));
+        assert!(result.ends_with('│'));
+        assert!(result.contains("My Title"));
+        assert!(result.contains("[bug]"));
     }
 
     #[test]

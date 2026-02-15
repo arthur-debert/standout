@@ -200,7 +200,103 @@ Now the status column is always at the right edge. If the terminal is 100 column
 
 ---
 
-## Step 7: Handling Long Content
+## Step 7: Sub-Columns (Distributing Space Within a Column)
+
+Sometimes a column contains multiple logical parts with different sizing needs. A common example: a task list where the middle column has a variable-length title and an optional tag, separated by flexible spacing.
+
+Without sub-columns, you can't compose `title + padding + tag` because the caller doesn't know the resolved column width. Sub-columns solve this by letting you define inner structure that is resolved per-row within the parent column's width.
+
+### The Problem
+
+Consider this layout with three columns: index (fixed), content (fill), and duration (fixed right-aligned). The content column should contain a title that grows and an optional tag that's right-aligned:
+
+```text
+1.  Gallery Navigation              [feature]  4d
+2.  Bug : Static Analysis                      8h
+3.  Fixing Layout of Image Nav      [bug]      2d
+```
+
+The tag `[feature]` must be right-aligned within the content column, with the title filling the remaining space. This is impossible with flat columns because the content column's resolved width isn't known to the template.
+
+### The Solution
+
+Define `sub_columns` on the parent column. Exactly one sub-column must be `"fill"` (the grower); the rest are Fixed or Bounded:
+
+```jinja
+{% set t = tabular([
+    {"width": 4},
+    {"width": "fill", "sub_columns": {
+        "columns": [
+            {"width": "fill"},
+            {"width": {"min": 0, "max": 30}, "align": "right"}
+        ],
+        "separator": " "
+    }},
+    {"width": 4, "align": "right"}
+], separator="  ", width=60) %}
+```
+
+Now pass nested arrays for the sub-column cells:
+
+```jinja
+{% for task in tasks %}
+{{ t.row([loop.index ~ ".", [task.title, task.tag], task.duration]) }}
+{% endfor %}
+```
+
+Each row resolves sub-column widths independently. If the tag is empty (Bounded with min=0), it takes zero width and the title fills the entire column. If the tag is present, it gets its content width (up to max=30) and the title gets the rest.
+
+### Sub-Column Options
+
+Sub-columns support the same formatting options as regular columns:
+
+| Option | Meaning |
+| ------ | ------- |
+| `width` | `"fill"`, number (fixed), or `{"min": n, "max": m}` (bounded) |
+| `align` | `"left"` (default), `"right"`, or `"center"` |
+| `overflow` | `"truncate"`, `"clip"`, `"wrap"`, or object form |
+| `style` | Style name to wrap sub-cell content |
+
+### Rust API
+
+From Rust, use `CellValue::Sub` for sub-column cells:
+
+```rust
+use standout_render::tabular::{
+    TabularSpec, Col, SubCol, SubColumns, TabularFormatter, CellValue,
+};
+
+let spec = TabularSpec::builder()
+    .column(Col::fixed(4))
+    .column(Col::fill().sub_columns(
+        SubColumns::new(
+            vec![SubCol::fill(), SubCol::bounded(0, 30).right()],
+            " ",
+        ).unwrap(),
+    ))
+    .column(Col::fixed(4).align(standout_render::tabular::Align::Right))
+    .separator("  ")
+    .build();
+
+let formatter = TabularFormatter::new(&spec, 60);
+
+let row = formatter.format_row_cells(&[
+    CellValue::Single("1."),
+    CellValue::Sub(vec!["Gallery Navigation", "[feature]"]),
+    CellValue::Single("4d"),
+]);
+```
+
+### Design Constraints
+
+- **One level only**: Sub-columns cannot be nested recursively.
+- **Exactly one Fill**: One sub-column must be `"fill"` (the grower). The rest must be Fixed or Bounded.
+- **Per-row resolution**: Sub-column widths are computed independently for each row, based on actual content.
+- **Width invariant**: The formatted sub-cell output is always exactly the parent column's width.
+
+---
+
+## Step 8: Handling Long Content
 
 What happens when a title is longer than its column? By default, Tabular truncates at the end with `...`. But you have options:
 
@@ -239,7 +335,7 @@ The wrapped lines are indented to align with the column.
 
 ---
 
-## Step 8: Dynamic Styling Based on Values
+## Step 9: Dynamic Styling Based on Values
 
 Here's where Tabular shines for task lists. We want status colors: green for done, yellow for pending.
 
@@ -280,7 +376,7 @@ In the terminal, statuses appear in their respective colors, making it instantly
 
 ---
 
-## Step 9: Column-Level Styles
+## Step 10: Column-Level Styles
 
 Instead of styling individual values, you can style entire columns. This is useful for de-emphasizing certain information:
 
@@ -296,7 +392,7 @@ Now indices appear in a muted style (typically gray), while titles and statuses 
 
 ---
 
-## Step 10: Automatic Field Extraction
+## Step 11: Automatic Field Extraction
 
 Tired of manually listing `[task.title, task.status, ...]`? If your column names match your struct fields, use `row_from()`:
 
@@ -320,7 +416,7 @@ Tabular extracts `task.title`, `task.status`, etc. automatically. For nested fie
 
 ---
 
-## Step 11: Adding Headers and Borders
+## Step 12: Adding Headers and Borders
 
 For a proper table with headers, switch from `tabular()` to `table()`:
 
@@ -385,7 +481,7 @@ For dense data, add lines between rows:
 
 ---
 
-## Step 12: The Complete Example
+## Step 13: The Complete Example
 
 Putting it all together, here's a polished task list:
 
