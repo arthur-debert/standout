@@ -171,7 +171,7 @@ fn sanitize_xml_name(name: &str) -> String {
 /// - If `value` is an Array, each element becomes a row.
 /// - If `value` is an Object, it becomes a single row.
 /// - Nested objects are flattened with dot notation.
-/// - Arrays inside objects are serialized as JSON strings.
+/// - Arrays inside objects are flattened with indexed keys (e.g., items.0, items.1).
 pub fn flatten_json_for_csv(value: &Value) -> (Vec<String>, Vec<Vec<String>>) {
     let mut rows: Vec<BTreeMap<String, String>> = Vec::new();
 
@@ -229,10 +229,12 @@ fn flatten_recursive(value: &Value, prefix: &str, acc: &mut BTreeMap<String, Str
             let key = if prefix.is_empty() { "value" } else { prefix };
             acc.insert(key.to_string(), s.clone());
         }
-        Value::Array(_) => {
-            // Serialize array as JSON string
-            let key = if prefix.is_empty() { "value" } else { prefix };
-            acc.insert(key.to_string(), value.to_string());
+        Value::Array(arr) => {
+            let key_prefix = if prefix.is_empty() { "value" } else { prefix };
+            for (i, item) in arr.iter().enumerate() {
+                let indexed_key = format!("{}.{}", key_prefix, i);
+                flatten_recursive(item, &indexed_key, acc);
+            }
         }
         Value::Object(map) => {
             if map.is_empty() {
@@ -441,5 +443,104 @@ mod tests {
     fn test_sanitize_xml_name_special_chars() {
         assert_eq!(sanitize_xml_name("a b"), "a_b");
         assert_eq!(sanitize_xml_name("a@b"), "a_b");
+    }
+
+    // =========================================================================
+    // flatten_json_for_csv tests
+    // =========================================================================
+
+    #[test]
+    fn test_flatten_csv_simple_object() {
+        let data = serde_json::json!({"name": "Alice", "age": 30});
+        let (headers, rows) = flatten_json_for_csv(&data);
+        assert_eq!(headers, vec!["age", "name"]);
+        assert_eq!(rows, vec![vec!["30", "Alice"]]);
+    }
+
+    #[test]
+    fn test_flatten_csv_array_of_objects() {
+        let data = serde_json::json!([
+            {"name": "Alice", "age": 30},
+            {"name": "Bob", "age": 25}
+        ]);
+        let (headers, rows) = flatten_json_for_csv(&data);
+        assert_eq!(headers, vec!["age", "name"]);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0], vec!["30", "Alice"]);
+        assert_eq!(rows[1], vec!["25", "Bob"]);
+    }
+
+    #[test]
+    fn test_flatten_csv_nested_objects() {
+        let data = serde_json::json!({"user": {"name": "Alice", "age": 30}});
+        let (headers, rows) = flatten_json_for_csv(&data);
+        assert_eq!(headers, vec!["user.age", "user.name"]);
+        assert_eq!(rows, vec![vec!["30", "Alice"]]);
+    }
+
+    #[test]
+    fn test_flatten_csv_array_field() {
+        let data = serde_json::json!({"name": "Alice", "tags": ["a", "b", "c"]});
+        let (headers, rows) = flatten_json_for_csv(&data);
+        assert!(headers.contains(&"name".to_string()));
+        assert!(headers.contains(&"tags.0".to_string()));
+        assert!(headers.contains(&"tags.1".to_string()));
+        assert!(headers.contains(&"tags.2".to_string()));
+        // Check values
+        let name_idx = headers.iter().position(|h| h == "name").unwrap();
+        let t0_idx = headers.iter().position(|h| h == "tags.0").unwrap();
+        let t1_idx = headers.iter().position(|h| h == "tags.1").unwrap();
+        let t2_idx = headers.iter().position(|h| h == "tags.2").unwrap();
+        assert_eq!(rows[0][name_idx], "Alice");
+        assert_eq!(rows[0][t0_idx], "a");
+        assert_eq!(rows[0][t1_idx], "b");
+        assert_eq!(rows[0][t2_idx], "c");
+    }
+
+    #[test]
+    fn test_flatten_csv_nested_array_of_objects() {
+        let data = serde_json::json!({
+            "items": [
+                {"name": "x", "value": 1},
+                {"name": "y", "value": 2}
+            ]
+        });
+        let (headers, rows) = flatten_json_for_csv(&data);
+        assert!(headers.contains(&"items.0.name".to_string()));
+        assert!(headers.contains(&"items.0.value".to_string()));
+        assert!(headers.contains(&"items.1.name".to_string()));
+        assert!(headers.contains(&"items.1.value".to_string()));
+    }
+
+    #[test]
+    fn test_flatten_csv_empty_array_field() {
+        let data = serde_json::json!({"name": "Alice", "tags": []});
+        let (headers, rows) = flatten_json_for_csv(&data);
+        assert_eq!(headers, vec!["name"]);
+        assert_eq!(rows, vec![vec!["Alice"]]);
+    }
+
+    #[test]
+    fn test_flatten_csv_mixed_array_rows() {
+        // Array of objects where some have arrays and some don't
+        let data = serde_json::json!([
+            {"name": "Alice", "tags": ["x"]},
+            {"name": "Bob"}
+        ]);
+        let (headers, rows) = flatten_json_for_csv(&data);
+        assert!(headers.contains(&"name".to_string()));
+        assert!(headers.contains(&"tags.0".to_string()));
+        assert_eq!(rows.len(), 2);
+        // Bob's tags.0 should be empty
+        let t0_idx = headers.iter().position(|h| h == "tags.0").unwrap();
+        assert_eq!(rows[1][t0_idx], "");
+    }
+
+    #[test]
+    fn test_flatten_csv_bare_primitive() {
+        let data = serde_json::json!(42);
+        let (headers, rows) = flatten_json_for_csv(&data);
+        assert_eq!(headers, vec!["value"]);
+        assert_eq!(rows, vec![vec!["42"]]);
     }
 }
