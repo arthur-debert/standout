@@ -1554,6 +1554,27 @@ mod tests {
         assert!(!output.contains("30"));
     }
 
+    #[test]
+    fn test_render_auto_csv_mode_with_array_field() {
+        use serde_json::json;
+
+        let theme = Theme::new();
+        let data = json!([
+            {"name": "Alice", "tags": ["admin", "user"]},
+            {"name": "Bob", "tags": ["user"]}
+        ]);
+
+        let output = render_auto("unused", &data, &theme, OutputMode::Csv).unwrap();
+
+        // Array fields should be flattened with indexed keys
+        assert!(output.contains("tags.0"));
+        assert!(output.contains("tags.1"));
+        assert!(output.contains("admin"));
+        assert!(output.contains("user"));
+        // Should NOT contain JSON array syntax
+        assert!(!output.contains("[\""));
+    }
+
     // ============================================================================
     // Context Injection Tests
     // ============================================================================
