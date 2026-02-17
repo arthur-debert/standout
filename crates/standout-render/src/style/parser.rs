@@ -212,6 +212,11 @@ pub fn parse_stylesheet(yaml: &str) -> Result<ThemeVariants, StylesheetError> {
             message: format!("Style name must be a string, got {:?}", key),
         })?;
 
+        // Skip the 'icons' section — it is parsed separately by Theme
+        if name == "icons" {
+            continue;
+        }
+
         let def = StyleDefinition::parse(value, name)?;
         definitions.insert(name.to_string(), def);
     }

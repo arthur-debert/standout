@@ -76,8 +76,12 @@
 //! - [`crate::style`]: Low-level style primitives and aliasing
 
 mod adaptive;
+mod icon_def;
+mod icon_mode;
 #[allow(clippy::module_inception)]
 mod theme;
 
 pub use adaptive::{detect_color_mode, set_theme_detector, ColorMode};
+pub use icon_def::{IconDefinition, IconSet};
+pub use icon_mode::{detect_icon_mode, set_icon_detector, IconMode};
 pub use theme::Theme;

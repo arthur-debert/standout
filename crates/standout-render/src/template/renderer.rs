@@ -41,7 +41,7 @@ use super::registry::{walk_template_dir, ResolvedTemplate, TemplateRegistry};
 use crate::error::RenderError;
 use crate::output::OutputMode;
 use crate::style::Styles;
-use crate::theme::Theme;
+use crate::theme::{detect_icon_mode, Theme};
 use crate::EmbeddedTemplates;
 
 /// A renderer with pre-registered templates.
@@ -129,6 +129,8 @@ pub struct Renderer {
     styles: Styles,
     /// Output mode for BBParser transform selection
     output_mode: OutputMode,
+    /// Resolved icon context for template injection
+    icon_context: HashMap<String, serde_json::Value>,
 }
 
 impl Renderer {
@@ -174,6 +176,20 @@ impl Renderer {
         let color_mode = super::super::theme::detect_color_mode();
         let styles = theme.resolve_styles(Some(color_mode));
 
+        // Resolve icons for the detected icon mode
+        let icon_context = if theme.icons().is_empty() {
+            HashMap::new()
+        } else {
+            let icon_mode = detect_icon_mode();
+            let resolved_icons = theme.resolve_icons(icon_mode);
+            let mut ctx = HashMap::new();
+            ctx.insert(
+                "icons".to_string(),
+                serde_json::to_value(resolved_icons).unwrap(),
+            );
+            ctx
+        };
+
         Ok(Self {
             engine,
             registry: TemplateRegistry::new(),
@@ -181,6 +197,7 @@ impl Renderer {
             template_dirs: Vec::new(),
             styles,
             output_mode: mode,
+            icon_context,
         })
     }
 
@@ -443,7 +460,19 @@ impl Renderer {
             .is_ok_and(|t| matches!(t, ResolvedTemplate::Inline(_)));
 
         // Convert data to serde_json::Value for the engine
-        let data_value = serde_json::to_value(data)?;
+        // If we have icon context, merge it with the data (data fields take precedence)
+        let data_value = if self.icon_context.is_empty() {
+            serde_json::to_value(data)?
+        } else {
+            let mut merged = self.icon_context.clone();
+            let data_val = serde_json::to_value(data)?;
+            if let Some(obj) = data_val.as_object() {
+                for (k, v) in obj {
+                    merged.insert(k.clone(), v.clone());
+                }
+            }
+            serde_json::Value::Object(merged.into_iter().collect())
+        };
 
         // In release mode: always use engine cache if available.
         // In debug mode: only use engine cache if it's an inline template (which doesn't change on disk).
@@ -970,5 +999,88 @@ mod tests {
             )
             .unwrap();
         assert_eq!(output, "Hello, Standout!");
+    }
+
+    // =========================================================================
+    // Renderer icon tests
+    // =========================================================================
+
+    #[test]
+    #[serial_test::serial]
+    fn test_renderer_with_icons() {
+        use crate::{set_icon_detector, IconDefinition, IconMode};
+
+        set_icon_detector(|| IconMode::Classic);
+
+        let theme = Theme::new().add_icon(
+            "check",
+            IconDefinition::new("[ok]").with_nerdfont("\u{f00c}"),
+        );
+
+        let mut renderer = Renderer::with_output(theme, OutputMode::Text).unwrap();
+        renderer
+            .add_template("test", "{{ icons.check }} {{ message }}")
+            .unwrap();
+
+        let output = renderer
+            .render(
+                "test",
+                &SimpleData {
+                    message: "done".into(),
+                },
+            )
+            .unwrap();
+        assert_eq!(output, "[ok] done");
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_renderer_with_icons_nerdfont() {
+        use crate::{set_icon_detector, IconDefinition, IconMode};
+
+        set_icon_detector(|| IconMode::NerdFont);
+
+        let theme = Theme::new().add_icon(
+            "check",
+            IconDefinition::new("[ok]").with_nerdfont("\u{f00c}"),
+        );
+
+        let mut renderer = Renderer::with_output(theme, OutputMode::Text).unwrap();
+        renderer
+            .add_template("test", "{{ icons.check }} {{ message }}")
+            .unwrap();
+
+        let output = renderer
+            .render(
+                "test",
+                &SimpleData {
+                    message: "done".into(),
+                },
+            )
+            .unwrap();
+        assert_eq!(output, "\u{f00c} done");
+
+        // Reset
+        set_icon_detector(|| IconMode::Classic);
+    }
+
+    #[test]
+    fn test_renderer_without_icons() {
+        // Ensure renderer works fine without icons
+        let theme = Theme::new().add("ok", Style::new().green());
+        let mut renderer = Renderer::with_output(theme, OutputMode::Text).unwrap();
+        renderer
+            .add_template("test", "[ok]{{ message }}[/ok]")
+            .unwrap();
+
+        let output = renderer
+            .render(
+                "test",
+                &SimpleData {
+                    message: "hi".into(),
+                },
+            )
+            .unwrap();
+        assert_eq!(output, "hi");
     }
 }

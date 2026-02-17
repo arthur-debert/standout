@@ -1,5 +1,6 @@
 //! Utility functions for text processing and color conversion.
 
+use serde::Serialize;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -83,6 +84,83 @@ pub fn truncate_to_width(s: &str, max_width: usize) -> String {
         current_width += char_width;
     }
 
+    result
+}
+
+/// Serializes data to XML, handling all serializable types.
+///
+/// Named structs serialize directly (using the struct name as root element).
+/// Map-like types are wrapped in a `<data>` root tag with keys sanitized to
+/// valid XML element names. Primitive types (strings, numbers, booleans) are
+/// wrapped as `<data><value>...</value></data>`. Null values produce an empty
+/// `<data/>` element.
+pub fn serialize_to_xml<T: Serialize + ?Sized>(data: &T) -> Result<String, quick_xml::DeError> {
+    // Direct serialization works for named structs (keys are known valid)
+    if let Ok(xml) = quick_xml::se::to_string(data) {
+        return Ok(xml);
+    }
+    // For types that need a root element (maps, primitives, arrays),
+    // convert to JSON Value, sanitize keys, and serialize with root tag
+    let value = serde_json::to_value(data).unwrap_or(serde_json::Value::Null);
+    let sanitized = sanitize_xml_keys(&value);
+    match sanitized {
+        serde_json::Value::Object(_) => quick_xml::se::to_string_with_root("data", &sanitized),
+        serde_json::Value::Null => quick_xml::se::to_string_with_root(
+            "data",
+            &serde_json::Value::Object(serde_json::Map::new()),
+        ),
+        other => {
+            let mut map = serde_json::Map::new();
+            map.insert("value".to_string(), other);
+            quick_xml::se::to_string_with_root("data", &serde_json::Value::Object(map))
+        }
+    }
+}
+
+/// Recursively sanitizes JSON object keys to be valid XML element names.
+fn sanitize_xml_keys(value: &serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(map) => {
+            let mut new_map = serde_json::Map::new();
+            for (key, val) in map {
+                let safe_key = sanitize_xml_name(key);
+                new_map.insert(safe_key, sanitize_xml_keys(val));
+            }
+            serde_json::Value::Object(new_map)
+        }
+        serde_json::Value::Array(arr) => {
+            serde_json::Value::Array(arr.iter().map(sanitize_xml_keys).collect())
+        }
+        other => other.clone(),
+    }
+}
+
+/// Ensures a string is a valid XML element name.
+///
+/// XML names must start with a letter or underscore. Subsequent characters
+/// may be letters, digits, hyphens, underscores, or periods. Invalid
+/// characters are replaced with underscores.
+fn sanitize_xml_name(name: &str) -> String {
+    if name.is_empty() {
+        return "_".to_string();
+    }
+    let mut result = String::with_capacity(name.len() + 1);
+    for (i, c) in name.chars().enumerate() {
+        if i == 0 {
+            if c.is_ascii_alphabetic() || c == '_' {
+                result.push(c);
+            } else {
+                result.push('_');
+                if c.is_ascii_alphanumeric() {
+                    result.push(c);
+                }
+            }
+        } else if c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.' {
+            result.push(c);
+        } else {
+            result.push('_');
+        }
+    }
     result
 }
 
@@ -228,5 +306,140 @@ mod tests {
     #[test]
     fn test_truncate_to_width_one_width() {
         assert_eq!(truncate_to_width("Hello", 1), "…");
+    }
+
+    #[test]
+    fn test_serialize_to_xml_named_struct() {
+        #[derive(serde::Serialize)]
+        struct User {
+            name: String,
+            age: u32,
+        }
+
+        let data = User {
+            name: "Alice".into(),
+            age: 30,
+        };
+        let xml = serialize_to_xml(&data).unwrap();
+        assert!(xml.contains("<User>"));
+        assert!(xml.contains("<name>Alice</name>"));
+        assert!(xml.contains("<age>30</age>"));
+    }
+
+    #[test]
+    fn test_serialize_to_xml_json_object() {
+        let data = serde_json::json!({"name": "test", "count": 42});
+        let xml = serialize_to_xml(&data).unwrap();
+        assert!(xml.contains("<data>"));
+        assert!(xml.contains("<name>test</name>"));
+        assert!(xml.contains("<count>42</count>"));
+    }
+
+    #[test]
+    fn test_serialize_to_xml_nested_object() {
+        let data = serde_json::json!({"user": {"name": "Bob", "age": 25}});
+        let xml = serialize_to_xml(&data).unwrap();
+        assert!(xml.contains("<data>"));
+        assert!(xml.contains("<user>"));
+        assert!(xml.contains("<name>Bob</name>"));
+    }
+
+    #[test]
+    fn test_serialize_to_xml_with_array_field() {
+        let data = serde_json::json!({"tags": ["a", "b", "c"]});
+        let xml = serialize_to_xml(&data).unwrap();
+        assert!(xml.contains("<data>"));
+        assert!(xml.contains("<tags>a</tags>"));
+    }
+
+    #[test]
+    fn test_serialize_to_xml_empty_object() {
+        let data = serde_json::json!({});
+        let xml = serialize_to_xml(&data).unwrap();
+        assert!(xml.contains("<data"));
+    }
+
+    #[test]
+    fn test_serialize_to_xml_hashmap() {
+        let mut data = std::collections::HashMap::new();
+        data.insert("key", "value");
+        let xml = serialize_to_xml(&data).unwrap();
+        assert!(xml.contains("<data>"));
+        assert!(xml.contains("<key>value</key>"));
+    }
+
+    #[test]
+    fn test_serialize_to_xml_null() {
+        let data = serde_json::Value::Null;
+        let xml = serialize_to_xml(&data).unwrap();
+        assert!(xml.contains("<data"));
+    }
+
+    #[test]
+    fn test_serialize_to_xml_bare_string() {
+        let data = serde_json::json!("hello");
+        let xml = serialize_to_xml(&data).unwrap();
+        assert!(xml.contains("<data>"));
+        assert!(xml.contains("<value>hello</value>"));
+    }
+
+    #[test]
+    fn test_serialize_to_xml_bare_number() {
+        let data = serde_json::json!(42);
+        let xml = serialize_to_xml(&data).unwrap();
+        assert!(xml.contains("<data>"));
+        assert!(xml.contains("<value>42</value>"));
+    }
+
+    #[test]
+    fn test_serialize_to_xml_bare_bool() {
+        let data = serde_json::json!(true);
+        let xml = serialize_to_xml(&data).unwrap();
+        assert!(xml.contains("<data>"));
+        assert!(xml.contains("<value>true</value>"));
+    }
+
+    #[test]
+    fn test_serialize_to_xml_bare_array() {
+        let data = serde_json::json!(["a", "b", "c"]);
+        let xml = serialize_to_xml(&data).unwrap();
+        assert!(xml.contains("<data>"));
+        assert!(xml.contains("<value>"));
+    }
+
+    #[test]
+    fn test_serialize_to_xml_numeric_keys() {
+        let data = serde_json::json!({"0": "zero", "1": "one"});
+        let xml = serialize_to_xml(&data).unwrap();
+        assert!(xml.contains("<data>"));
+        // Keys starting with digits get prefixed with underscore
+        assert!(xml.contains("<_0>zero</_0>"));
+        assert!(xml.contains("<_1>one</_1>"));
+    }
+
+    #[test]
+    fn test_sanitize_xml_name_valid() {
+        assert_eq!(sanitize_xml_name("name"), "name");
+        assert_eq!(sanitize_xml_name("_private"), "_private");
+        assert_eq!(sanitize_xml_name("item-1"), "item-1");
+        assert_eq!(sanitize_xml_name("a.b"), "a.b");
+    }
+
+    #[test]
+    fn test_sanitize_xml_name_digit_start() {
+        assert_eq!(sanitize_xml_name("0"), "_0");
+        assert_eq!(sanitize_xml_name("1abc"), "_1abc");
+        assert_eq!(sanitize_xml_name("42"), "_42");
+    }
+
+    #[test]
+    fn test_sanitize_xml_name_empty() {
+        assert_eq!(sanitize_xml_name(""), "_");
+    }
+
+    #[test]
+    fn test_sanitize_xml_name_special_chars() {
+        assert_eq!(sanitize_xml_name("a b"), "a_b");
+        assert_eq!(sanitize_xml_name("a@b"), "a_b");
     }
 }
