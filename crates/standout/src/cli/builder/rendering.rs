@@ -194,7 +194,7 @@ impl AppBuilder {
                 serde_yaml::to_string(data).map_err(|e| SetupError::Config(e.to_string()))
             }
             OutputMode::Xml => {
-                quick_xml::se::to_string(data).map_err(|e| SetupError::Config(e.to_string()))
+                crate::serialize_to_xml(data).map_err(|e| SetupError::Config(e.to_string()))
             }
             OutputMode::Csv => {
                 let value =

@@ -81,7 +81,7 @@ use crate::error::RenderError;
 use crate::output::OutputMode;
 use crate::style::Styles;
 use crate::tabular::FlatDataSpec;
-use crate::theme::{detect_color_mode, ColorMode, Theme};
+use crate::theme::{detect_color_mode, detect_icon_mode, ColorMode, Theme};
 
 /// Maps OutputMode to BBParser's TagTransform.
 fn output_mode_to_transform(mode: OutputMode) -> TagTransform {
@@ -367,10 +367,15 @@ pub fn render_with_mode<T: Serialize>(
     // Resolve styles for the specified color mode
     let styles = theme.resolve_styles(Some(color_mode));
 
-    // Pass 1: Template rendering
+    // Pass 1: Template rendering (with icons if defined)
     let engine = MiniJinjaEngine::new();
     let data_value = serde_json::to_value(data)?;
-    let template_output = engine.render_template(template, &data_value)?;
+    let icon_context = build_icon_context(theme);
+    let template_output = if icon_context.is_empty() {
+        engine.render_template(template, &data_value)?
+    } else {
+        engine.render_with_context(template, &data_value, icon_context)?
+    };
 
     // Pass 2: BBParser style tag processing
     let final_output = apply_style_tags(&template_output, &styles, output_mode);
@@ -439,8 +444,8 @@ where
         .validate()
         .map_err(|e| RenderError::StyleError(e.to_string()))?;
 
-    // Build context from vars
-    let mut context: HashMap<String, serde_json::Value> = HashMap::new();
+    // Build context from icons + vars (vars take precedence over icons)
+    let mut context: HashMap<String, serde_json::Value> = build_icon_context(theme);
     for (key, value) in vars {
         context.insert(key.as_ref().to_string(), value.into());
     }
@@ -512,7 +517,7 @@ pub fn render_auto<T: Serialize>(
         match mode {
             OutputMode::Json => Ok(serde_json::to_string_pretty(data)?),
             OutputMode::Yaml => Ok(serde_yaml::to_string(data)?),
-            OutputMode::Xml => Ok(quick_xml::se::to_string(data)?),
+            OutputMode::Xml => Ok(crate::util::serialize_to_xml(data)?),
             OutputMode::Csv => {
                 let value = serde_json::to_value(data)?;
                 let (headers, rows) = crate::util::flatten_json_for_csv(&value);
@@ -556,7 +561,7 @@ pub fn render_auto_with_spec<T: Serialize>(
         match mode {
             OutputMode::Json => Ok(serde_json::to_string_pretty(data)?),
             OutputMode::Yaml => Ok(serde_yaml::to_string(data)?),
-            OutputMode::Xml => Ok(quick_xml::se::to_string(data)?),
+            OutputMode::Xml => Ok(crate::util::serialize_to_xml(data)?),
             OutputMode::Csv => {
                 let value = serde_json::to_value(data)?;
 
@@ -695,9 +700,9 @@ pub fn render_with_context<T: Serialize>(
         }
     }
 
-    // Build the combined context: data + injected context
-    // Data fields take precedence over context fields
-    let context = build_combined_context(data, context_registry, render_context)?;
+    // Build the combined context: icons + injected context + data
+    let icon_context = build_icon_context(theme);
+    let context = build_combined_context(data, context_registry, render_context, icon_context)?;
 
     // Pass 1: Template rendering with context
     let data_value = serde_json::to_value(data)?;
@@ -788,7 +793,7 @@ pub fn render_auto_with_context<T: Serialize>(
         match mode {
             OutputMode::Json => Ok(serde_json::to_string_pretty(data)?),
             OutputMode::Yaml => Ok(serde_yaml::to_string(data)?),
-            OutputMode::Xml => Ok(quick_xml::se::to_string(data)?),
+            OutputMode::Xml => Ok(crate::util::serialize_to_xml(data)?),
             OutputMode::Csv => {
                 let value = serde_json::to_value(data)?;
                 let (headers, rows) = crate::util::flatten_json_for_csv(&value);
@@ -816,6 +821,21 @@ pub fn render_auto_with_context<T: Serialize>(
     }
 }
 
+/// Builds an icon context from a theme's icon definitions.
+///
+/// Returns a map with a single `"icons"` key mapping to the resolved icon strings,
+/// or an empty map if the theme has no icons defined.
+fn build_icon_context(theme: &Theme) -> HashMap<String, serde_json::Value> {
+    if theme.icons().is_empty() {
+        return HashMap::new();
+    }
+    let icon_mode = detect_icon_mode();
+    let resolved = theme.resolve_icons(icon_mode);
+    let mut ctx = HashMap::new();
+    ctx.insert("icons".to_string(), serde_json::to_value(resolved).unwrap());
+    ctx
+}
+
 /// Builds a combined context from data and injected context.
 ///
 /// Data fields take precedence over context fields.
@@ -823,6 +843,7 @@ fn build_combined_context<T: Serialize>(
     data: &T,
     context_registry: &ContextRegistry,
     render_context: &RenderContext,
+    icon_context: HashMap<String, serde_json::Value>,
 ) -> Result<HashMap<String, serde_json::Value>, RenderError> {
     // First, resolve all context providers
     let context_values = context_registry.resolve(render_context);
@@ -830,9 +851,10 @@ fn build_combined_context<T: Serialize>(
     // Convert data to a map of values
     let data_value = serde_json::to_value(data)?;
 
-    let mut combined: HashMap<String, serde_json::Value> = HashMap::new();
+    // Start with icon context (lowest priority)
+    let mut combined: HashMap<String, serde_json::Value> = icon_context;
 
-    // Add context values first (lower priority)
+    // Add context values (medium priority)
     for (key, value) in context_values {
         // Convert minijinja::Value to serde_json::Value
         // This is a bit inefficient but necessary for the abstraction
@@ -842,7 +864,7 @@ fn build_combined_context<T: Serialize>(
         combined.insert(key, json_val);
     }
 
-    // Add data values (higher priority - overwrites context)
+    // Add data values (highest priority - overwrites context)
     if let Some(obj) = data_value.as_object() {
         for (key, value) in obj {
             combined.insert(key.clone(), value.clone());
@@ -869,7 +891,7 @@ pub fn render_auto_with_engine(
         match mode {
             OutputMode::Json => Ok(serde_json::to_string_pretty(data)?),
             OutputMode::Yaml => Ok(serde_yaml::to_string(data)?),
-            OutputMode::Xml => Ok(quick_xml::se::to_string(data)?),
+            OutputMode::Xml => Ok(crate::util::serialize_to_xml(data)?),
             OutputMode::Csv => {
                 let (headers, rows) = crate::util::flatten_json_for_csv(data);
 
@@ -892,10 +914,10 @@ pub fn render_auto_with_engine(
             .validate()
             .map_err(|e| RenderError::StyleError(e.to_string()))?;
 
-        // Build the combined context: data + injected context
-        // Note: data is already Value, but build_combined_context expects T: Serialize
-        // We can pass &data directly since Value implements Serialize
-        let context_map = build_combined_context(data, context_registry, render_context)?;
+        // Build the combined context: icons + injected context + data
+        let icon_context = build_icon_context(theme);
+        let context_map =
+            build_combined_context(data, context_registry, render_context, icon_context)?;
 
         // Merge into a single Value for the engine
         let combined_value = serde_json::Value::Object(context_map.into_iter().collect());
@@ -937,7 +959,7 @@ pub fn render_auto_with_engine_split(
         let output = match mode {
             OutputMode::Json => serde_json::to_string_pretty(data)?,
             OutputMode::Yaml => serde_yaml::to_string(data)?,
-            OutputMode::Xml => quick_xml::se::to_string(data)?,
+            OutputMode::Xml => crate::util::serialize_to_xml(data)?,
             OutputMode::Csv => {
                 let (headers, rows) = crate::util::flatten_json_for_csv(data);
 
@@ -961,8 +983,10 @@ pub fn render_auto_with_engine_split(
             .validate()
             .map_err(|e| RenderError::StyleError(e.to_string()))?;
 
-        // Build the combined context: data + injected context
-        let context_map = build_combined_context(data, context_registry, render_context)?;
+        // Build the combined context: icons + injected context + data
+        let icon_context = build_icon_context(theme);
+        let context_map =
+            build_combined_context(data, context_registry, render_context, icon_context)?;
 
         // Merge into a single Value for the engine
         let combined_value = serde_json::Value::Object(context_map.into_iter().collect());
@@ -1424,7 +1448,7 @@ mod tests {
     }
 
     #[test]
-    fn test_render_auto_xml_mode() {
+    fn test_render_auto_xml_mode_named_struct() {
         let theme = Theme::new();
 
         #[derive(Serialize)]
@@ -1443,6 +1467,47 @@ mod tests {
 
         assert!(output.contains("<root>"));
         assert!(output.contains("<name>test</name>"));
+    }
+
+    #[test]
+    fn test_render_auto_xml_mode_json_map() {
+        use serde_json::json;
+
+        let theme = Theme::new();
+        let data = json!({"name": "test", "count": 42});
+
+        let output = render_auto("unused template", &data, &theme, OutputMode::Xml).unwrap();
+
+        assert!(output.contains("<data>"));
+        assert!(output.contains("<name>test</name>"));
+        assert!(output.contains("<count>42</count>"));
+    }
+
+    #[test]
+    fn test_render_auto_xml_mode_nested_map() {
+        use serde_json::json;
+
+        let theme = Theme::new();
+        let data = json!({"user": {"name": "Alice", "age": 30}});
+
+        let output = render_auto("unused template", &data, &theme, OutputMode::Xml).unwrap();
+
+        assert!(output.contains("<data>"));
+        assert!(output.contains("<user>"));
+        assert!(output.contains("<name>Alice</name>"));
+    }
+
+    #[test]
+    fn test_render_auto_xml_mode_with_array() {
+        use serde_json::json;
+
+        let theme = Theme::new();
+        let data = json!({"items": ["a", "b", "c"]});
+
+        let output = render_auto("unused template", &data, &theme, OutputMode::Xml).unwrap();
+
+        assert!(output.contains("<data>"));
+        assert!(output.contains("<items>a</items>"));
     }
 
     #[test]
@@ -1487,6 +1552,27 @@ mod tests {
         assert!(lines.contains(&"Alice,admin"));
         assert!(lines.contains(&"Bob,user"));
         assert!(!output.contains("30"));
+    }
+
+    #[test]
+    fn test_render_auto_csv_mode_with_array_field() {
+        use serde_json::json;
+
+        let theme = Theme::new();
+        let data = json!([
+            {"name": "Alice", "tags": ["admin", "user"]},
+            {"name": "Bob", "tags": ["user"]}
+        ]);
+
+        let output = render_auto("unused", &data, &theme, OutputMode::Csv).unwrap();
+
+        // Array fields should be flattened with indexed keys
+        assert!(output.contains("tags.0"));
+        assert!(output.contains("tags.1"));
+        assert!(output.contains("admin"));
+        assert!(output.contains("user"));
+        // Should NOT contain JSON array syntax
+        assert!(!output.contains("[\""));
     }
 
     // ============================================================================
@@ -2206,5 +2292,203 @@ mod tests {
 
         assert!(output.contains("name: test"));
         assert!(output.contains("count: 42"));
+    }
+
+    // =========================================================================
+    // Icon integration tests
+    // =========================================================================
+
+    #[test]
+    #[serial_test::serial]
+    fn test_render_with_icons_classic() {
+        use crate::{set_icon_detector, IconDefinition, IconMode};
+
+        set_icon_detector(|| IconMode::Classic);
+
+        let theme = Theme::new()
+            .add_icon(
+                "check",
+                IconDefinition::new("[ok]").with_nerdfont("\u{f00c}"),
+            )
+            .add_icon("arrow", IconDefinition::new(">>"));
+
+        let data = SimpleData {
+            message: "done".into(),
+        };
+
+        let output = render_with_output(
+            "{{ icons.check }} {{ message }} {{ icons.arrow }}",
+            &data,
+            &theme,
+            OutputMode::Text,
+        )
+        .unwrap();
+
+        assert_eq!(output, "[ok] done >>");
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_render_with_icons_nerdfont() {
+        use crate::{set_icon_detector, IconDefinition, IconMode};
+
+        set_icon_detector(|| IconMode::NerdFont);
+
+        let theme = Theme::new().add_icon(
+            "check",
+            IconDefinition::new("[ok]").with_nerdfont("\u{f00c}"),
+        );
+
+        let data = SimpleData {
+            message: "done".into(),
+        };
+
+        let output = render_with_output(
+            "{{ icons.check }} {{ message }}",
+            &data,
+            &theme,
+            OutputMode::Text,
+        )
+        .unwrap();
+
+        assert_eq!(output, "\u{f00c} done");
+
+        // Reset
+        set_icon_detector(|| IconMode::Classic);
+    }
+
+    #[test]
+    fn test_render_without_icons_no_overhead() {
+        let theme = Theme::new();
+        let data = SimpleData {
+            message: "hello".into(),
+        };
+
+        // Should work fine without icons
+        let output = render_with_output("{{ message }}", &data, &theme, OutputMode::Text).unwrap();
+
+        assert_eq!(output, "hello");
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_render_with_icons_and_styles() {
+        use crate::{set_icon_detector, IconDefinition, IconMode};
+
+        set_icon_detector(|| IconMode::Classic);
+
+        let theme = Theme::new()
+            .add("title", Style::new().bold())
+            .add_icon("bullet", IconDefinition::new("-"));
+
+        let data = SimpleData {
+            message: "item".into(),
+        };
+
+        let output = render_with_output(
+            "{{ icons.bullet }} [title]{{ message }}[/title]",
+            &data,
+            &theme,
+            OutputMode::Text,
+        )
+        .unwrap();
+
+        assert_eq!(output, "- item");
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_render_with_vars_includes_icons() {
+        use crate::{set_icon_detector, IconDefinition, IconMode};
+
+        set_icon_detector(|| IconMode::Classic);
+
+        let theme = Theme::new().add_icon("star", IconDefinition::new("*"));
+
+        let data = SimpleData {
+            message: "hello".into(),
+        };
+
+        let vars = std::collections::HashMap::from([("version", "1.0")]);
+
+        let output = render_with_vars(
+            "{{ icons.star }} {{ message }} v{{ version }}",
+            &data,
+            &theme,
+            OutputMode::Text,
+            vars,
+        )
+        .unwrap();
+
+        assert_eq!(output, "* hello v1.0");
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_render_with_context_includes_icons() {
+        use crate::context::{ContextRegistry, RenderContext};
+        use crate::{set_icon_detector, IconDefinition, IconMode};
+
+        set_icon_detector(|| IconMode::Classic);
+
+        let theme = Theme::new().add_icon("dot", IconDefinition::new("."));
+
+        let data = SimpleData {
+            message: "test".into(),
+        };
+
+        let mut registry = ContextRegistry::new();
+        registry.add_static("extra", Value::from("ctx"));
+
+        let json_data = serde_json::to_value(&data).unwrap();
+        let render_ctx = RenderContext::new(OutputMode::Text, Some(80), &theme, &json_data);
+
+        let output = render_with_context(
+            "{{ icons.dot }} {{ message }} {{ extra }}",
+            &data,
+            &theme,
+            OutputMode::Text,
+            &registry,
+            &render_ctx,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(output, ". test ctx");
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_render_yaml_from_theme_with_icons() {
+        use crate::{set_icon_detector, IconDefinition, IconMode};
+
+        set_icon_detector(|| IconMode::Classic);
+
+        let theme = Theme::from_yaml(
+            r#"
+            title:
+                fg: cyan
+                bold: true
+            icons:
+                check:
+                    classic: "[ok]"
+                    nerdfont: "nf"
+            "#,
+        )
+        .unwrap();
+
+        let data = SimpleData {
+            message: "done".into(),
+        };
+
+        let output = render_with_output(
+            "{{ icons.check }} [title]{{ message }}[/title]",
+            &data,
+            &theme,
+            OutputMode::Text,
+        )
+        .unwrap();
+
+        assert_eq!(output, "[ok] done");
     }
 }

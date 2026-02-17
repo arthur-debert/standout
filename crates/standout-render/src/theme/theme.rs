@@ -69,6 +69,8 @@ use super::super::style::{
 };
 
 use super::adaptive::ColorMode;
+use super::icon_def::{IconDefinition, IconSet};
+use super::icon_mode::IconMode;
 
 /// A named collection of styles used when rendering templates.
 ///
@@ -123,6 +125,8 @@ pub struct Theme {
     dark: HashMap<String, Style>,
     /// Alias definitions (name → target).
     aliases: HashMap<String, String>,
+    /// Icon definitions (classic + optional nerdfont variants).
+    icons: IconSet,
 }
 
 impl Theme {
@@ -135,6 +139,7 @@ impl Theme {
             light: HashMap::new(),
             dark: HashMap::new(),
             aliases: HashMap::new(),
+            icons: IconSet::new(),
         }
     }
 
@@ -147,6 +152,7 @@ impl Theme {
             light: HashMap::new(),
             dark: HashMap::new(),
             aliases: HashMap::new(),
+            icons: IconSet::new(),
         }
     }
 
@@ -187,6 +193,7 @@ impl Theme {
             .and_then(|s| s.to_str())
             .map(|s| s.to_string());
 
+        let icons = parse_icons_from_yaml_str(&content)?;
         let variants = parse_stylesheet(&content)?;
         Ok(Self {
             name,
@@ -195,6 +202,7 @@ impl Theme {
             light: variants.light().clone(),
             dark: variants.dark().clone(),
             aliases: variants.aliases().clone(),
+            icons,
         })
     }
 
@@ -229,8 +237,17 @@ impl Theme {
     /// "#).unwrap();
     /// ```
     pub fn from_yaml(yaml: &str) -> Result<Self, StylesheetError> {
+        let icons = parse_icons_from_yaml_str(yaml)?;
         let variants = parse_stylesheet(yaml)?;
-        Ok(Self::from_variants(variants))
+        Ok(Self {
+            name: None,
+            source_path: None,
+            base: variants.base().clone(),
+            light: variants.light().clone(),
+            dark: variants.dark().clone(),
+            aliases: variants.aliases().clone(),
+            icons,
+        })
     }
 
     /// Creates a theme from pre-parsed theme variants.
@@ -242,6 +259,7 @@ impl Theme {
             light: variants.light().clone(),
             dark: variants.dark().clone(),
             aliases: variants.aliases().clone(),
+            icons: IconSet::new(),
         }
     }
 
@@ -289,11 +307,13 @@ impl Theme {
             message: format!("Failed to read {}: {}", path.display(), e),
         })?;
 
+        let icons = parse_icons_from_yaml_str(&content)?;
         let variants = parse_stylesheet(&content)?;
         self.base = variants.base().clone();
         self.light = variants.light().clone();
         self.dark = variants.dark().clone();
         self.aliases = variants.aliases().clone();
+        self.icons = icons;
 
         Ok(())
     }
@@ -371,6 +391,53 @@ impl Theme {
             self.dark.insert(name.to_string(), dark_style);
         }
         self
+    }
+
+    /// Adds an icon definition to the theme, returning `self` for chaining.
+    ///
+    /// Icons are characters (not images) that adapt between classic Unicode
+    /// and Nerd Font glyphs. Each icon has a classic variant and an optional
+    /// Nerd Font variant.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use standout_render::{Theme, IconDefinition};
+    ///
+    /// let theme = Theme::new()
+    ///     .add_icon("pending", IconDefinition::new("⚪"))
+    ///     .add_icon("done", IconDefinition::new("⚫").with_nerdfont("\u{f00c}"));
+    /// ```
+    pub fn add_icon(mut self, name: &str, def: IconDefinition) -> Self {
+        self.icons.insert(name.to_string(), def);
+        self
+    }
+
+    /// Resolves icons for the given icon mode.
+    ///
+    /// Returns a map of icon names to resolved strings for the given mode.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use standout_render::{Theme, IconDefinition, IconMode};
+    ///
+    /// let theme = Theme::new()
+    ///     .add_icon("done", IconDefinition::new("⚫").with_nerdfont("\u{f00c}"));
+    ///
+    /// let classic = theme.resolve_icons(IconMode::Classic);
+    /// assert_eq!(classic.get("done").unwrap(), "⚫");
+    ///
+    /// let nerdfont = theme.resolve_icons(IconMode::NerdFont);
+    /// assert_eq!(nerdfont.get("done").unwrap(), "\u{f00c}");
+    /// ```
+    pub fn resolve_icons(&self, mode: IconMode) -> HashMap<String, String> {
+        self.icons.resolve(mode)
+    }
+
+    /// Returns a reference to the icon set.
+    pub fn icons(&self) -> &IconSet {
+        &self.icons
     }
 
     /// Resolves styles for the given color mode.
@@ -488,6 +555,7 @@ impl Theme {
         self.light.extend(other.light);
         self.dark.extend(other.dark);
         self.aliases.extend(other.aliases);
+        self.icons = self.icons.merge(other.icons);
         self
     }
 }
@@ -496,6 +564,98 @@ impl Default for Theme {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Parses icon definitions from a YAML string.
+///
+/// Extracts the `icons:` section from the YAML root mapping and
+/// parses each entry into an [`IconDefinition`].
+///
+/// # YAML Format
+///
+/// ```yaml
+/// icons:
+///   # String shorthand (classic only)
+///   pending: "⚪"
+///
+///   # Mapping with both variants
+///   done:
+///     classic: "⚫"
+///     nerdfont: "\uf00c"
+/// ```
+fn parse_icons_from_yaml_str(yaml: &str) -> Result<IconSet, StylesheetError> {
+    let root: serde_yaml::Value =
+        serde_yaml::from_str(yaml).map_err(|e| StylesheetError::Parse {
+            path: None,
+            message: e.to_string(),
+        })?;
+
+    parse_icons_from_yaml(&root)
+}
+
+/// Parses icon definitions from a parsed YAML value.
+fn parse_icons_from_yaml(root: &serde_yaml::Value) -> Result<IconSet, StylesheetError> {
+    let mut icon_set = IconSet::new();
+
+    let mapping = match root.as_mapping() {
+        Some(m) => m,
+        None => return Ok(icon_set),
+    };
+
+    let icons_value = match mapping.get(serde_yaml::Value::String("icons".into())) {
+        Some(v) => v,
+        None => return Ok(icon_set),
+    };
+
+    let icons_map = icons_value
+        .as_mapping()
+        .ok_or_else(|| StylesheetError::Parse {
+            path: None,
+            message: "'icons' must be a mapping".to_string(),
+        })?;
+
+    for (key, value) in icons_map {
+        let name = key.as_str().ok_or_else(|| StylesheetError::Parse {
+            path: None,
+            message: format!("Icon name must be a string, got {:?}", key),
+        })?;
+
+        let def = match value {
+            serde_yaml::Value::String(s) => {
+                // Shorthand: classic-only
+                IconDefinition::new(s.clone())
+            }
+            serde_yaml::Value::Mapping(map) => {
+                let classic = map
+                    .get(serde_yaml::Value::String("classic".into()))
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| StylesheetError::InvalidDefinition {
+                        style: name.to_string(),
+                        message: "Icon mapping must have a 'classic' key".to_string(),
+                        path: None,
+                    })?;
+                let nerdfont = map
+                    .get(serde_yaml::Value::String("nerdfont".into()))
+                    .and_then(|v| v.as_str());
+                let mut def = IconDefinition::new(classic);
+                if let Some(nf) = nerdfont {
+                    def = def.with_nerdfont(nf);
+                }
+                def
+            }
+            _ => {
+                return Err(StylesheetError::InvalidDefinition {
+                    style: name.to_string(),
+                    message: "Icon must be a string or mapping with 'classic' key".to_string(),
+                    path: None,
+                });
+            }
+        };
+
+        icon_set.insert(name.to_string(), def);
+    }
+
+    Ok(icon_set)
 }
 
 #[cfg(test)]
@@ -880,5 +1040,206 @@ mod tests {
         assert!(styles.has("new"));
 
         assert_eq!(merged.len(), 3);
+    }
+
+    // =========================================================================
+    // Icon tests
+    // =========================================================================
+
+    #[test]
+    fn test_theme_add_icon() {
+        let theme = Theme::new()
+            .add_icon("pending", IconDefinition::new("⚪"))
+            .add_icon("done", IconDefinition::new("⚫").with_nerdfont("\u{f00c}"));
+
+        assert_eq!(theme.icons().len(), 2);
+        assert!(!theme.icons().is_empty());
+    }
+
+    #[test]
+    fn test_theme_resolve_icons_classic() {
+        let theme = Theme::new()
+            .add_icon("pending", IconDefinition::new("⚪"))
+            .add_icon("done", IconDefinition::new("⚫").with_nerdfont("\u{f00c}"));
+
+        let resolved = theme.resolve_icons(IconMode::Classic);
+        assert_eq!(resolved.get("pending").unwrap(), "⚪");
+        assert_eq!(resolved.get("done").unwrap(), "⚫");
+    }
+
+    #[test]
+    fn test_theme_resolve_icons_nerdfont() {
+        let theme = Theme::new()
+            .add_icon("pending", IconDefinition::new("⚪"))
+            .add_icon("done", IconDefinition::new("⚫").with_nerdfont("\u{f00c}"));
+
+        let resolved = theme.resolve_icons(IconMode::NerdFont);
+        assert_eq!(resolved.get("pending").unwrap(), "⚪"); // No nerdfont, falls back
+        assert_eq!(resolved.get("done").unwrap(), "\u{f00c}");
+    }
+
+    #[test]
+    fn test_theme_icons_empty_by_default() {
+        let theme = Theme::new();
+        assert!(theme.icons().is_empty());
+    }
+
+    #[test]
+    fn test_theme_merge_with_icons() {
+        let base = Theme::new()
+            .add_icon("keep", IconDefinition::new("K"))
+            .add_icon("override", IconDefinition::new("OLD"));
+
+        let ext = Theme::new()
+            .add_icon("override", IconDefinition::new("NEW"))
+            .add_icon("added", IconDefinition::new("A"));
+
+        let merged = base.merge(ext);
+        assert_eq!(merged.icons().len(), 3);
+
+        let resolved = merged.resolve_icons(IconMode::Classic);
+        assert_eq!(resolved.get("keep").unwrap(), "K");
+        assert_eq!(resolved.get("override").unwrap(), "NEW");
+        assert_eq!(resolved.get("added").unwrap(), "A");
+    }
+
+    #[test]
+    fn test_theme_from_yaml_with_icons() {
+        let theme = Theme::from_yaml(
+            r#"
+            header:
+                fg: cyan
+                bold: true
+            icons:
+                pending: "⚪"
+                done:
+                    classic: "⚫"
+                    nerdfont: "nf_done"
+            "#,
+        )
+        .unwrap();
+
+        // Styles
+        assert_eq!(theme.len(), 1);
+        let styles = theme.resolve_styles(None);
+        assert!(styles.has("header"));
+
+        // Icons
+        assert_eq!(theme.icons().len(), 2);
+        let resolved = theme.resolve_icons(IconMode::Classic);
+        assert_eq!(resolved.get("pending").unwrap(), "⚪");
+        assert_eq!(resolved.get("done").unwrap(), "⚫");
+
+        let resolved = theme.resolve_icons(IconMode::NerdFont);
+        assert_eq!(resolved.get("done").unwrap(), "nf_done");
+    }
+
+    #[test]
+    fn test_theme_from_yaml_no_icons() {
+        let theme = Theme::from_yaml(
+            r#"
+            header:
+                fg: cyan
+            "#,
+        )
+        .unwrap();
+
+        assert!(theme.icons().is_empty());
+    }
+
+    #[test]
+    fn test_theme_from_yaml_icons_only() {
+        let theme = Theme::from_yaml(
+            r#"
+            icons:
+                check: "✓"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(theme.icons().len(), 1);
+        assert_eq!(theme.len(), 0); // No styles
+    }
+
+    #[test]
+    fn test_theme_from_yaml_icons_invalid_type() {
+        let result = Theme::from_yaml(
+            r#"
+            icons:
+                bad: 42
+            "#,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_theme_from_yaml_icons_mapping_without_classic() {
+        let result = Theme::from_yaml(
+            r#"
+            icons:
+                bad:
+                    nerdfont: "nf"
+            "#,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_theme_from_file_with_icons() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let theme_path = temp_dir.path().join("iconic.yaml");
+        fs::write(
+            &theme_path,
+            r#"
+            header:
+                fg: cyan
+            icons:
+                check:
+                    classic: "[ok]"
+                    nerdfont: "nf_check"
+            "#,
+        )
+        .unwrap();
+
+        let theme = Theme::from_file(&theme_path).unwrap();
+        assert_eq!(theme.icons().len(), 1);
+        let resolved = theme.resolve_icons(IconMode::NerdFont);
+        assert_eq!(resolved.get("check").unwrap(), "nf_check");
+    }
+
+    #[test]
+    fn test_theme_refresh_with_icons() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let theme_path = temp_dir.path().join("refresh.yaml");
+        fs::write(
+            &theme_path,
+            r#"
+            icons:
+                v1: "one"
+            "#,
+        )
+        .unwrap();
+
+        let mut theme = Theme::from_file(&theme_path).unwrap();
+        assert_eq!(theme.icons().len(), 1);
+
+        fs::write(
+            &theme_path,
+            r#"
+            icons:
+                v1: "one"
+                v2: "two"
+            "#,
+        )
+        .unwrap();
+
+        theme.refresh().unwrap();
+        assert_eq!(theme.icons().len(), 2);
     }
 }
