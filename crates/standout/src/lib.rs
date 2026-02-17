@@ -246,7 +246,10 @@ pub use standout_render::{
 };
 
 // Theme module exports (from standout-render)
-pub use standout_render::{detect_color_mode, set_theme_detector, ColorMode, Theme};
+pub use standout_render::{
+    detect_color_mode, detect_icon_mode, set_icon_detector, set_theme_detector, ColorMode,
+    IconDefinition, IconMode, IconSet, Theme,
+};
 
 // Output module exports (from standout-render)
 pub use standout_render::{write_binary_output, write_output, OutputDestination, OutputMode};
@@ -280,7 +283,7 @@ pub use standout_bbparser::{UnknownTagError, UnknownTagErrors, UnknownTagKind};
 
 // Utility exports (from standout-render)
 pub use standout_render::{
-    flatten_json_for_csv, rgb_to_ansi256, rgb_to_truecolor, truncate_to_width,
+    flatten_json_for_csv, rgb_to_ansi256, rgb_to_truecolor, serialize_to_xml, truncate_to_width,
 };
 
 // File loader exports (from standout-render)

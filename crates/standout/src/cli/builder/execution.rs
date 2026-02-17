@@ -379,7 +379,7 @@ impl AppBuilder {
     }
 
     /// Augments a command for dispatch (adds --output flag without help subcommand).
-    fn augment_command_for_dispatch(&self, mut cmd: Command) -> Command {
+    pub(crate) fn augment_command_for_dispatch(&self, mut cmd: Command) -> Command {
         if let Some(ref flag_name) = self.output_flag {
             let flag: &'static str = Box::leak(flag_name.clone().into_boxed_str());
             cmd = cmd.arg(
@@ -387,7 +387,16 @@ impl AppBuilder {
                     .long(flag)
                     .value_name("MODE")
                     .global(true)
-                    .value_parser(["auto", "term", "text", "term-debug", "json"])
+                    .value_parser([
+                        "auto",
+                        "term",
+                        "text",
+                        "term-debug",
+                        "json",
+                        "yaml",
+                        "xml",
+                        "csv",
+                    ])
                     .default_value("auto")
                     .help("Output format"),
             );
@@ -1588,6 +1597,102 @@ mod tests {
 
         let content = std::fs::read_to_string(file_path).unwrap();
         assert_eq!(content, "99");
+    }
+
+    #[test]
+    fn test_dispatch_with_output_file_json_mode() {
+        use serde_json::json;
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("output.json");
+        let path_str = file_path.to_str().unwrap();
+
+        let builder = AppBuilder::new()
+            .command(
+                "show",
+                |_m, _ctx| Ok(HandlerOutput::Render(json!({"name": "test", "count": 42}))),
+                "unused",
+            )
+            .unwrap();
+
+        let cmd = Command::new("app").subcommand(Command::new("show"));
+
+        let result = builder.dispatch_from(
+            cmd,
+            [
+                "app",
+                "--output",
+                "json",
+                "--output-file-path",
+                path_str,
+                "show",
+            ],
+        );
+
+        assert!(result.is_handled());
+        assert_eq!(result.output(), Some(""));
+
+        let content = std::fs::read_to_string(file_path).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert_eq!(parsed["name"], "test");
+        assert_eq!(parsed["count"], 42);
+    }
+
+    #[test]
+    fn test_dispatch_with_output_file_text_mode() {
+        use serde_json::json;
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("output.txt");
+        let path_str = file_path.to_str().unwrap();
+
+        let builder = AppBuilder::new()
+            .command(
+                "show",
+                |_m, _ctx| Ok(HandlerOutput::Render(json!({"name": "Alice"}))),
+                "Hello {{ name }}",
+            )
+            .unwrap();
+
+        let cmd = Command::new("app").subcommand(Command::new("show"));
+
+        let result = builder.dispatch_from(
+            cmd,
+            [
+                "app",
+                "--output",
+                "text",
+                "--output-file-path",
+                path_str,
+                "show",
+            ],
+        );
+
+        assert!(result.is_handled());
+        assert_eq!(result.output(), Some(""));
+
+        let content = std::fs::read_to_string(file_path).unwrap();
+        assert_eq!(content, "Hello Alice");
+    }
+
+    #[test]
+    fn test_dispatch_without_output_file_flag() {
+        use serde_json::json;
+
+        let builder = AppBuilder::new()
+            .no_output_file_flag()
+            .command(
+                "show",
+                |_m, _ctx| Ok(HandlerOutput::Render(json!({"count": 42}))),
+                "Count: {{ count }}",
+            )
+            .unwrap();
+
+        let cmd = Command::new("app").subcommand(Command::new("show"));
+
+        // Without the flag, output goes to stdout normally
+        let result = builder.dispatch_from(cmd, ["app", "show"]);
+
+        assert!(result.is_handled());
+        assert!(result.output().unwrap().contains("Count: 42"));
     }
 
     // ============================================================================

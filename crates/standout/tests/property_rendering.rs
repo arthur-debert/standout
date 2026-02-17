@@ -90,7 +90,19 @@ fn validate_structured_output(output: &str, mode: OutputMode) {
                 output
             );
         }
-        // XML and CSV are harder to validate generically, but we verify no panic
+        OutputMode::Xml => {
+            // XML output must be non-empty and contain a root element
+            assert!(!output.is_empty(), "XML output should not be empty");
+            assert!(
+                output.contains('<') && output.contains('>'),
+                "XML output should contain tags: {}",
+                output
+            );
+        }
+        OutputMode::Csv => {
+            // CSV output must be non-empty
+            assert!(!output.is_empty(), "CSV output should not be empty");
+        }
         _ => {}
     }
 }
