@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.0.0] - 2026-02-17
+
 ## [6.2.0] - 2026-02-15
 
 ### Added
@@ -1094,7 +1096,8 @@ let output = render_with_output(template, &data, &theme, OutputMode::Term)?;
   - Command handler system with `dispatch_from` convenience method
   - Archive variant support in clap integration
 
-[Unreleased]: https://github.com/arthur-debert/standout/compare/standout-v6.2.0...HEAD
+[Unreleased]: https://github.com/arthur-debert/standout/compare/standout-v7.0.0...HEAD
+[7.0.0]: https://github.com/arthur-debert/standout/compare/standout-v6.2.0...standout-v7.0.0
 [6.2.0]: https://github.com/arthur-debert/standout/compare/standout-v6.1.0...standout-v6.2.0
 [6.1.0]: https://github.com/arthur-debert/standout/compare/standout-v6.0.2...standout-v6.1.0
 [6.0.2]: https://github.com/arthur-debert/standout/compare/standout-v6.0.1...standout-v6.0.2
