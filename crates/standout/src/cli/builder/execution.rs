@@ -379,7 +379,7 @@ impl AppBuilder {
     }
 
     /// Augments a command for dispatch (adds --output flag without help subcommand).
-    fn augment_command_for_dispatch(&self, mut cmd: Command) -> Command {
+    pub(crate) fn augment_command_for_dispatch(&self, mut cmd: Command) -> Command {
         if let Some(ref flag_name) = self.output_flag {
             let flag: &'static str = Box::leak(flag_name.clone().into_boxed_str());
             cmd = cmd.arg(
@@ -387,7 +387,16 @@ impl AppBuilder {
                     .long(flag)
                     .value_name("MODE")
                     .global(true)
-                    .value_parser(["auto", "term", "text", "term-debug", "json"])
+                    .value_parser([
+                        "auto",
+                        "term",
+                        "text",
+                        "term-debug",
+                        "json",
+                        "yaml",
+                        "xml",
+                        "csv",
+                    ])
                     .default_value("auto")
                     .help("Output format"),
             );

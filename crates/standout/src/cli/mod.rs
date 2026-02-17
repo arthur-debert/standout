@@ -34,7 +34,7 @@
 //! let mut api = MyApi::new();
 //!
 //! // FnMut handlers can capture mutable state
-//! App::builder()
+//! App::new()
 //!     .command("add", |m, ctx| {
 //!         let item = Item::from(m);
 //!         api.add(item);  // &mut self works!
@@ -72,7 +72,7 @@
 //! ```rust,ignore
 //! use standout::cli::{App, Output, HandlerResult};
 //!
-//! App::builder()
+//! App::new()
 //!     .command("list", |matches, ctx| {
 //!         let items = load_items()?;
 //!         Ok(Output::Render(items))
@@ -97,7 +97,7 @@
 //!
 //! ## Key Types
 //!
-//! - [`App`] / [`AppBuilder`]: Main entry point and configuration
+//! - [`App`]: Main entry point and configuration (re-export of `AppBuilder`)
 //! - [`Handler`]: Trait for command handlers (`&mut self`)
 //! - [`FnHandler`]: Wrapper for `FnMut` closures
 //! - [`Output`]: What handlers produce (render data, silent, binary)
@@ -117,11 +117,10 @@
 mod dispatch;
 mod result;
 
-// Shared core for App
-mod core;
+// Helper functions (formerly the App struct lived here)
+pub(crate) mod app;
 
-// Split from former standout module
-mod app;
+// Builder is now the single App implementation
 mod builder;
 
 // Public modules
@@ -132,9 +131,8 @@ pub mod hooks;
 #[macro_use]
 pub mod macros;
 
-// Re-export main types from app and builder modules
-pub use app::App;
-pub use builder::AppBuilder;
+// Re-export AppBuilder as App — the single unified type
+pub use builder::AppBuilder as App;
 
 // Re-export group types for declarative dispatch
 pub use group::{CommandConfig, GroupBuilder};
@@ -169,7 +167,7 @@ pub use dispatch::{
 ///
 /// This is the simplest entry point for basic CLIs without topics.
 pub fn parse(cmd: clap::Command) -> clap::ArgMatches {
-    App::parse(cmd)
+    App::new().parse_with(cmd)
 }
 
 /// Like `parse`, but takes arguments from an iterator.
