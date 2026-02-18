@@ -7,6 +7,7 @@
 //! - 256-color palette: `0` through `255`
 //! - RGB hex: `"#ff6b35"` or `"#fff"` (3 or 6 digit)
 //! - RGB tuple: `[255, 107, 53]`
+//! - Cube coordinates: `cube(60%, 20%, 0%)` (theme-relative color)
 //!
 //! # Example
 //!
@@ -22,9 +23,14 @@
 //!     serde_yaml::Value::Number(107.into()),
 //!     serde_yaml::Value::Number(53.into()),
 //! ])).unwrap();
+//!
+//! // Parse cube coordinate
+//! let cube = ColorDef::parse_string("cube(60%, 20%, 0%)").unwrap();
 //! ```
 
 use console::Color;
+
+use crate::colorspace::{CubeCoord, ThemePalette};
 
 /// Parsed color definition from stylesheet.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,6 +41,8 @@ pub enum ColorDef {
     Color256(u8),
     /// True color RGB.
     Rgb(u8, u8, u8),
+    /// Theme-relative cube coordinate, resolved via [`ThemePalette`] at style build time.
+    Cube(CubeCoord),
 }
 
 impl ColorDef {
@@ -70,8 +78,14 @@ impl ColorDef {
     /// - Named colors: `red`, `green`, `blue`, etc.
     /// - Bright variants: `bright_red`, `bright_green`, etc.
     /// - Hex codes: `#ff6b35` or `#fff`
+    /// - Cube coordinates: `cube(60%, 20%, 0%)`
     pub fn parse_string(s: &str) -> Result<Self, String> {
         let s = s.trim();
+
+        // Check for cube() function
+        if s.starts_with("cube(") && s.ends_with(')') {
+            return Self::parse_cube(s);
+        }
 
         // Check for hex color
         if let Some(hex) = s.strip_prefix('#') {
@@ -80,6 +94,31 @@ impl ColorDef {
 
         // Check for named color
         Self::parse_named(s)
+    }
+
+    /// Parses a `cube(r%, g%, b%)` color specification.
+    ///
+    /// Each component is a percentage (0–100). The `%` suffix is optional.
+    fn parse_cube(s: &str) -> Result<Self, String> {
+        let inner = &s[5..s.len() - 1]; // strip "cube(" and ")"
+        let parts: Vec<&str> = inner.split(',').map(|p| p.trim()).collect();
+        if parts.len() != 3 {
+            return Err(format!(
+                "cube() requires exactly 3 components, got {}",
+                parts.len()
+            ));
+        }
+
+        let mut values = [0.0f64; 3];
+        for (i, part) in parts.iter().enumerate() {
+            let num_str = part.strip_suffix('%').unwrap_or(part).trim();
+            values[i] = num_str
+                .parse::<f64>()
+                .map_err(|_| format!("Invalid cube component '{}': expected a number", part))?;
+        }
+
+        let coord = CubeCoord::from_percentages(values[0], values[1], values[2])?;
+        Ok(ColorDef::Cube(coord))
     }
 
     /// Parses a hex color code (without the # prefix).
@@ -184,11 +223,27 @@ impl ColorDef {
     }
 
     /// Converts this color definition to a `console::Color`.
-    pub fn to_console_color(&self) -> Color {
+    ///
+    /// For [`Cube`](ColorDef::Cube) colors, a [`ThemePalette`] is required to resolve
+    /// the cube coordinate to an actual RGB value. If no palette is provided,
+    /// the default xterm palette is used.
+    pub fn to_console_color(&self, palette: Option<&ThemePalette>) -> Color {
         match self {
             ColorDef::Named(c) => *c,
             ColorDef::Color256(n) => Color::Color256(*n),
             ColorDef::Rgb(r, g, b) => Color::Color256(crate::rgb_to_ansi256((*r, *g, *b))),
+            ColorDef::Cube(coord) => {
+                let p;
+                let palette = match palette {
+                    Some(pal) => pal,
+                    None => {
+                        p = ThemePalette::default_xterm();
+                        &p
+                    }
+                };
+                let rgb = palette.resolve(coord);
+                Color::Color256(crate::rgb_to_ansi256((rgb.0, rgb.1, rgb.2)))
+            }
         }
     }
 }
@@ -420,23 +475,124 @@ mod tests {
     #[test]
     fn test_to_console_color_named() {
         let c = ColorDef::Named(Color::Red);
-        assert_eq!(c.to_console_color(), Color::Red);
+        assert_eq!(c.to_console_color(None), Color::Red);
     }
 
     #[test]
     fn test_to_console_color_256() {
         let c = ColorDef::Color256(208);
-        assert_eq!(c.to_console_color(), Color::Color256(208));
+        assert_eq!(c.to_console_color(None), Color::Color256(208));
     }
 
     #[test]
     fn test_to_console_color_rgb() {
         let c = ColorDef::Rgb(255, 107, 53);
         // RGB gets converted to 256 color via rgb_to_ansi256
-        if let Color::Color256(_) = c.to_console_color() {
+        if let Color::Color256(_) = c.to_console_color(None) {
             // OK - it converted
         } else {
             panic!("Expected Color256");
         }
+    }
+
+    // =========================================================================
+    // Cube color tests
+    // =========================================================================
+
+    #[test]
+    fn test_parse_cube_percentages() {
+        let c = ColorDef::parse_string("cube(60%, 20%, 0%)").unwrap();
+        match c {
+            ColorDef::Cube(coord) => {
+                assert!((coord.r - 0.6).abs() < 0.001);
+                assert!((coord.g - 0.2).abs() < 0.001);
+                assert!((coord.b - 0.0).abs() < 0.001);
+            }
+            _ => panic!("Expected Cube"),
+        }
+    }
+
+    #[test]
+    fn test_parse_cube_without_percent_sign() {
+        let c = ColorDef::parse_string("cube(100, 50, 0)").unwrap();
+        match c {
+            ColorDef::Cube(coord) => {
+                assert!((coord.r - 1.0).abs() < 0.001);
+                assert!((coord.g - 0.5).abs() < 0.001);
+                assert!((coord.b - 0.0).abs() < 0.001);
+            }
+            _ => panic!("Expected Cube"),
+        }
+    }
+
+    #[test]
+    fn test_parse_cube_corners() {
+        // Origin
+        let c = ColorDef::parse_string("cube(0%, 0%, 0%)").unwrap();
+        assert!(matches!(c, ColorDef::Cube(_)));
+
+        // Opposite corner
+        let c = ColorDef::parse_string("cube(100%, 100%, 100%)").unwrap();
+        assert!(matches!(c, ColorDef::Cube(_)));
+    }
+
+    #[test]
+    fn test_parse_cube_out_of_range() {
+        assert!(ColorDef::parse_string("cube(101%, 0%, 0%)").is_err());
+        assert!(ColorDef::parse_string("cube(-1%, 0%, 0%)").is_err());
+    }
+
+    #[test]
+    fn test_parse_cube_wrong_arg_count() {
+        assert!(ColorDef::parse_string("cube(60%, 20%)").is_err());
+        assert!(ColorDef::parse_string("cube(60%, 20%, 0%, 10%)").is_err());
+    }
+
+    #[test]
+    fn test_parse_cube_invalid_number() {
+        assert!(ColorDef::parse_string("cube(abc, 20%, 0%)").is_err());
+    }
+
+    #[test]
+    fn test_to_console_color_cube() {
+        use crate::colorspace::CubeCoord;
+        let coord = CubeCoord::from_percentages(60.0, 20.0, 0.0).unwrap();
+        let c = ColorDef::Cube(coord);
+        // Should resolve without panic
+        if let Color::Color256(_) = c.to_console_color(None) {
+            // OK
+        } else {
+            panic!("Expected Color256 from cube resolution");
+        }
+    }
+
+    #[test]
+    fn test_to_console_color_cube_with_palette() {
+        use crate::colorspace::{CubeCoord, Rgb, ThemePalette};
+        let palette = ThemePalette::new([
+            Rgb(40, 40, 40),
+            Rgb(204, 36, 29),
+            Rgb(152, 151, 26),
+            Rgb(215, 153, 33),
+            Rgb(69, 133, 136),
+            Rgb(177, 98, 134),
+            Rgb(104, 157, 106),
+            Rgb(168, 153, 132),
+        ]);
+        let coord = CubeCoord::from_percentages(0.0, 0.0, 0.0).unwrap();
+        let c = ColorDef::Cube(coord);
+        // Origin should resolve to bg (anchors[0])
+        if let Color::Color256(_) = c.to_console_color(Some(&palette)) {
+            // OK
+        } else {
+            panic!("Expected Color256");
+        }
+    }
+
+    #[test]
+    fn test_parse_value_cube_string() {
+        let val = Value::String("cube(50%, 50%, 50%)".into());
+        let c = ColorDef::parse_value(&val).unwrap();
+        assert!(matches!(c, ColorDef::Cube(_)));
     }
 }

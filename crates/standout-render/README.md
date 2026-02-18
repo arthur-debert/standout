@@ -68,6 +68,21 @@ Or CSS syntax:
 }
 ```
 
+### Theme-Relative Colors
+
+Express colors as positions in a theme's color cube instead of absolute values:
+
+```yaml
+accent:
+  fg: "cube(60%, 20%, 0%)"   # 60% red, 20% green — adapts to any theme
+```
+
+```css
+.accent { color: cube(60%, 20%, 0%); }
+```
+
+The `cube(r%, g%, b%)` syntax resolves to actual RGB via trilinear interpolation in CIE LAB space using the theme's 8 base ANSI colors as cube corners. The same coordinate produces earthy tones in Gruvbox, pastels in Catppuccin, and muted variants in Solarized — designer intent is preserved across all themes.
+
 ### Multiple Output Modes
 
 One template, many formats:
