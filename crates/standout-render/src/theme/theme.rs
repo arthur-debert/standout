@@ -64,6 +64,8 @@ use std::path::{Path, PathBuf};
 
 use console::Style;
 
+use crate::colorspace::ThemePalette;
+
 use super::super::style::{
     parse_stylesheet, StyleValidationError, StyleValue, Styles, StylesheetError, ThemeVariants,
 };
@@ -127,6 +129,8 @@ pub struct Theme {
     aliases: HashMap<String, String>,
     /// Icon definitions (classic + optional nerdfont variants).
     icons: IconSet,
+    /// Theme palette for resolving [`ColorDef::Cube`] colors.
+    palette: Option<ThemePalette>,
 }
 
 impl Theme {
@@ -140,6 +144,7 @@ impl Theme {
             dark: HashMap::new(),
             aliases: HashMap::new(),
             icons: IconSet::new(),
+            palette: None,
         }
     }
 
@@ -153,6 +158,7 @@ impl Theme {
             dark: HashMap::new(),
             aliases: HashMap::new(),
             icons: IconSet::new(),
+            palette: None,
         }
     }
 
@@ -163,6 +169,31 @@ impl Theme {
     pub fn with_name(mut self, name: impl Into<String>) -> Self {
         self.name = Some(name.into());
         self
+    }
+
+    /// Sets the theme palette used to resolve [`ColorDef::Cube`] colors.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use standout_render::Theme;
+    /// use standout_render::colorspace::{ThemePalette, Rgb};
+    ///
+    /// let palette = ThemePalette::new([
+    ///     Rgb(40, 40, 40), Rgb(204, 36, 29), Rgb(152, 151, 26), Rgb(215, 153, 33),
+    ///     Rgb(69, 133, 136), Rgb(177, 98, 134), Rgb(104, 157, 106), Rgb(168, 153, 132),
+    /// ]);
+    ///
+    /// let theme = Theme::new().with_palette(palette);
+    /// ```
+    pub fn with_palette(mut self, palette: ThemePalette) -> Self {
+        self.palette = Some(palette);
+        self
+    }
+
+    /// Returns a reference to the theme palette, if set.
+    pub fn palette(&self) -> Option<&ThemePalette> {
+        self.palette.as_ref()
     }
 
     /// Loads a theme from a YAML file.
@@ -194,7 +225,7 @@ impl Theme {
             .map(|s| s.to_string());
 
         let icons = parse_icons_from_yaml_str(&content)?;
-        let variants = parse_stylesheet(&content)?;
+        let variants = parse_stylesheet(&content, None)?;
         Ok(Self {
             name,
             source_path: Some(path.to_path_buf()),
@@ -203,6 +234,7 @@ impl Theme {
             dark: variants.dark().clone(),
             aliases: variants.aliases().clone(),
             icons,
+            palette: None,
         })
     }
 
@@ -238,7 +270,7 @@ impl Theme {
     /// ```
     pub fn from_yaml(yaml: &str) -> Result<Self, StylesheetError> {
         let icons = parse_icons_from_yaml_str(yaml)?;
-        let variants = parse_stylesheet(yaml)?;
+        let variants = parse_stylesheet(yaml, None)?;
         Ok(Self {
             name: None,
             source_path: None,
@@ -247,6 +279,7 @@ impl Theme {
             dark: variants.dark().clone(),
             aliases: variants.aliases().clone(),
             icons,
+            palette: None,
         })
     }
 
@@ -260,6 +293,7 @@ impl Theme {
             dark: variants.dark().clone(),
             aliases: variants.aliases().clone(),
             icons: IconSet::new(),
+            palette: None,
         }
     }
 
@@ -308,7 +342,7 @@ impl Theme {
         })?;
 
         let icons = parse_icons_from_yaml_str(&content)?;
-        let variants = parse_stylesheet(&content)?;
+        let variants = parse_stylesheet(&content, self.palette.as_ref())?;
         self.base = variants.base().clone();
         self.light = variants.light().clone();
         self.dark = variants.dark().clone();
@@ -556,6 +590,9 @@ impl Theme {
         self.dark.extend(other.dark);
         self.aliases.extend(other.aliases);
         self.icons = self.icons.merge(other.icons);
+        if other.palette.is_some() {
+            self.palette = other.palette;
+        }
         self
     }
 }
@@ -1241,5 +1278,56 @@ mod tests {
 
         theme.refresh().unwrap();
         assert_eq!(theme.icons().len(), 2);
+    }
+
+    // =========================================================================
+    // Palette tests
+    // =========================================================================
+
+    #[test]
+    fn test_theme_no_palette_by_default() {
+        let theme = Theme::new();
+        assert!(theme.palette().is_none());
+    }
+
+    #[test]
+    fn test_theme_with_palette() {
+        use crate::colorspace::{Rgb, ThemePalette};
+
+        let palette = ThemePalette::new([
+            Rgb(40, 40, 40),
+            Rgb(204, 36, 29),
+            Rgb(152, 151, 26),
+            Rgb(215, 153, 33),
+            Rgb(69, 133, 136),
+            Rgb(177, 98, 134),
+            Rgb(104, 157, 106),
+            Rgb(168, 153, 132),
+        ]);
+
+        let theme = Theme::new().with_palette(palette);
+        assert!(theme.palette().is_some());
+    }
+
+    #[test]
+    fn test_theme_merge_palette_from_other() {
+        use crate::colorspace::ThemePalette;
+
+        let base = Theme::new();
+        let other = Theme::new().with_palette(ThemePalette::default_xterm());
+
+        let merged = base.merge(other);
+        assert!(merged.palette().is_some());
+    }
+
+    #[test]
+    fn test_theme_merge_keeps_own_palette() {
+        use crate::colorspace::ThemePalette;
+
+        let base = Theme::new().with_palette(ThemePalette::default_xterm());
+        let other = Theme::new();
+
+        let merged = base.merge(other);
+        assert!(merged.palette().is_some());
     }
 }

@@ -222,6 +222,37 @@ Features:
 
 YAML syntax is also supported as an alternative. See [Styling System](../topics/styling-system.md) for complete style options.
 
+### Theme-Relative Colors
+
+Standard color definitions (named colors, hex, 256-palette) are absolute — they look the same regardless of the user's terminal theme. This can clash with carefully chosen base16 palettes.
+
+`cube(r%, g%, b%)` colors solve this by specifying a position in a color cube whose corners are the theme's 8 base ANSI colors:
+
+```css
+.warm-accent { color: cube(60%, 20%, 0%); }   /* 60% toward red, 20% toward green */
+.cool-accent { color: cube(0%, 0%, 80%); }     /* 80% toward blue */
+.neutral     { color: cube(50%, 50%, 50%); }   /* center of the cube */
+```
+
+The same coordinate produces different RGB values depending on the active theme — a Gruvbox theme produces earthy tones, Catppuccin produces pastels, and Solarized produces muted variants. The designer's intent ("warm accent") is preserved across all themes.
+
+The interpolation happens in CIE LAB space, ensuring perceptually uniform gradients with no muddy midpoints.
+
+To attach a palette to a theme:
+
+```rust
+use standout_render::Theme;
+use standout_render::colorspace::{ThemePalette, Rgb};
+
+let palette = ThemePalette::new([
+    Rgb(40, 40, 40),    Rgb(204, 36, 29),   Rgb(152, 151, 26),  Rgb(215, 153, 33),
+    Rgb(69, 133, 136),  Rgb(177, 98, 134),  Rgb(104, 157, 106), Rgb(168, 153, 132),
+]);
+
+let theme = Theme::from_yaml("...")?
+    .with_palette(palette);
+```
+
 ---
 
 ## Template Integration with Styling

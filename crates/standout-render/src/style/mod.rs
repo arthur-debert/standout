@@ -69,7 +69,7 @@
 //!     fg: white
 //! "#;
 //!
-//! let variants = parse_stylesheet(yaml).unwrap();
+//! let variants = parse_stylesheet(yaml, None).unwrap();
 //! let dark_styles = variants.resolve(Some(ColorMode::Dark));
 //! ```
 

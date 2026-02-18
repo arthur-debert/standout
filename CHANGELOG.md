@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Theme-relative colorspace module** (`standout_render::colorspace`) — A pure-computation module for generating perceptually uniform palettes from base16 themes via trilinear interpolation in CIE LAB space. Based on [jake-stewart's proposal](https://gist.github.com/jake-stewart/0a8ea46159a7da2c808e5be2177e1783).
+
+  **New types:** `CubeCoord`, `Rgb`, `ThemePalette`
+
+- **Cube color syntax** (`cube(60%, 20%, 0%)`) — Colors can now be specified as theme-relative coordinates in a color cube whose corners are the 8 base ANSI colors. Instead of absolute RGB, designers express intent as a position in the theme's color space, and the framework resolves the actual color via LAB interpolation.
+
+  Supported in YAML stylesheets, CSS stylesheets, and shorthand strings:
+
+  ```yaml
+  accent:
+    fg: "cube(60%, 20%, 0%)"
+    bold: true
+  ```
+
+  ```css
+  .accent { color: cube(60%, 20%, 0%); font-weight: bold; }
+  ```
+
+- **Theme palette support** — `Theme::with_palette(ThemePalette)` lets you attach a palette of 8 anchor colors to a theme. Cube colors in stylesheets are resolved against this palette (or a default xterm palette if none is set).
+
+### Changed
+
+- `parse_stylesheet` and `parse_css` now accept an `Option<&ThemePalette>` parameter for resolving cube colors during style building.
+- `ColorDef::to_console_color` now accepts an `Option<&ThemePalette>` parameter.
+- `StyleAttributes::to_style` now accepts an `Option<&ThemePalette>` parameter.
+
 ## [7.0.0] - 2026-02-17
 
 ## [6.2.0] - 2026-02-15
