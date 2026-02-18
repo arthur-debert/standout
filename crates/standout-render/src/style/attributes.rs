@@ -22,6 +22,8 @@
 
 use console::Style;
 
+use crate::colorspace::ThemePalette;
+
 use super::color::ColorDef;
 use super::error::StylesheetError;
 
@@ -186,14 +188,16 @@ impl StyleAttributes {
     }
 
     /// Converts these attributes to a `console::Style`.
-    pub fn to_style(&self) -> Style {
+    ///
+    /// The optional [`ThemePalette`] is used to resolve [`ColorDef::Cube`] colors.
+    pub fn to_style(&self, palette: Option<&ThemePalette>) -> Style {
         let mut style = Style::new();
 
         if let Some(ref fg) = self.fg {
-            style = style.fg(fg.to_console_color());
+            style = style.fg(fg.to_console_color(palette));
         }
         if let Some(ref bg) = self.bg {
-            style = style.bg(bg.to_console_color());
+            style = style.bg(bg.to_console_color(palette));
         }
         if self.bold == Some(true) {
             style = style.bold();
@@ -458,7 +462,7 @@ mod tests {
     #[test]
     fn test_to_style_empty() {
         let attrs = StyleAttributes::new();
-        let style = attrs.to_style();
+        let style = attrs.to_style(None);
         // Empty style - hard to test directly, but should not panic
         let _ = style.apply_to("test");
     }
@@ -471,7 +475,7 @@ mod tests {
             italic: Some(true),
             ..Default::default()
         };
-        let style = attrs.to_style().force_styling(true);
+        let style = attrs.to_style(None).force_styling(true);
         let output = style.apply_to("test").to_string();
         // Should contain ANSI codes
         assert!(output.contains("\x1b["));

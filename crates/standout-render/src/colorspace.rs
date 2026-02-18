@@ -202,6 +202,9 @@ fn lerp_lab(t: f64, a: &Lab, b: &Lab) -> Lab {
 /// `CubeCoord { r: 0.6, g: 0.2, b: 0.0 }`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CubeCoord {
+    // SAFETY: `Eq` is manually implemented because `f64` doesn't derive `Eq`.
+    // This is safe because all values are validated to be finite (0.0..=1.0)
+    // during construction, so `PartialEq` is reflexive.
     /// Red axis fraction (0.0–1.0).
     pub r: f64,
     /// Green axis fraction (0.0–1.0).
@@ -209,6 +212,8 @@ pub struct CubeCoord {
     /// Blue axis fraction (0.0–1.0).
     pub b: f64,
 }
+
+impl Eq for CubeCoord {}
 
 impl CubeCoord {
     /// Creates a new cube coordinate with fractional values (0.0–1.0 per axis).
@@ -284,6 +289,22 @@ pub struct ThemePalette {
 }
 
 impl ThemePalette {
+    /// Creates a palette using the standard xterm base16 colors.
+    ///
+    /// This is the default when no explicit theme palette is configured.
+    pub fn default_xterm() -> Self {
+        Self::new([
+            Rgb(0, 0, 0),       // black
+            Rgb(205, 0, 0),     // red
+            Rgb(0, 205, 0),     // green
+            Rgb(205, 205, 0),   // yellow
+            Rgb(0, 0, 238),     // blue
+            Rgb(205, 0, 205),   // magenta
+            Rgb(0, 205, 205),   // cyan
+            Rgb(229, 229, 229), // white
+        ])
+    }
+
     /// Creates a new palette from the 8 base ANSI colors.
     ///
     /// The array order must be: black, red, green, yellow, blue, magenta, cyan, white.
