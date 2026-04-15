@@ -144,6 +144,7 @@
 //! ```
 
 // Internal modules
+pub mod colorspace;
 pub mod context;
 mod embedded;
 mod error;

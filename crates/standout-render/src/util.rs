@@ -505,7 +505,7 @@ mod tests {
                 {"name": "y", "value": 2}
             ]
         });
-        let (headers, rows) = flatten_json_for_csv(&data);
+        let (headers, _rows) = flatten_json_for_csv(&data);
         assert!(headers.contains(&"items.0.name".to_string()));
         assert!(headers.contains(&"items.0.value".to_string()));
         assert!(headers.contains(&"items.1.name".to_string()));

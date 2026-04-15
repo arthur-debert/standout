@@ -14,6 +14,7 @@ struct Empty;
 
 #[handler]
 fn my_verified_handler(#[arg] foo: String) -> Result<standout::cli::Output<Empty>, anyhow::Error> {
+    let _ = foo;
     Ok(Output::Render(Empty))
 }
 

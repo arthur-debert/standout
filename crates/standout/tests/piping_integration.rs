@@ -229,9 +229,13 @@ fn test_pipe_command_failure() {
     // Hook error should produce a Handled result with error message
     match result {
         RunResult::Handled(output) => {
-            // Error message should contain info about the failed command
+            // Error message should indicate the pipe command failed.
+            // On macOS the error typically mentions "exit 1" or "failed";
+            // on Linux it may surface as "Broken pipe" instead.
             assert!(
-                output.contains("exit 1") || output.contains("failed"),
+                output.contains("exit 1")
+                    || output.contains("failed")
+                    || output.contains("Broken pipe"),
                 "Expected error message about failed command, got: {}",
                 output
             );

@@ -28,6 +28,8 @@ use std::collections::HashMap;
 
 use console::Style;
 
+use crate::colorspace::ThemePalette;
+
 use super::super::theme::ColorMode;
 use super::definition::StyleDefinition;
 use super::error::StylesheetError;
@@ -188,9 +190,12 @@ impl Default for ThemeVariants {
 /// disabled: muted
 /// "#;
 ///
-/// let variants = parse_stylesheet(yaml).unwrap();
+/// let variants = parse_stylesheet(yaml, None).unwrap();
 /// ```
-pub fn parse_stylesheet(yaml: &str) -> Result<ThemeVariants, StylesheetError> {
+pub fn parse_stylesheet(
+    yaml: &str,
+    palette: Option<&ThemePalette>,
+) -> Result<ThemeVariants, StylesheetError> {
     // Parse YAML into a mapping
     let root: serde_yaml::Value =
         serde_yaml::from_str(yaml).map_err(|e| StylesheetError::Parse {
@@ -222,12 +227,13 @@ pub fn parse_stylesheet(yaml: &str) -> Result<ThemeVariants, StylesheetError> {
     }
 
     // Build theme variants from definitions
-    build_variants(&definitions)
+    build_variants(&definitions, palette)
 }
 
 /// Builds theme variants from parsed style definitions.
 pub(crate) fn build_variants(
     definitions: &HashMap<String, StyleDefinition>,
+    palette: Option<&ThemePalette>,
 ) -> Result<ThemeVariants, StylesheetError> {
     let mut variants = ThemeVariants::new();
 
@@ -238,19 +244,21 @@ pub(crate) fn build_variants(
             }
             StyleDefinition::Attributes { base, light, dark } => {
                 // Build base style
-                let base_style = base.to_style();
+                let base_style = base.to_style(palette);
                 variants.base.insert(name.clone(), base_style);
 
                 // Build light variant if overrides exist
                 if let Some(light_attrs) = light {
                     let merged = base.merge(light_attrs);
-                    variants.light.insert(name.clone(), merged.to_style());
+                    variants
+                        .light
+                        .insert(name.clone(), merged.to_style(palette));
                 }
 
                 // Build dark variant if overrides exist
                 if let Some(dark_attrs) = dark {
                     let merged = base.merge(dark_attrs);
-                    variants.dark.insert(name.clone(), merged.to_style());
+                    variants.dark.insert(name.clone(), merged.to_style(palette));
                 }
             }
         }
@@ -270,7 +278,7 @@ mod tests {
     #[test]
     fn test_parse_empty_stylesheet() {
         let yaml = "{}";
-        let variants = parse_stylesheet(yaml).unwrap();
+        let variants = parse_stylesheet(yaml, None).unwrap();
         assert!(variants.is_empty());
     }
 
@@ -281,7 +289,7 @@ mod tests {
                 fg: cyan
                 bold: true
         "#;
-        let variants = parse_stylesheet(yaml).unwrap();
+        let variants = parse_stylesheet(yaml, None).unwrap();
 
         assert_eq!(variants.len(), 1);
         assert!(variants.base().contains_key("header"));
@@ -296,7 +304,7 @@ mod tests {
             accent: cyan
             warning: "yellow italic"
         "#;
-        let variants = parse_stylesheet(yaml).unwrap();
+        let variants = parse_stylesheet(yaml, None).unwrap();
 
         assert_eq!(variants.base().len(), 3);
         assert!(variants.base().contains_key("bold_text"));
@@ -311,7 +319,7 @@ mod tests {
                 dim: true
             disabled: muted
         "#;
-        let variants = parse_stylesheet(yaml).unwrap();
+        let variants = parse_stylesheet(yaml, None).unwrap();
 
         assert_eq!(variants.base().len(), 1);
         assert_eq!(variants.aliases().len(), 1);
@@ -332,7 +340,7 @@ mod tests {
                 dark:
                     fg: white
         "#;
-        let variants = parse_stylesheet(yaml).unwrap();
+        let variants = parse_stylesheet(yaml, None).unwrap();
 
         assert!(variants.base().contains_key("footer"));
         assert!(variants.light().contains_key("footer"));
@@ -347,7 +355,7 @@ mod tests {
                 light:
                     bg: white
         "#;
-        let variants = parse_stylesheet(yaml).unwrap();
+        let variants = parse_stylesheet(yaml, None).unwrap();
 
         assert!(variants.base().contains_key("panel"));
         assert!(variants.light().contains_key("panel"));
@@ -362,7 +370,7 @@ mod tests {
                 dark:
                     bg: black
         "#;
-        let variants = parse_stylesheet(yaml).unwrap();
+        let variants = parse_stylesheet(yaml, None).unwrap();
 
         assert!(variants.base().contains_key("panel"));
         assert!(!variants.light().contains_key("panel"));
@@ -385,7 +393,7 @@ mod tests {
                 dark:
                     fg: white
         "#;
-        let variants = parse_stylesheet(yaml).unwrap();
+        let variants = parse_stylesheet(yaml, None).unwrap();
         let resolved = variants.resolve(None);
 
         // Should have both styles from base
@@ -409,7 +417,7 @@ mod tests {
                 dark:
                     fg: white
         "#;
-        let variants = parse_stylesheet(yaml).unwrap();
+        let variants = parse_stylesheet(yaml, None).unwrap();
         let resolved = variants.resolve(Some(ColorMode::Light));
 
         // footer should use light variant
@@ -429,7 +437,7 @@ mod tests {
                 dark:
                     fg: white
         "#;
-        let variants = parse_stylesheet(yaml).unwrap();
+        let variants = parse_stylesheet(yaml, None).unwrap();
         let resolved = variants.resolve(Some(ColorMode::Dark));
 
         // footer should use dark variant
@@ -446,7 +454,7 @@ mod tests {
                 dim: true
             disabled: muted
         "#;
-        let variants = parse_stylesheet(yaml).unwrap();
+        let variants = parse_stylesheet(yaml, None).unwrap();
         let resolved = variants.resolve(Some(ColorMode::Light));
 
         // muted should be concrete
@@ -465,7 +473,7 @@ mod tests {
                 fg: cyan
                 bold: true
         "#;
-        let variants = parse_stylesheet(yaml).unwrap();
+        let variants = parse_stylesheet(yaml, None).unwrap();
 
         // Light mode
         let light = variants.resolve(Some(ColorMode::Light));
@@ -487,14 +495,14 @@ mod tests {
     #[test]
     fn test_parse_invalid_yaml() {
         let yaml = "not: [valid: yaml";
-        let result = parse_stylesheet(yaml);
+        let result = parse_stylesheet(yaml, None);
         assert!(matches!(result, Err(StylesheetError::Parse { .. })));
     }
 
     #[test]
     fn test_parse_non_mapping_root() {
         let yaml = "- item1\n- item2";
-        let result = parse_stylesheet(yaml);
+        let result = parse_stylesheet(yaml, None);
         assert!(matches!(result, Err(StylesheetError::Parse { .. })));
     }
 
@@ -504,7 +512,7 @@ mod tests {
             bad:
                 fg: not_a_color
         "#;
-        let result = parse_stylesheet(yaml);
+        let result = parse_stylesheet(yaml, None);
         assert!(result.is_err());
     }
 
@@ -514,7 +522,7 @@ mod tests {
             bad:
                 unknown: true
         "#;
-        let result = parse_stylesheet(yaml);
+        let result = parse_stylesheet(yaml, None);
         assert!(matches!(
             result,
             Err(StylesheetError::UnknownAttribute { .. })
@@ -566,7 +574,7 @@ mod tests {
             warning: "yellow bold"
         "##;
 
-        let variants = parse_stylesheet(yaml).unwrap();
+        let variants = parse_stylesheet(yaml, None).unwrap();
 
         // Check counts
         // Base: muted, accent, background, text, border, error, success, warning = 8
@@ -588,5 +596,62 @@ mod tests {
             Some(&"accent".to_string())
         );
         assert_eq!(variants.aliases().get("footer"), Some(&"muted".to_string()));
+    }
+
+    // =========================================================================
+    // Cube color integration tests
+    // =========================================================================
+
+    #[test]
+    fn test_parse_cube_color_in_stylesheet() {
+        let yaml = r#"
+            theme_accent:
+                fg: "cube(60%, 20%, 0%)"
+                bold: true
+        "#;
+        let variants = parse_stylesheet(yaml, None).unwrap();
+        assert!(variants.base().contains_key("theme_accent"));
+    }
+
+    #[test]
+    fn test_parse_cube_color_with_palette() {
+        use crate::colorspace::{Rgb, ThemePalette};
+
+        let palette = ThemePalette::new([
+            Rgb(40, 40, 40),
+            Rgb(204, 36, 29),
+            Rgb(152, 151, 26),
+            Rgb(215, 153, 33),
+            Rgb(69, 133, 136),
+            Rgb(177, 98, 134),
+            Rgb(104, 157, 106),
+            Rgb(168, 153, 132),
+        ]);
+
+        let yaml = r#"
+            warm:
+                fg: "cube(80%, 30%, 0%)"
+            cool:
+                fg: "cube(0%, 0%, 80%)"
+        "#;
+        let variants = parse_stylesheet(yaml, Some(&palette)).unwrap();
+        assert!(variants.base().contains_key("warm"));
+        assert!(variants.base().contains_key("cool"));
+    }
+
+    #[test]
+    fn test_parse_cube_color_adaptive() {
+        let yaml = r#"
+            panel:
+                fg: "cube(50%, 50%, 50%)"
+                light:
+                    fg: "cube(20%, 20%, 20%)"
+                dark:
+                    fg: "cube(80%, 80%, 80%)"
+        "#;
+        let variants = parse_stylesheet(yaml, None).unwrap();
+        assert!(variants.base().contains_key("panel"));
+        assert!(variants.light().contains_key("panel"));
+        assert!(variants.dark().contains_key("panel"));
     }
 }

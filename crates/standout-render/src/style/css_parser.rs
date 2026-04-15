@@ -99,7 +99,10 @@ use super::error::StylesheetError;
 use super::parser::{build_variants, ThemeVariants};
 
 /// Parses a CSS stylesheet and builds theme variants.
-pub fn parse_css(css: &str) -> Result<ThemeVariants, StylesheetError> {
+pub fn parse_css(
+    css: &str,
+    palette: Option<&crate::colorspace::ThemePalette>,
+) -> Result<ThemeVariants, StylesheetError> {
     let mut input = ParserInput::new(css);
     let mut parser = Parser::new(&mut input);
 
@@ -120,7 +123,7 @@ pub fn parse_css(css: &str) -> Result<ThemeVariants, StylesheetError> {
         }
     }
 
-    build_variants(&css_parser.definitions)
+    build_variants(&css_parser.definitions, palette)
 }
 
 struct StyleSheetParser {
@@ -429,6 +432,25 @@ fn parse_color<'i, 't>(input: &mut Parser<'i, 't>) -> Result<ColorDef, ParseErro
     };
 
     match token {
+        Token::Function(ref name) if name.as_ref() == "cube" => {
+            input
+                .parse_nested_block(|input| {
+                    let r = input.expect_percentage()?;
+                    input.expect_comma()?;
+                    let g = input.expect_percentage()?;
+                    input.expect_comma()?;
+                    let b = input.expect_percentage()?;
+                    // cssparser percentages are 0.0–1.0, convert to 0–100 for from_percentages
+                    crate::colorspace::CubeCoord::from_percentages(
+                        r as f64 * 100.0,
+                        g as f64 * 100.0,
+                        b as f64 * 100.0,
+                    )
+                    .map(ColorDef::Cube)
+                    .map_err(|_| input.new_custom_error::<(), ()>(()))
+                })
+                .map_err(|_: ParseError<'i, ()>| input.new_custom_error::<(), ()>(()))
+        }
         Token::Ident(name) => {
             ColorDef::parse_string(name.as_ref()).map_err(|_| input.new_custom_error::<(), ()>(()))
         }
@@ -453,7 +475,7 @@ mod tests {
     #[test]
     fn test_parse_simple() {
         let css = ".error { color: red; font-weight: bold; }";
-        let variants = parse_css(css).unwrap();
+        let variants = parse_css(css, None).unwrap();
         let base = variants.base();
 
         // Ensure "error" style exists
@@ -470,7 +492,7 @@ mod tests {
     fn test_parse_adaptive() {
         let css =
             ".text { color: red; } @media (prefers-color-scheme: dark) { .text { color: white; } }";
-        let variants = parse_css(css).unwrap();
+        let variants = parse_css(css, None).unwrap();
 
         let light = variants.resolve(Some(ColorMode::Light));
         let dark = variants.resolve(Some(ColorMode::Dark));
@@ -495,7 +517,7 @@ mod tests {
     #[test]
     fn test_multiple_selectors() {
         let css = ".a, .b { color: blue; }";
-        let variants = parse_css(css).unwrap();
+        let variants = parse_css(css, None).unwrap();
         let base = variants.base();
         assert!(base.contains_key("a"));
         assert!(base.contains_key("b"));
@@ -517,7 +539,7 @@ mod tests {
             strikethrough: true;
         }
         "#;
-        let variants = parse_css(css).unwrap();
+        let variants = parse_css(css, None).unwrap();
         let base = variants.base();
         assert!(base.contains_key("all-props"));
 
@@ -551,7 +573,7 @@ mod tests {
             visibility: hidden;
         }
         "#;
-        let variants = parse_css(css).unwrap();
+        let variants = parse_css(css, None).unwrap();
         let base = variants.base();
         let style = base.get("aliases").unwrap().clone().force_styling(true);
         let out = style.apply_to("text").to_string();
@@ -566,7 +588,7 @@ mod tests {
     #[test]
     fn test_text_decoration_line_through() {
         let css = ".strike { text-decoration: line-through; }";
-        let variants = parse_css(css).unwrap();
+        let variants = parse_css(css, None).unwrap();
         let style = variants
             .base()
             .get("strike")
@@ -590,7 +612,7 @@ mod tests {
         "#;
 
         // cssparser is robust and may skip invalid declarations
-        let variants = parse_css(css).unwrap();
+        let variants = parse_css(css, None).unwrap();
         assert!(variants.base().contains_key("valid"));
     }
 
@@ -598,7 +620,7 @@ mod tests {
     fn test_empty_selector_error() {
         // Just dots without name
         let css = ". { color: red; }";
-        let res = parse_css(css);
+        let res = parse_css(css, None);
         assert!(res.is_err());
     }
 
@@ -609,7 +631,7 @@ mod tests {
         // Our parser expects '.' delimiters in parse_prelude.
         // If it doesn't find '.', it consumes tokens.
         // If names is empty, it returns error.
-        let res = parse_css(css);
+        let res = parse_css(css, None);
         assert!(res.is_err());
     }
 
@@ -617,14 +639,14 @@ mod tests {
     fn test_invalid_color() {
         let css = ".bad-color { color: not-a-color; }";
         // Should ignore the invalid property but parse the rule
-        let variants = parse_css(css).unwrap();
+        let variants = parse_css(css, None).unwrap();
         assert!(variants.base().contains_key("bad-color"));
     }
 
     #[test]
     fn test_hex_colors() {
         let css = ".hex { color: #ff0000; bg: #00ff00; }";
-        let variants = parse_css(css).unwrap();
+        let variants = parse_css(css, None).unwrap();
         let style = variants.base().get("hex").unwrap();
         let out = style.apply_to("x").to_string();
         // Just verify it parsed something, specific hex to ansi conversion depends on color support
@@ -639,8 +661,54 @@ mod tests {
             color: red; /* Inline comment */
         }
         "#;
-        let variants = parse_css(css).unwrap();
+        let variants = parse_css(css, None).unwrap();
         assert!(variants.base().contains_key("commented"));
+    }
+
+    // =========================================================================
+    // Cube color CSS tests
+    // =========================================================================
+
+    #[test]
+    fn test_css_cube_color() {
+        let css = ".warm { color: cube(60%, 20%, 0%); }";
+        let variants = parse_css(css, None).unwrap();
+        assert!(variants.base().contains_key("warm"));
+    }
+
+    #[test]
+    fn test_css_cube_color_bg() {
+        let css = ".panel { background-color: cube(10%, 10%, 50%); }";
+        let variants = parse_css(css, None).unwrap();
+        assert!(variants.base().contains_key("panel"));
+    }
+
+    #[test]
+    fn test_css_cube_with_other_props() {
+        let css = ".styled { color: cube(80%, 30%, 0%); font-weight: bold; }";
+        let variants = parse_css(css, None).unwrap();
+        let style = variants
+            .base()
+            .get("styled")
+            .unwrap()
+            .clone()
+            .force_styling(true);
+        let out = style.apply_to("text").to_string();
+        // Should have bold
+        assert!(out.contains("\x1b[1m"));
+    }
+
+    #[test]
+    fn test_css_cube_adaptive() {
+        let css = r#"
+        .text { color: cube(50%, 50%, 50%); }
+        @media (prefers-color-scheme: dark) {
+            .text { color: cube(80%, 80%, 80%); }
+        }
+        "#;
+        let variants = parse_css(css, None).unwrap();
+        assert!(variants.base().contains_key("text"));
+        assert!(variants.dark().contains_key("text"));
     }
 
     use proptest::prelude::*;
@@ -649,7 +717,7 @@ mod tests {
         #[test]
         fn test_random_css_input_no_panic(s in "\\PC*") {
             // Should never panic, even with garbage input
-            let _ = parse_css(&s);
+            let _ = parse_css(&s, None);
         }
 
         #[test]
@@ -659,7 +727,7 @@ mod tests {
             prop_name in "[a-z-]+"
         ) {
             let css = format!(".prop {{ color: {}; bold: {}; {}: {}; }}", color, bool_val, prop_name, bool_val);
-            let _ = parse_css(&css);
+            let _ = parse_css(&css, None);
         }
     }
 }
