@@ -479,6 +479,33 @@ For dense data, add lines between rows:
 └──────┴────────────────────────────────────┘
 ```
 
+### Alternating Row Styles
+
+For long tables, alternating background colors on even/odd rows improves readability (sometimes called "zebra striping"). Pass `row_styles` to the `table()` function:
+
+```jinja
+{# Default gray tint — subtle dark/light gray alternation #}
+{% set t = table(columns, header_style="bold", row_styles=true) %}
+
+{# Named tint — blue, red, green, or purple #}
+{% set t = table(columns, header_style="bold", row_styles="blue") %}
+
+{# Fully custom style names #}
+{% set t = table(columns, row_styles=["my_even", "my_odd"]) %}
+```
+
+The default theme includes five adaptive tints that automatically adjust to the user's light/dark terminal setting:
+
+| Tint | Usage | Dark mode | Light mode |
+|--------|-------|-----------|------------|
+| gray | `row_styles=true` | dark gray bg | light gray bg |
+| blue | `row_styles="blue"` | dark navy bg | lavender bg |
+| red | `row_styles="red"` | dark crimson bg | blush bg |
+| green | `row_styles="green"` | dark forest bg | mint bg |
+| purple | `row_styles="purple"` | dark plum bg | lilac bg |
+
+The Rust API equivalent is `Table::row_styles("table_row_even", "table_row_odd")`.
+
 ---
 
 ## Step 13: The Complete Example

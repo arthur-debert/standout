@@ -35,6 +35,8 @@
 //! println!("{}", table.render(&data));
 //! ```
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use super::formatter::{CellValue, OwnedCellValue, TabularFormatter};
 use super::traits::{Tabular, TabularRow};
 use super::types::{FlatDataSpec, TabularSpec};
@@ -170,7 +172,10 @@ impl BorderChars {
 }
 
 /// A decorated table with borders, headers, and separators.
-#[derive(Clone, Debug)]
+///
+/// Supports alternating row styles (odd/even) via [`row_styles`](Table::row_styles).
+/// When set, data rows are automatically wrapped in `[style]...[/style]` tags
+/// that alternate between the two style names.
 pub struct Table {
     /// The underlying formatter.
     formatter: TabularFormatter,
@@ -182,6 +187,39 @@ pub struct Table {
     header_style: Option<String>,
     /// Whether to add separators between data rows.
     row_separator: bool,
+    /// Alternating row style names: (odd_style, even_style).
+    /// Row 0 uses even, row 1 uses odd, etc.
+    row_styles: Option<(String, String)>,
+    /// Counter for tracking data row index (for alternating styles).
+    row_counter: AtomicUsize,
+}
+
+impl Clone for Table {
+    fn clone(&self) -> Self {
+        Self {
+            formatter: self.formatter.clone(),
+            headers: self.headers.clone(),
+            border: self.border,
+            header_style: self.header_style.clone(),
+            row_separator: self.row_separator,
+            row_styles: self.row_styles.clone(),
+            row_counter: AtomicUsize::new(self.row_counter.load(Ordering::Relaxed)),
+        }
+    }
+}
+
+impl std::fmt::Debug for Table {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Table")
+            .field("formatter", &self.formatter)
+            .field("headers", &self.headers)
+            .field("border", &self.border)
+            .field("header_style", &self.header_style)
+            .field("row_separator", &self.row_separator)
+            .field("row_styles", &self.row_styles)
+            .field("row_counter", &self.row_counter.load(Ordering::Relaxed))
+            .finish()
+    }
 }
 
 impl Table {
@@ -194,6 +232,8 @@ impl Table {
             border: BorderStyle::None,
             header_style: None,
             row_separator: false,
+            row_styles: None,
+            row_counter: AtomicUsize::new(0),
         }
     }
 
@@ -206,6 +246,8 @@ impl Table {
             border: BorderStyle::None,
             header_style: None,
             row_separator: false,
+            row_styles: None,
+            row_counter: AtomicUsize::new(0),
         }
     }
 
@@ -288,6 +330,27 @@ impl Table {
         self
     }
 
+    /// Set alternating row styles for even and odd data rows.
+    ///
+    /// When set, each data row is wrapped in `[style]...[/style]` tags
+    /// that alternate between the two style names. Row 0 uses `even_style`,
+    /// row 1 uses `odd_style`, and so on.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let table = Table::new(spec, 80)
+    ///     .row_styles("table_row_even", "table_row_odd");
+    /// ```
+    pub fn row_styles(
+        mut self,
+        even_style: impl Into<String>,
+        odd_style: impl Into<String>,
+    ) -> Self {
+        self.row_styles = Some((odd_style.into(), even_style.into()));
+        self
+    }
+
     /// Get the border style.
     pub fn get_border(&self) -> BorderStyle {
         self.border
@@ -301,7 +364,7 @@ impl Table {
     /// Format a data row.
     pub fn row<S: AsRef<str>>(&self, values: &[S]) -> String {
         let content = self.formatter.format_row(values);
-        self.wrap_row(&content)
+        self.wrap_data_row(&content)
     }
 
     /// Format a data row with sub-column support.
@@ -310,7 +373,7 @@ impl Table {
     /// [`CellValue::Sub`]; all others should be [`CellValue::Single`].
     pub fn row_cells(&self, values: &[CellValue<'_>]) -> String {
         let content = self.formatter.format_row_cells(values);
-        self.wrap_row(&content)
+        self.wrap_data_row(&content)
     }
 
     /// Format a data row by extracting values from a serializable struct.
@@ -332,7 +395,7 @@ impl Table {
     /// ```
     pub fn row_from<T: serde::Serialize>(&self, value: &T) -> String {
         let content = self.formatter.row_from(value);
-        self.wrap_row(&content)
+        self.wrap_data_row(&content)
     }
 
     /// Format a data row using the `TabularRow` trait.
@@ -364,7 +427,7 @@ impl Table {
     /// ```
     pub fn row_from_trait<T: TabularRow>(&self, value: &T) -> String {
         let content = self.formatter.row_from_trait(value);
-        self.wrap_row(&content)
+        self.wrap_data_row(&content)
     }
 
     /// Format the header row.
@@ -400,6 +463,22 @@ impl Table {
     /// Generate the bottom border row.
     pub fn bottom_border(&self) -> String {
         self.horizontal_line(LineType::Bottom)
+    }
+
+    /// Wrap a data row with alternating style (if set) and borders.
+    fn wrap_data_row(&self, content: &str) -> String {
+        let bordered = self.wrap_row(content);
+        if let Some((odd_style, even_style)) = &self.row_styles {
+            let index = self.row_counter.fetch_add(1, Ordering::Relaxed);
+            let style = if index.is_multiple_of(2) {
+                even_style
+            } else {
+                odd_style
+            };
+            format!("[{}]{}[/{}]", style, bordered, style)
+        } else {
+            bordered
+        }
     }
 
     /// Wrap a row content with vertical borders.
@@ -479,6 +558,7 @@ impl Table {
     ///
     /// Includes top border, header (if set), separator, data rows, and bottom border.
     pub fn render<S: AsRef<str>>(&self, rows: &[Vec<S>]) -> String {
+        self.row_counter.store(0, Ordering::Relaxed);
         let mut output = Vec::new();
 
         // Top border
@@ -639,7 +719,7 @@ impl minijinja::value::Object for Table {
                 // Convert MiniJinja Value to serde_json::Value for field extraction
                 let json_value = minijinja::value::Value::from_serialize(&args[0]);
                 let formatted = self.formatter.row_from(&json_value);
-                Ok(minijinja::Value::from(self.wrap_row(&formatted)))
+                Ok(minijinja::Value::from(self.wrap_data_row(&formatted)))
             }
             "header_row" => {
                 // header_row() - format the header row

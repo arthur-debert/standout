@@ -29,6 +29,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Theme palette support** — `Theme::with_palette(ThemePalette)` lets you attach a palette of 8 anchor colors to a theme. Cube colors in stylesheets are resolved against this palette (or a default xterm palette if none is set).
 
+- **Alternating table row styles** — `Table::row_styles(even, odd)` wraps each data row in style tags that alternate between even and odd style names. The row counter auto-increments on every `row()` / `row_cells()` / `row_from()` / `row_from_trait()` call.
+
+  In templates, pass `row_styles` to the `table()` function:
+
+  ```jinja
+  {% set t = table(columns, row_styles=true) %}          {# default gray tint #}
+  {% set t = table(columns, row_styles="blue") %}         {# blue tint #}
+  {% set t = table(columns, row_styles=["a", "b"]) %}     {# custom style names #}
+  ```
+
+- **Built-in table row tint styles** — `Theme::default()` now ships with adaptive alternating-row styles in five tints: gray (default), blue, red, green, and purple. Each tint provides a subtle background color shift for odd rows, with dark- and light-mode variants.
+
+  | Tint | Dark bg (odd) | Light bg (odd) |
+  |--------|---------------|----------------|
+  | gray | 236 `#303030` | 254 `#e4e4e4` |
+  | blue | 17 `#00005f` | 189 `#d7d7ff` |
+  | red | 52 `#5f0000` | 224 `#ffd7d7` |
+  | green | 22 `#005f00` | 194 `#d7ffd7` |
+  | purple | 53 `#5f005f` | 225 `#ffd7ff` |
+
+  Style names follow the pattern `table_row_{even,odd}[_{tint}]`.
+
 ### Changed
 
 - `parse_stylesheet` and `parse_css` now accept an `Option<&ThemePalette>` parameter for resolving cube colors during style building.
