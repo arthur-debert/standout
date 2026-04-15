@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.2.0] - 2026-04-15
+
 ### Added
 
 - **Theme-relative colorspace module** (`standout_render::colorspace`) — A pure-computation module for generating perceptually uniform palettes from base16 themes via trilinear interpolation in CIE LAB space. Based on [jake-stewart's proposal](https://gist.github.com/jake-stewart/0a8ea46159a7da2c808e5be2177e1783).
@@ -1180,7 +1182,8 @@ let output = render_with_output(template, &data, &theme, OutputMode::Term)?;
   - Command handler system with `dispatch_from` convenience method
   - Archive variant support in clap integration
 
-[Unreleased]: https://github.com/arthur-debert/standout/compare/standout-v7.1.0...HEAD
+[Unreleased]: https://github.com/arthur-debert/standout/compare/standout-v7.2.0...HEAD
+[7.2.0]: https://github.com/arthur-debert/standout/compare/standout-v7.1.0...standout-v7.2.0
 [7.1.0]: https://github.com/arthur-debert/standout/compare/standout-v7.0.0...standout-v7.1.0
 [7.0.0]: https://github.com/arthur-debert/standout/compare/standout-v6.2.0...standout-v7.0.0
 [6.2.0]: https://github.com/arthur-debert/standout/compare/standout-v6.1.0...standout-v6.2.0
