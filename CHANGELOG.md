@@ -16,8 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       .command_passthrough("init-sh", |_m, _ctx| {
           print!("export PATH=\"$HOME/.myapp/bin:$PATH\"");
           Ok(())
-      })
+      })?
+      .build()?;
   ```
+
+- **`Theme::from_css()` and `Theme::from_css_file()`** — New constructors for loading themes directly from CSS content or CSS files, matching the existing `from_yaml()` / `from_file()` pattern.
+
+- **CSS stylesheet support in `embed_styles!`** — The `embed_styles!` macro and `StylesheetRegistry` now recognize `.css` files in addition to `.yaml` / `.yml`. CSS files are auto-detected and parsed with the CSS parser. `.css` has highest priority when multiple formats exist with the same base name.
 
 - **Complete working example** — New `docs/guides/complete-example.md` with a self-contained, copy-paste project (Cargo.toml, main.rs, template, CSS stylesheet).
 

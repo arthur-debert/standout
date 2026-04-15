@@ -71,18 +71,32 @@ use super::error::StylesheetError;
 ///
 /// When multiple files exist with the same base name but different extensions,
 /// the extension appearing earlier in this list takes precedence.
-pub const STYLESHEET_EXTENSIONS: &[&str] = &[".yaml", ".yml"];
+pub const STYLESHEET_EXTENSIONS: &[&str] = &[".css", ".yaml", ".yml"];
 
 /// Creates the file registry configuration for stylesheets.
 fn stylesheet_config() -> FileRegistryConfig<Theme> {
     FileRegistryConfig {
         extensions: STYLESHEET_EXTENSIONS,
         transform: |content| {
-            Theme::from_yaml(content).map_err(|e| LoadError::Transform {
+            parse_theme_content(content).map_err(|e| LoadError::Transform {
                 name: String::new(), // FileRegistry fills in the actual name
                 message: e.to_string(),
             })
         },
+    }
+}
+
+/// Parses theme content, auto-detecting CSS vs YAML format.
+///
+/// CSS is detected by the presence of a CSS class selector (`.name {`),
+/// which distinguishes it from YAML inline maps that also use `{`.
+fn parse_theme_content(content: &str) -> Result<Theme, StylesheetError> {
+    let trimmed = content.trim_start();
+    // CSS files start with class selectors (.name), comments (/*), or @media queries
+    if trimmed.starts_with('.') || trimmed.starts_with("/*") || trimmed.starts_with("@media") {
+        Theme::from_css(content)
+    } else {
+        Theme::from_yaml(content)
     }
 }
 
@@ -291,11 +305,10 @@ impl StylesheetRegistry {
     pub fn from_embedded_entries(entries: &[(&str, &str)]) -> Result<Self, StylesheetError> {
         let mut registry = Self::new();
 
-        // Use shared helper with YAML parsing transform
-        registry.inline =
-            build_embedded_registry(entries, STYLESHEET_EXTENSIONS, |yaml_content| {
-                Theme::from_yaml(yaml_content)
-            })?;
+        // Use shared helper with auto-detecting CSS/YAML parsing
+        registry.inline = build_embedded_registry(entries, STYLESHEET_EXTENSIONS, |content| {
+            parse_theme_content(content)
+        })?;
 
         Ok(registry)
     }

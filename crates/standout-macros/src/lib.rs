@@ -8,7 +8,7 @@
 //! ## Embedding Macros
 //!
 //! - [`embed_templates!`] - Embed template files (`.jinja`, `.jinja2`, `.j2`, `.txt`)
-//! - [`embed_styles!`] - Embed stylesheet files (`.yaml`, `.yml`)
+//! - [`embed_styles!`] - Embed stylesheet files (`.css`, `.yaml`, `.yml`)
 //!
 //! ## Derive Macros
 //!

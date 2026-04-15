@@ -33,7 +33,7 @@ use syn::LitStr;
 pub const TEMPLATE_EXTENSIONS: &[&str] = &[".jinja", ".jinja2", ".j2", ".txt"];
 
 /// Stylesheet file extensions (must match standout::style::STYLESHEET_EXTENSIONS).
-pub const STYLESHEET_EXTENSIONS: &[&str] = &[".yaml", ".yml"];
+pub const STYLESHEET_EXTENSIONS: &[&str] = &[".css", ".yaml", ".yml"];
 
 /// Generates code to create an EmbeddedTemplates source.
 ///
