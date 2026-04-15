@@ -674,7 +674,61 @@ impl Theme {
 
 impl Default for Theme {
     fn default() -> Self {
+        use console::{Color, Style};
+
+        // ANSI 256 color reference for tints:
+        //
+        // Dark mode (very dark tinted bg):        Light mode (pastel tinted bg):
+        //   gray:   236 (#303030)                   gray:   254 (#e4e4e4)
+        //   blue:    17 (#00005f)                   blue:   189 (#d7d7ff)
+        //   red:     52 (#5f0000)                   red:    224 (#ffd7d7)
+        //   green:   22 (#005f00)                   green:  194 (#d7ffd7)
+        //   purple:  53 (#5f005f)                   purple: 225 (#ffd7ff)
+
         Self::new()
+            // ── Base (gray) ─────────────────────────────────────────────
+            .add("table_row_even", Style::new())
+            .add_adaptive(
+                "table_row_odd",
+                Style::new(),
+                Some(Style::new().bg(Color::Color256(254))),
+                Some(Style::new().bg(Color::Color256(236))),
+            )
+            // gray is an alias for the base variant
+            .add("table_row_even_gray", "table_row_even")
+            .add("table_row_odd_gray", "table_row_odd")
+            // ── Blue ────────────────────────────────────────────────────
+            .add("table_row_even_blue", Style::new())
+            .add_adaptive(
+                "table_row_odd_blue",
+                Style::new(),
+                Some(Style::new().bg(Color::Color256(189))),
+                Some(Style::new().bg(Color::Color256(17))),
+            )
+            // ── Red ─────────────────────────────────────────────────────
+            .add("table_row_even_red", Style::new())
+            .add_adaptive(
+                "table_row_odd_red",
+                Style::new(),
+                Some(Style::new().bg(Color::Color256(224))),
+                Some(Style::new().bg(Color::Color256(52))),
+            )
+            // ── Green ───────────────────────────────────────────────────
+            .add("table_row_even_green", Style::new())
+            .add_adaptive(
+                "table_row_odd_green",
+                Style::new(),
+                Some(Style::new().bg(Color::Color256(194))),
+                Some(Style::new().bg(Color::Color256(22))),
+            )
+            // ── Purple ──────────────────────────────────────────────────
+            .add("table_row_even_purple", Style::new())
+            .add_adaptive(
+                "table_row_odd_purple",
+                Style::new(),
+                Some(Style::new().bg(Color::Color256(225))),
+                Some(Style::new().bg(Color::Color256(53))),
+            )
     }
 }
 
@@ -830,7 +884,11 @@ mod tests {
     #[test]
     fn test_theme_default() {
         let theme = Theme::default();
-        assert!(theme.is_empty());
+        // Default theme includes built-in table row styles
+        assert!(!theme.is_empty());
+        let styles = theme.resolve_styles(Some(crate::ColorMode::Dark));
+        assert!(styles.resolve("table_row_even").is_some());
+        assert!(styles.resolve("table_row_odd").is_some());
     }
 
     // =========================================================================

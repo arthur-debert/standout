@@ -254,6 +254,29 @@ if !errors.is_empty() {
 
 ---
 
+## Built-in Styles
+
+`Theme::default()` includes adaptive styles for alternating table row backgrounds. These are used automatically when you pass `row_styles=true` (or a tint name) to the `table()` template function.
+
+| Style name | Purpose |
+|------------|---------|
+| `table_row_even` | Even rows — no background (transparent) |
+| `table_row_odd` | Odd rows — subtle gray background shift |
+| `table_row_even_gray` | Alias for `table_row_even` |
+| `table_row_odd_gray` | Alias for `table_row_odd` |
+| `table_row_even_blue` | Even rows for blue tint |
+| `table_row_odd_blue` | Odd rows — dark navy / lavender bg |
+| `table_row_even_red` | Even rows for red tint |
+| `table_row_odd_red` | Odd rows — dark crimson / blush bg |
+| `table_row_even_green` | Even rows for green tint |
+| `table_row_odd_green` | Odd rows — dark forest / mint bg |
+| `table_row_even_purple` | Even rows for purple tint |
+| `table_row_odd_purple` | Odd rows — dark plum / lilac bg |
+
+All odd-row styles are adaptive: they resolve to a dark variant when the terminal is in dark mode, and a light variant in light mode. You can override any of these by defining the same style name in your theme.
+
+---
+
 ## Best Practices
 
 ### Semantic, Presentation, and Visual Layers

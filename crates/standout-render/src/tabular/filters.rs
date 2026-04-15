@@ -247,6 +247,7 @@ fn register_table_functions(env: &mut Environment<'static>) {
             let row_separator = kwargs
                 .get::<Option<bool>>("row_separator")?
                 .unwrap_or(false);
+            let row_styles = kwargs.get::<Option<Value>>("row_styles")?;
             let width = kwargs.get::<Option<usize>>("width")?.unwrap_or(80);
             kwargs.assert_all_used()?;
 
@@ -284,6 +285,40 @@ fn register_table_functions(env: &mut Environment<'static>) {
             // Set row separator if enabled
             if row_separator {
                 table = table.row_separator(true);
+            }
+
+            // Set row styles for alternating row colors.
+            // Accepts:
+            //   row_styles=true              → default gray tint
+            //   row_styles="blue"            → blue tint (table_row_even_blue / table_row_odd_blue)
+            //   row_styles=["my_even","my_odd"] → custom style names
+            if let Some(rs) = row_styles {
+                if rs.is_true() {
+                    match rs.kind() {
+                        minijinja::value::ValueKind::Bool => {
+                            table = table.row_styles("table_row_even", "table_row_odd");
+                        }
+                        minijinja::value::ValueKind::String => {
+                            let tint = rs.to_string();
+                            let even = format!("table_row_even_{}", tint);
+                            let odd = format!("table_row_odd_{}", tint);
+                            table = table.row_styles(even, odd);
+                        }
+                        _ => {
+                            if let Ok(iter) = rs.try_iter() {
+                                let names: Vec<String> = iter.map(|v| v.to_string()).collect();
+                                if names.len() == 2 {
+                                    table = table.row_styles(&names[0], &names[1]);
+                                } else {
+                                    return Err(minijinja::Error::new(
+                                        minijinja::ErrorKind::InvalidOperation,
+                                        "row_styles array must have exactly 2 elements: [even_style, odd_style]",
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             Ok(Value::from_object(table))
