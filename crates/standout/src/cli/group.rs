@@ -332,6 +332,73 @@ impl CommandRecipe for ErasedConfigRecipe {
     }
 }
 
+/// Recipe for passthrough commands that bypass the rendering pipeline.
+///
+/// The handler receives `&ArgMatches` and `&CommandContext`, writes directly to
+/// stdout (or does whatever it needs), and the framework marks the command as
+/// handled with no output.
+pub(crate) struct PassthroughRecipe<F>
+where
+    F: FnMut(&ArgMatches, &CommandContext) -> Result<(), anyhow::Error> + 'static,
+{
+    handler: Rc<RefCell<F>>,
+}
+
+impl<F> PassthroughRecipe<F>
+where
+    F: FnMut(&ArgMatches, &CommandContext) -> Result<(), anyhow::Error> + 'static,
+{
+    pub fn new(handler: F) -> Self {
+        Self {
+            handler: Rc::new(RefCell::new(handler)),
+        }
+    }
+}
+
+impl<F> CommandRecipe for PassthroughRecipe<F>
+where
+    F: FnMut(&ArgMatches, &CommandContext) -> Result<(), anyhow::Error> + 'static,
+{
+    fn template(&self) -> Option<&str> {
+        None
+    }
+
+    fn hooks(&self) -> Option<&Hooks> {
+        None
+    }
+
+    fn take_hooks(&mut self) -> Option<Hooks> {
+        None
+    }
+
+    fn create_dispatch(
+        &self,
+        _template: &str,
+        _context_registry: &ContextRegistry,
+        _template_engine: Rc<Box<dyn standout_render::template::TemplateEngine>>,
+    ) -> DispatchFn {
+        let handler = self.handler.clone();
+
+        Rc::new(RefCell::new(
+            move |matches: &ArgMatches,
+                  ctx: &CommandContext,
+                  _hooks: Option<&Hooks>,
+                  _output_mode: crate::OutputMode,
+                  _theme: &crate::Theme| {
+                let result = (handler.borrow_mut())(matches, ctx);
+                match result {
+                    Ok(()) => Ok(super::dispatch::DispatchOutput::Silent),
+                    Err(e) => Err(format!("Error: {}", e)),
+                }
+            },
+        ))
+    }
+
+    fn expected_args(&self) -> Vec<ExpectedArg> {
+        Vec::new()
+    }
+}
+
 /// Configuration for a single command.
 ///
 /// Used internally to collect handler, template, and hooks before
@@ -730,6 +797,40 @@ impl GroupBuilder {
         self
     }
 
+    /// Registers a passthrough command that bypasses the rendering pipeline.
+    ///
+    /// The handler receives `&ArgMatches` and `&CommandContext`, writes directly to
+    /// stdout (or does whatever it needs), and the framework marks the command as
+    /// handled with no rendered output. The command still participates in
+    /// help/completions.
+    ///
+    /// Use this for commands that manage their own output (e.g., shell init scripts
+    /// that output `eval`-able code, or commands that delegate to another tool).
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// .group("app", |g| g
+    ///     .passthrough("init-sh", |_m, _ctx| {
+    ///         print!("export PATH=\"$HOME/.myapp/bin:$PATH\"");
+    ///         Ok(())
+    ///     }))
+    /// ```
+    pub fn passthrough<F>(mut self, name: &str, handler: F) -> Self
+    where
+        F: FnMut(&ArgMatches, &CommandContext) -> Result<(), anyhow::Error> + 'static,
+    {
+        self.entries.insert(
+            name.to_string(),
+            GroupEntry::Command {
+                handler: Box::new(PassthroughCommandConfig {
+                    handler: Rc::new(RefCell::new(handler)),
+                }),
+            },
+        );
+        self
+    }
+
     /// Creates a nested group within this group.
     ///
     /// # Example
@@ -911,6 +1012,59 @@ where
 
     fn expected_args(&self) -> Vec<ExpectedArg> {
         self.handler.borrow().expected_args()
+    }
+}
+
+/// Internal: passthrough command config that bypasses rendering.
+struct PassthroughCommandConfig<F>
+where
+    F: FnMut(&ArgMatches, &CommandContext) -> Result<(), anyhow::Error> + 'static,
+{
+    handler: Rc<RefCell<F>>,
+}
+
+impl<F> ErasedCommandConfig for PassthroughCommandConfig<F>
+where
+    F: FnMut(&ArgMatches, &CommandContext) -> Result<(), anyhow::Error> + 'static,
+{
+    fn template(&self) -> Option<&str> {
+        None
+    }
+
+    fn hooks(&self) -> Option<&Hooks> {
+        None
+    }
+
+    fn take_hooks(&mut self) -> Option<Hooks> {
+        None
+    }
+
+    fn register(
+        self: Box<Self>,
+        _path: &str,
+        _template: String,
+        _context_registry: ContextRegistry,
+        _template_engine: Rc<Box<dyn standout_render::template::TemplateEngine>>,
+    ) -> DispatchFn {
+        let handler = self.handler;
+
+        Rc::new(RefCell::new(
+            move |matches: &ArgMatches,
+                  ctx: &CommandContext,
+                  _hooks: Option<&Hooks>,
+                  _output_mode: crate::OutputMode,
+                  _theme: &crate::Theme| {
+                let result = (handler.borrow_mut())(matches, ctx);
+                match result {
+                    Ok(()) => Ok(super::dispatch::DispatchOutput::Silent),
+                    Err(e) => Err(format!("Error: {}", e)),
+                }
+            },
+        ))
+    }
+
+    fn expected_args(&self) -> Vec<ExpectedArg> {
+        Vec::new()
     }
 }
 

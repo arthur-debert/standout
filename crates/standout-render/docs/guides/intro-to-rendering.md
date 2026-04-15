@@ -220,7 +220,7 @@ Features:
 - **True color**: RGB values for precise colors (`#ff6b35` or `[255, 107, 53]`)
 - **Aliases**: semantic names resolve to visual styles (`commit-message: title`)
 
-YAML syntax is also supported as an alternative. See [Styling System](../topics/styling-system.md) for complete style options.
+See [Styling System](../topics/styling-system.md) for complete style options.
 
 ---
 
@@ -368,11 +368,11 @@ pub struct Report {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let theme = Theme::from_yaml(r#"
-        title: { fg: cyan, bold: true }
-        done: green
-        pending: yellow
-        muted: { dim: true }
+    let theme = Theme::from_css(r#"
+        .title { color: cyan; font-weight: bold; }
+        .done { color: green; }
+        .pending { color: yellow; }
+        .muted { opacity: 0.5; }
     "#)?;
 
     let tasks = vec![

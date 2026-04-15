@@ -15,61 +15,9 @@ This separation provides several benefits:
 
 A `Theme` is a named collection of styles. Each style maps a name (like `title` or `error`) to visual attributes (bold cyan, dim red, etc.).
 
-### Programmatic Themes
-
-Build themes in code using the builder pattern:
-
-```rust
-use standout_render::Theme;
-use console::Style;
-
-let theme = Theme::new()
-    .add("title", Style::new().bold().cyan())
-    .add("error", Style::new().red().bold())
-    .add("muted", Style::new().dim())
-    .add("success", Style::new().green());
-```
-
-### YAML Themes
-
-For file-based configuration, YAML provides a concise syntax:
-
-```yaml
-# theme.yaml
-title:
-  fg: cyan
-  bold: true
-
-error:
-  fg: red
-  bold: true
-
-muted:
-  dim: true
-
-success:
-  fg: green
-
-# Shorthand: single attribute or space-separated
-warning: yellow
-emphasis: "bold italic"
-```
-
-Load YAML themes:
-
-```rust
-use standout_render::Theme;
-
-// From string
-let theme = Theme::from_yaml(yaml_content)?;
-
-// From file (with hot reload in debug builds)
-let theme = Theme::from_yaml_file("styles/theme.yaml")?;
-```
-
 ### CSS Themes
 
-For developers who prefer standard CSS syntax, `standout-render` supports a subset of CSS Level 3 tailored for terminals:
+Define styles in standard CSS syntax — a subset of CSS Level 3 tailored for terminals:
 
 ```css
 /* theme.css */
@@ -104,7 +52,24 @@ let theme = Theme::from_css(css_content)?;
 let theme = Theme::from_css_file("styles/theme.css")?;
 ```
 
-> CSS is the recommended format for new projects. It enables syntax highlighting in editors, linting tools, and familiarity for web developers.
+CSS gives you syntax highlighting in editors, linting tools, and familiarity for web developers.
+
+### Programmatic Themes
+
+Build themes in code using the builder pattern:
+
+```rust
+use standout_render::Theme;
+use console::Style;
+
+let theme = Theme::new()
+    .add("title", Style::new().bold().cyan())
+    .add("error", Style::new().red().bold())
+    .add("muted", Style::new().dim())
+    .add("success", Style::new().green());
+```
+
+> **Legacy format:** YAML themes are still supported via `Theme::from_yaml()` and `Theme::from_yaml_file()`. CSS is the recommended format for all new projects.
 
 ---
 
@@ -119,44 +84,39 @@ let theme = Theme::from_css_file("styles/theme.css")?;
 
 ### Color Formats
 
-```yaml
-# Named colors (16 ANSI colors)
-fg: red
-fg: green
-fg: blue
-fg: cyan
-fg: magenta
-fg: yellow
-fg: white
-fg: black
+```css
+/* Named colors (16 ANSI colors) */
+.example { color: red; }
+.example { color: green; }
+.example { color: cyan; }
+.example { color: magenta; }
+.example { color: yellow; }
+.example { color: white; }
+.example { color: black; }
 
-# Bright variants
-fg: bright_red
-fg: bright_green
+/* Bright variants */
+.example { color: bright_red; }
+.example { color: bright_green; }
 
-# 256-color palette (0-255)
-fg: 208
+/* 256-color palette (0-255) */
+.example { color: 208; }
 
-# RGB hex
-fg: "#ff6b35"
-fg: "#f63"      # shorthand
-
-# RGB array
-fg: [255, 107, 53]
+/* RGB hex */
+.example { color: #ff6b35; }
+.example { color: #f63; }     /* shorthand */
 ```
 
 ### Text Attributes
 
-| YAML | CSS | Effect |
-|------|-----|--------|
-| `bold: true` | `font-weight: bold` | Bold text |
-| `dim: true` | `opacity: 0.5` | Dimmed/faint text |
-| `italic: true` | `font-style: italic` | Italic text |
-| `underline: true` | `text-decoration: underline` | Underlined text |
-| `blink: true` | `text-decoration: blink` | Blinking text |
-| `reverse: true` | — | Swap fg/bg colors |
-| `hidden: true` | `visibility: hidden` | Hidden text |
-| `strikethrough: true` | `text-decoration: line-through` | Strikethrough |
+| CSS Property | Effect |
+|-------------|--------|
+| `font-weight: bold` | Bold text |
+| `opacity: 0.5` | Dimmed/faint text |
+| `font-style: italic` | Italic text |
+| `text-decoration: underline` | Underlined text |
+| `text-decoration: blink` | Blinking text |
+| `text-decoration: line-through` | Strikethrough |
+| `visibility: hidden` | Hidden text |
 
 ---
 
@@ -168,39 +128,27 @@ Terminal applications run in both light and dark environments. A color that look
 
 Instead of defining separate "light theme" and "dark theme" files, you define mode-specific overrides at the style level:
 
-```yaml
-panel:
-  bold: true          # Shared across all modes
-  fg: gray            # Default/fallback
-  light:
-    fg: black         # Override for light mode
-  dark:
-    fg: white         # Override for dark mode
-```
-
-When resolving `panel` in dark mode:
-1. Start with base attributes (`bold: true`, `fg: gray`)
-2. Merge dark overrides (`fg: white` replaces `fg: gray`)
-3. Result: bold white text
-
-This is efficient: most styles (bold, italic, semantic colors like green/red) look fine in both modes. Only a handful need adjustment—typically foreground colors for contrast.
-
-### CSS Syntax
-
 ```css
 .panel {
     font-weight: bold;
-    color: gray;
+    color: gray;        /* Default/fallback */
 }
 
 @media (prefers-color-scheme: light) {
-    .panel { color: black; }
+    .panel { color: black; }   /* Override for light mode */
 }
 
 @media (prefers-color-scheme: dark) {
-    .panel { color: white; }
+    .panel { color: white; }   /* Override for dark mode */
 }
 ```
+
+When resolving `panel` in dark mode:
+1. Start with base attributes (`bold`, `gray`)
+2. Merge dark overrides (`white` replaces `gray`)
+3. Result: bold white text
+
+This is efficient: most styles (bold, italic, semantic colors like green/red) look fine in both modes. Only a handful need adjustment—typically foreground colors for contrast.
 
 ### Programmatic API
 
@@ -245,16 +193,14 @@ set_theme_detector(|| ColorMode::Dark);  // Force dark mode
 
 Aliases let semantic names resolve to visual styles. This is useful when multiple concepts share the same appearance:
 
-```yaml
-# Define the visual style once
-title:
-  fg: cyan
-  bold: true
-
-# Aliases
-commit-message: title
-section-header: title
-heading: title
+```rust
+let theme = Theme::new()
+    // Define the visual style once
+    .add("title", Style::new().bold().cyan())
+    // Aliases — pass a string to reference another style by name
+    .add("commit-message", "title")
+    .add("section-header", "title")
+    .add("heading", "title");
 ```
 
 Now `[commit-message]`, `[section-header]`, and `[heading]` all render identically to `[title]`.
@@ -306,33 +252,26 @@ if !errors.is_empty() {
 Organize your styles in three conceptual layers:
 
 **1. Visual primitives** (low-level appearance):
-```yaml
-_cyan-bold:
-  fg: cyan
-  bold: true
-
-_dim:
-  dim: true
-
-_red-bold:
-  fg: red
-  bold: true
+```css
+._cyan-bold { color: cyan; font-weight: bold; }
+._dim { opacity: 0.5; }
+._red-bold { color: red; font-weight: bold; }
 ```
 
-**2. Presentation roles** (UI concepts):
-```yaml
-heading: _cyan-bold
-secondary: _dim
-danger: _red-bold
+**2. Presentation roles** (UI concepts — use aliases in code):
+```rust
+theme.add("heading", "_cyan-bold")
+     .add("secondary", "_dim")
+     .add("danger", "_red-bold");
 ```
 
-**3. Semantic names** (domain concepts):
-```yaml
-# In templates, use these
-task-title: heading
-task-status-done: success
-task-status-pending: warning
-error-message: danger
+**3. Semantic names** (domain concepts — aliases to presentation):
+```rust
+// In templates, use these
+theme.add("task-title", "heading")
+     .add("task-status-done", "success")
+     .add("task-status-pending", "warning")
+     .add("error-message", "danger");
 ```
 
 Templates use semantic names (`task-title`), which resolve to presentation roles (`heading`), which resolve to visual primitives (`_cyan-bold`).
@@ -344,25 +283,26 @@ This layering lets you:
 
 ### Naming Conventions
 
-```yaml
-# Good: descriptive, semantic
-error-message: ...
-file-path: ...
-command-name: ...
+```css
+/* Good: descriptive, semantic */
+.error-message { ... }
+.file-path { ... }
+.command-name { ... }
 
-# Avoid: visual descriptions
-red-text: ...
-bold-cyan: ...
+/* Avoid: visual descriptions */
+.red-text { ... }
+.bold-cyan { ... }
 ```
 
 ### Keep Themes Focused
 
 One theme per "look". Don't mix concerns:
 
-```yaml
-# theme-default.yaml - your app's default look
-# theme-colorblind.yaml - accessibility variant
-# theme-monochrome.yaml - for piped output
+```text
+styles/
+├── default.css          # your app's default look
+├── colorblind.css       # accessibility variant
+└── monochrome.css       # for piped output
 ```
 
 ---
@@ -372,18 +312,18 @@ One theme per "look". Don't mix concerns:
 ### Theme Creation
 
 ```rust
-// Empty theme
-let theme = Theme::new();
-
-// From YAML string
-let theme = Theme::from_yaml(yaml_str)?;
-
 // From CSS string
 let theme = Theme::from_css(css_str)?;
 
-// From files (hot reload in debug)
-let theme = Theme::from_yaml_file(path)?;
+// From CSS file (hot reload in debug)
 let theme = Theme::from_css_file(path)?;
+
+// Empty theme (for programmatic building)
+let theme = Theme::new();
+
+// Legacy: YAML is still supported
+let theme = Theme::from_yaml(yaml_str)?;
+let theme = Theme::from_yaml_file(path)?;
 ```
 
 ### Adding Styles

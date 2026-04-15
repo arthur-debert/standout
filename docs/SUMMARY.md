@@ -6,6 +6,7 @@
 
 # Getting Started
 
+- [Complete Working Example](./guides/complete-example.md)
 - [Quick Start](./guides/tldr-intro-to-standout.md)
 - [Introduction to Standout](./guides/intro-to-standout.md)
 

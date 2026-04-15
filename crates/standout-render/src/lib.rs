@@ -99,26 +99,24 @@
 //!     );
 //! ```
 //!
-//! ## YAML-Based Themes
+//! ## CSS-Based Themes
 //!
 //! Ship themes alongside your application or allow users to bring their own. The
-//! [`Theme::from_yaml`] helper loads named styles (and adaptive overrides) directly
-//! from a YAML definition:
+//! [`Theme::from_css`] helper loads named styles (and adaptive overrides) directly
+//! from a CSS definition:
 //!
 //! ```rust
 //! use standout_render::Theme;
 //!
-//! let theme = Theme::from_yaml(r#"
-//! header:
-//!   fg: cyan
-//!   bold: true
-//! panel:
-//!   fg: gray
-//!   light:
-//!     fg: black
-//!   dark:
-//!     fg: white
-//! title: header
+//! let theme = Theme::from_css(r#"
+//! .header { color: cyan; font-weight: bold; }
+//! .panel { color: gray; }
+//! @media (prefers-color-scheme: light) {
+//!     .panel { color: black; }
+//! }
+//! @media (prefers-color-scheme: dark) {
+//!     .panel { color: white; }
+//! }
 //! "#).unwrap();
 //! ```
 //!

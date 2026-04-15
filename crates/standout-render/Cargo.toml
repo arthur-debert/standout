@@ -10,7 +10,7 @@ repository = "https://github.com/arthur-debert/standout"
 readme = "README.md"
 
 [dependencies]
-console = "0.15"
+console = "0.16"
 dark-light = "0.2"
 deunicode = "1.6.2"
 minijinja = { version = "2", features = ["loader"] }
