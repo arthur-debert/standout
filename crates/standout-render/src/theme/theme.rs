@@ -304,7 +304,7 @@ impl Theme {
     /// "#).unwrap();
     /// ```
     pub fn from_css(css: &str) -> Result<Self, StylesheetError> {
-        let variants = crate::parse_css(css)?;
+        let variants = crate::parse_css(css, None)?;
         Ok(Self {
             name: None,
             source_path: None,
@@ -313,6 +313,7 @@ impl Theme {
             dark: variants.dark().clone(),
             aliases: variants.aliases().clone(),
             icons: IconSet::new(),
+            palette: None,
         })
     }
 
@@ -344,7 +345,7 @@ impl Theme {
             .and_then(|s| s.to_str())
             .map(|s| s.to_string());
 
-        let variants = crate::parse_css(&content)?;
+        let variants = crate::parse_css(&content, None)?;
         Ok(Self {
             name,
             source_path: Some(path.to_path_buf()),
@@ -353,6 +354,7 @@ impl Theme {
             dark: variants.dark().clone(),
             aliases: variants.aliases().clone(),
             icons: IconSet::new(),
+            palette: None,
         })
     }
 

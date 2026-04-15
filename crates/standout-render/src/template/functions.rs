@@ -2460,7 +2460,7 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn test_render_yaml_from_theme_with_icons() {
-        use crate::{set_icon_detector, IconDefinition, IconMode};
+        use crate::{set_icon_detector, IconMode};
 
         set_icon_detector(|| IconMode::Classic);
 

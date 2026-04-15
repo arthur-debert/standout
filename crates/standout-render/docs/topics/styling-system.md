@@ -104,7 +104,16 @@ let theme = Theme::new()
 /* RGB hex */
 .example { color: #ff6b35; }
 .example { color: #f63; }     /* shorthand */
+
+/* Theme-relative cube colors */
+.example { color: cube(60%, 20%, 0%); }
 ```
+
+Cube colors express a position in a color cube whose 8 corners are the base ANSI
+colors of the user's terminal theme. The same `cube(60%, 20%, 0%)` produces earthy
+tones in Gruvbox, pastels in Catppuccin, and muted shades in Solarized.
+Interpolation is done in CIE LAB space for perceptually uniform gradients.
+Attach a palette to a theme with `Theme::with_palette()`.
 
 ### Text Attributes
 
