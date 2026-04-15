@@ -9,7 +9,7 @@ categories = ["command-line-interface", "parser-implementations"]
 repository = "https://github.com/arthur-debert/standout"
 
 [dependencies]
-console = "0.15"
+console = "0.16"
 
 [dev-dependencies]
 proptest = "1"

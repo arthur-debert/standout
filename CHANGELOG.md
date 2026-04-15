@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Passthrough commands** — Commands that bypass the rendering pipeline but still participate in help, completions, and dispatch. Use `command_passthrough` on `App` or `passthrough` on `GroupBuilder` for commands that manage their own output (e.g., shell init scripts, config delegation).
+
+  ```rust
+  App::builder()
+      .command_passthrough("init-sh", |_m, _ctx| {
+          print!("export PATH=\"$HOME/.myapp/bin:$PATH\"");
+          Ok(())
+      })?
+      .build()?;
+  ```
+
+- **`Theme::from_css()` and `Theme::from_css_file()`** — New constructors for loading themes directly from CSS content or CSS files, matching the existing `from_yaml()` / `from_file()` pattern.
+
+- **CSS stylesheet support in `embed_styles!`** — The `embed_styles!` macro and `StylesheetRegistry` now recognize `.css` files in addition to `.yaml` / `.yml`. CSS files are auto-detected and parsed with the CSS parser. `.css` has highest priority when multiple formats exist with the same base name.
+
+- **Complete working example** — New `docs/guides/complete-example.md` with a self-contained, copy-paste project (Cargo.toml, main.rs, template, CSS stylesheet).
+
+### Changed
+
+- **`console` crate bumped to 0.16** — The `console` dependency has been updated from 0.15 to 0.16 across all crates (`standout`, `standout-render`, `standout-bbparser`). Users who construct `console::Style` values programmatically must ensure they depend on `console = "0.16"`. No API changes were needed — all existing console APIs remain compatible.
+
+- **CSS is now the primary styling format** — All documentation now presents CSS as the recommended and primary format for defining styles. YAML themes are still supported but are documented as a legacy alternative. Specific changes:
+  - `docs/index.md`, `docs/intro.md`: References to "CSS or YAML" replaced with "CSS"
+  - `docs/guides/intro-to-standout.md`: Removed YAML styling alternative section
+  - `docs/guides/tldr-intro-to-standout.md`: Updated comments to reference CSS only
+  - `docs/topics/app-configuration.md`: Examples and file listings now show `.css` files
+  - `crates/standout-render/docs/topics/styling-system.md`: Restructured to lead with CSS, YAML moved to legacy note
+  - `crates/standout-render/docs/guides/intro-to-rendering.md`: Complete example now uses `Theme::from_css()`
+  - `crates/standout-render/src/lib.rs`: Rustdoc example changed from `Theme::from_yaml()` to `Theme::from_css()`
+
 ## [7.0.0] - 2026-02-17
 
 ## [6.2.0] - 2026-02-15

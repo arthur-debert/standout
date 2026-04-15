@@ -135,7 +135,7 @@ pub fn list(_matches: &ArgMatches, _ctx: &CommandContext) -> HandlerResult<TodoR
 // Setup and configure standout:
 let app = App::builder()
     .templates(embed_templates!("src/templates"))  // Embeds all .jinja/.j2/.txt files
-    .styles(embed_styles!("src/styles"))           // Embeds all .yaml/.yml files
+    .styles(embed_styles!("src/styles"))           // Embeds all .css files
     .default_theme("default")                      // Set the default theme
     .commands(Commands::dispatch_config())         // Generated auto dispatch
     .build()?;

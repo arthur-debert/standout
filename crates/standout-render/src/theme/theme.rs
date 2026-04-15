@@ -250,6 +250,79 @@ impl Theme {
         })
     }
 
+    /// Creates a theme from CSS content.
+    ///
+    /// The CSS format supports a subset of CSS Level 3 tailored for terminals.
+    /// Class selectors map to style names (`.title { ... }` defines the `title` style).
+    /// Adaptive styles use `@media (prefers-color-scheme: light|dark)` queries.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`StylesheetError`] if parsing fails.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use standout_render::Theme;
+    ///
+    /// let theme = Theme::from_css(r#"
+    /// .header { color: cyan; font-weight: bold; }
+    /// .muted { opacity: 0.5; }
+    /// "#).unwrap();
+    /// ```
+    pub fn from_css(css: &str) -> Result<Self, StylesheetError> {
+        let variants = crate::parse_css(css)?;
+        Ok(Self {
+            name: None,
+            source_path: None,
+            base: variants.base().clone(),
+            light: variants.light().clone(),
+            dark: variants.dark().clone(),
+            aliases: variants.aliases().clone(),
+            icons: IconSet::new(),
+        })
+    }
+
+    /// Loads a theme from a CSS file.
+    ///
+    /// The theme name is derived from the filename (without extension).
+    /// The source path is stored for [`refresh`](Theme::refresh) support.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`StylesheetError`] if the file cannot be read or parsed.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use standout_render::Theme;
+    ///
+    /// let theme = Theme::from_css_file("./themes/default.css")?;
+    /// assert_eq!(theme.name(), Some("default"));
+    /// ```
+    pub fn from_css_file<P: AsRef<Path>>(path: P) -> Result<Self, StylesheetError> {
+        let path = path.as_ref();
+        let content = std::fs::read_to_string(path).map_err(|e| StylesheetError::Load {
+            message: format!("Failed to read {}: {}", path.display(), e),
+        })?;
+
+        let name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_string());
+
+        let variants = crate::parse_css(&content)?;
+        Ok(Self {
+            name,
+            source_path: Some(path.to_path_buf()),
+            base: variants.base().clone(),
+            light: variants.light().clone(),
+            dark: variants.dark().clone(),
+            aliases: variants.aliases().clone(),
+            icons: IconSet::new(),
+        })
+    }
+
     /// Creates a theme from pre-parsed theme variants.
     pub fn from_variants(variants: ThemeVariants) -> Self {
         Self {

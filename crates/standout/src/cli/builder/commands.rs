@@ -11,7 +11,8 @@ use serde::Serialize;
 
 use super::{AppBuilder, PendingCommand};
 use crate::cli::group::{
-    ClosureRecipe, CommandConfig, ErasedConfigRecipe, GroupBuilder, GroupEntry, StructRecipe,
+    ClosureRecipe, CommandConfig, ErasedConfigRecipe, GroupBuilder, GroupEntry, PassthroughRecipe,
+    StructRecipe,
 };
 use crate::cli::handler::{CommandContext, FnHandler, Handler, HandlerResult};
 use crate::cli::hooks::Hooks;
@@ -267,6 +268,50 @@ impl AppBuilder {
             PendingCommand {
                 recipe: Box::new(recipe),
                 template,
+            },
+        );
+
+        Ok(self)
+    }
+
+    /// Registers a passthrough command that bypasses the rendering pipeline.
+    ///
+    /// The handler receives `&ArgMatches` and `&CommandContext`, writes directly to
+    /// stdout (or does whatever it needs), and the framework marks the command as
+    /// handled with no rendered output. The command still participates in
+    /// help/completions and dispatch.
+    ///
+    /// Use this for commands that manage their own output (e.g., shell init scripts
+    /// that output `eval`-able code, or commands that delegate to another tool).
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use standout::cli::App;
+    ///
+    /// App::builder()
+    ///     .command_passthrough("init-sh", |_m, _ctx| {
+    ///         print!("export PATH=\"$HOME/.myapp/bin:$PATH\"");
+    ///         Ok(())
+    ///     })
+    ///     .build()?
+    ///     .run(cmd, args);
+    /// ```
+    pub fn command_passthrough<F>(self, path: &str, handler: F) -> Result<Self, SetupError>
+    where
+        F: FnMut(&ArgMatches, &CommandContext) -> Result<(), anyhow::Error> + 'static,
+    {
+        let recipe = PassthroughRecipe::new(handler);
+
+        if self.pending_commands.borrow().contains_key(path) {
+            return Err(SetupError::DuplicateCommand(path.to_string()));
+        }
+
+        self.pending_commands.borrow_mut().insert(
+            path.to_string(),
+            PendingCommand {
+                recipe: Box::new(recipe),
+                template: String::new(),
             },
         );
 
@@ -558,5 +603,60 @@ mod tests {
 
         assert!(builder.has_command("version"));
         assert!(builder.has_command("db.migrate"));
+    }
+
+    #[test]
+    fn test_command_passthrough() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        let called = Arc::new(AtomicBool::new(false));
+        let called_clone = called.clone();
+
+        let builder = AppBuilder::new()
+            .command_passthrough("init-sh", move |_m, _ctx| {
+                called_clone.store(true, Ordering::SeqCst);
+                Ok(())
+            })
+            .unwrap();
+
+        assert!(builder.has_command("init-sh"));
+
+        let cmd = Command::new("app").subcommand(Command::new("init-sh"));
+        let matches = cmd.try_get_matches_from(["app", "init-sh"]).unwrap();
+        let result = builder.dispatch(matches, OutputMode::Text);
+
+        assert!(called.load(Ordering::SeqCst));
+        // Passthrough commands produce empty handled output (silent)
+        assert!(result.is_handled());
+        assert_eq!(result.output(), Some(""));
+    }
+
+    #[test]
+    fn test_group_passthrough() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        let called = Arc::new(AtomicBool::new(false));
+        let called_clone = called.clone();
+
+        let builder = AppBuilder::new()
+            .group("shell", |g| {
+                g.passthrough("init", move |_m, _ctx| {
+                    called_clone.store(true, Ordering::SeqCst);
+                    Ok(())
+                })
+            })
+            .unwrap();
+
+        assert!(builder.has_command("shell.init"));
+
+        let cmd =
+            Command::new("app").subcommand(Command::new("shell").subcommand(Command::new("init")));
+        let matches = cmd.try_get_matches_from(["app", "shell", "init"]).unwrap();
+        let result = builder.dispatch(matches, OutputMode::Text);
+
+        assert!(called.load(Ordering::SeqCst));
+        assert!(result.is_handled());
     }
 }

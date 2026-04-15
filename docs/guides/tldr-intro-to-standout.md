@@ -69,7 +69,7 @@ Configure the app:
         .app_state(Database::connect()?)                 // Optional: shared state for handlers
         .templates(embed_templates!("src/templates"))    // Sets the root template path
         .styles(embed_styles!("src/styles"))             // Likewise the styles root
-        .default_theme("default")                        // Use styles/default.css or default.yaml
+        .default_theme("default")                        // Use styles/default.css
         .commands(Commands::dispatch_config())           // Register handlers from derive macro
     .build()?;
 ```

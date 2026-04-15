@@ -62,13 +62,13 @@ Templates are referenced by path without extension: `"list"`, `"db/migrate"`.
 .styles(embed_styles!("src/styles"))
 ```
 
-Collects files matching: `.yaml`, `.yml`.
+Collects files matching: `.css` (and legacy `.yaml`, `.yml`).
 
 ```text
 src/styles/
-  default.yaml
-  dark.yaml
-  light.yaml
+  default.css
+  dark.css
+  light.css
 ```
 
 Themes are referenced by filename without extension: `"default"`, `"dark"`.
@@ -110,7 +110,7 @@ If `.default_theme()` is not called, `AppBuilder` attempts to load a theme from 
 2. `theme`
 3. `base`
 
-This allows you to provide a standard `base.yaml` or `theme.yaml` without requiring explicit configuration code. If the explicit theme isn't found, `build()` returns `SetupError::ThemeNotFound`.
+This allows you to provide a standard `base.css` or `theme.css` without requiring explicit configuration code. If the explicit theme isn't found, `build()` returns `SetupError::ThemeNotFound`.
 
 ### Explicit Theme
 
@@ -408,12 +408,9 @@ Template `src/templates/list.j2`:
 [muted]v{{ version }}[/muted]
 ```
 
-Style `src/styles/default.yaml`:
+Style `src/styles/default.css`:
 
-```yaml
-header:
-  fg: cyan
-  bold: true
-muted:
-  dim: true
+```css
+.header { color: cyan; font-weight: bold; }
+.muted { opacity: 0.5; }
 ```

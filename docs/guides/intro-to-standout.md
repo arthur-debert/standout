@@ -558,22 +558,7 @@ Create `src/styles/default.css`:
 }
 ```
 
-Or if you prefer YAML (`src/styles/default.yaml`):
-
-```yaml
-done: strikethrough, gray
-index: yellow
-pending:
-  bold: true
-  fg: white
-  light:
-    fg: black
-  dark:
-    fg: white
-message: cyan
-```
-
-> **Verify:** The file exists at `src/styles/default.css` or `src/styles/default.yaml`.
+> **Verify:** The file exists at `src/styles/default.css`.
 
 ### 8.2 Add style tags to your template
 
@@ -601,7 +586,7 @@ Add the styles to your app builder:
 let app = App::builder()
     .templates(embed_templates!("src/templates"))
     .styles(embed_styles!("src/styles"))       // Load stylesheets
-    .default_theme("default")                  // Use styles/default.css or default.yaml
+    .default_theme("default")                  // Use styles/default.css
     .commands(Commands::dispatch_config())
     .build()?;
 ```
@@ -639,7 +624,7 @@ src/
 │   ├── list.jinja       # with [style] tags
 │   └── add.jinja
 └── styles/
-    └── default.css      # or default.yaml
+    └── default.css
 ```
 
 For brevity's sake, we've ignored a bunch of finer and relevant points:
@@ -789,4 +774,4 @@ fn main() -> anyhow::Result<()> {
 - Styles not loading
   - **Error:** `theme not found: default`
   - **Cause:** Stylesheet file missing or wrong path.
-  - **Fix:** Ensure `src/styles/default.css` or `default.yaml` exists. Check `embed_styles!` path matches your file structure.
+  - **Fix:** Ensure `src/styles/default.css` exists. Check `embed_styles!` path matches your file structure.

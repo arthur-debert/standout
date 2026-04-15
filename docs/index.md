@@ -106,7 +106,7 @@ mod handlers {
 
 ### 2. Define Your Presentation
 
-Templates use MiniJinja with semantic style tags. Styles are defined separately in CSS or YAML.
+Templates use MiniJinja with semantic style tags. Styles are defined separately in CSS.
 
 ```jinja
 {# list.jinja #}
@@ -166,7 +166,7 @@ myapp list --output text    # Plain text, no ANSI codes
 ### Rendering
 
 - [MiniJinja](https://github.com/mitsuhiko/minijinja) templates with semantic style tags
-- CSS or YAML stylesheets with light/dark mode support
+- CSS stylesheets with light/dark mode support
 - Hot reload during development—edit templates without recompiling
 - Tabular layouts with alignment, truncation, and Unicode support
 
