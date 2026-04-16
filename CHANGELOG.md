@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.3.0] - 2026-04-16
+
 ### Added
 
 - **Opt-in help handling** (Issue #116) — New `.help_handling(true)` builder method enables standout's themed help rendering. When enabled, all help invocations (`help`, `--help`, `-h`) — at both root and subcommand level — produce identical standout-rendered output. Previously, only the `help` subcommand went through standout while `--help`/`-h` fell through to clap's default ungrouped rendering.
@@ -1190,7 +1192,8 @@ let output = render_with_output(template, &data, &theme, OutputMode::Term)?;
   - Command handler system with `dispatch_from` convenience method
   - Archive variant support in clap integration
 
-[Unreleased]: https://github.com/arthur-debert/standout/compare/standout-v7.2.0...HEAD
+[Unreleased]: https://github.com/arthur-debert/standout/compare/standout-v7.3.0...HEAD
+[7.3.0]: https://github.com/arthur-debert/standout/compare/standout-v7.2.0...standout-v7.3.0
 [7.2.0]: https://github.com/arthur-debert/standout/compare/standout-v7.1.0...standout-v7.2.0
 [7.1.0]: https://github.com/arthur-debert/standout/compare/standout-v7.0.0...standout-v7.1.0
 [7.0.0]: https://github.com/arthur-debert/standout/compare/standout-v6.2.0...standout-v7.0.0
