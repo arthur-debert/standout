@@ -383,31 +383,47 @@ fn test_help_handling_off_help_flag_returns_clap_error() {
 }
 
 #[test]
-#[should_panic(expected = "command_groups requires .help_handling(true)")]
-fn test_build_panics_on_groups_without_help_handling() {
-    let _app = App::new()
+fn test_build_errors_on_groups_without_help_handling() {
+    let result = App::new()
         .command_groups(vec![CommandGroup {
             title: "Core".into(),
             help: None,
             commands: vec![Some("init".into())],
         }])
-        .build()
-        .unwrap();
+        .build();
+    match result {
+        Err(e) => {
+            let msg = e.to_string();
+            assert!(
+                msg.contains("command_groups requires .help_handling(true)"),
+                "error: {msg}"
+            );
+        }
+        Ok(_) => panic!("Expected build to fail"),
+    }
 }
 
 #[test]
-#[should_panic(expected = "topics requires .help_handling(true)")]
-fn test_build_panics_on_topics_without_help_handling() {
+fn test_build_errors_on_topics_without_help_handling() {
     use standout::topics::{Topic, TopicType};
-    let _app = App::new()
+    let result = App::new()
         .add_topic(Topic::new(
             "Guide",
             "Some guide content here.",
             TopicType::Text,
             Some("guide".to_string()),
         ))
-        .build()
-        .unwrap();
+        .build();
+    match result {
+        Err(e) => {
+            let msg = e.to_string();
+            assert!(
+                msg.contains("topics requires .help_handling(true)"),
+                "error: {msg}"
+            );
+        }
+        Ok(_) => panic!("Expected build to fail"),
+    }
 }
 
 #[test]
@@ -436,4 +452,19 @@ fn test_build_succeeds_with_help_handling_and_topics() {
         ))
         .build();
     assert!(app.is_ok());
+}
+
+#[test]
+fn test_help_flag_works_with_required_args() {
+    // A subcommand with required positional args should still show help
+    // when --help is passed (clap's native short-circuit behavior).
+    let app = App::new().help_handling(true);
+    let cmd = Command::new("myapp").subcommand(
+        Command::new("greet")
+            .about("Greet someone")
+            .arg(clap::Arg::new("name").required(true)),
+    );
+    let result = app.get_matches_from(cmd, ["myapp", "greet", "--help"]);
+    let output = extract_help(result);
+    assert!(output.contains("greet"), "output:\n{output}");
 }

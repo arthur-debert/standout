@@ -430,10 +430,10 @@ impl AppBuilder {
     ///
     /// Disabled by default — clap's built-in help is used unless you opt in.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// `build()` will panic if `command_groups` or topics are configured without
-    /// enabling `help_handling`.
+    /// `build()` returns `SetupError::Config` if `command_groups` or topics are
+    /// configured without enabling `help_handling`.
     ///
     /// # Example
     ///
