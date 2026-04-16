@@ -421,6 +421,32 @@ impl AppBuilder {
         self.help_command_groups = Some(groups);
         self
     }
+
+    /// Enables standout help handling.
+    ///
+    /// When enabled, standout intercepts all help invocations (`help`, `--help`,
+    /// `-h`) and renders its own themed help instead of clap's default. This is
+    /// required for `command_groups` and topics to work.
+    ///
+    /// Disabled by default — clap's built-in help is used unless you opt in.
+    ///
+    /// # Errors
+    ///
+    /// `build()` returns `SetupError::Config` if `command_groups` or topics are
+    /// configured without enabling `help_handling`.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// App::builder()
+    ///     .help_handling(true)
+    ///     .command_groups(vec![...])
+    ///     .build()?;
+    /// ```
+    pub fn help_handling(mut self, enabled: bool) -> Self {
+        self.help_handling = enabled;
+        self
+    }
 }
 
 #[cfg(test)]

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Opt-in help handling** (Issue #116) — New `.help_handling(true)` builder method enables standout's themed help rendering. When enabled, all help invocations (`help`, `--help`, `-h`) — at both root and subcommand level — produce identical standout-rendered output. Previously, only the `help` subcommand went through standout while `--help`/`-h` fell through to clap's default ungrouped rendering.
+
+### Changed
+
+- **Help interception is now opt-in** — `App` no longer intercepts help by default. Call `.help_handling(true)` to enable standout's help rendering. This is required when using `command_groups` or topics — `build()` will panic if either is configured without it.
+
 ## [7.2.0] - 2026-04-15
 
 ### Added

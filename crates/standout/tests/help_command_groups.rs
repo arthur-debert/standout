@@ -1,5 +1,7 @@
 use clap::Command;
-use standout::cli::{render_help, validate_command_groups, CommandGroup, HelpConfig};
+use standout::cli::{
+    render_help, validate_command_groups, App, CommandGroup, HelpConfig, HelpResult,
+};
 use standout::OutputMode;
 
 #[test]
@@ -244,4 +246,225 @@ fn test_group_help_text_renders_below_title() {
         title_pos < help_pos && help_pos < first_cmd_pos,
         "output:\n{output}"
     );
+}
+
+// =========================================================================
+// Help handling opt-in and uniform interception tests
+// =========================================================================
+
+/// Helper: build an App with help_handling enabled and command groups.
+fn app_with_groups() -> App {
+    App::new().help_handling(true).command_groups(vec![
+        CommandGroup {
+            title: "Core".into(),
+            help: None,
+            commands: vec![Some("status".into()), Some("list".into())],
+        },
+        CommandGroup {
+            title: "Misc".into(),
+            help: None,
+            commands: vec![Some("help".into())],
+        },
+    ])
+}
+
+fn test_cmd() -> Command {
+    Command::new("myapp")
+        .about("Test app")
+        .subcommand(Command::new("status").about("Show status"))
+        .subcommand(Command::new("list").about("List items"))
+}
+
+fn extract_help(result: HelpResult) -> String {
+    match result {
+        HelpResult::Help(h) => h,
+        HelpResult::PagedHelp(h) => h,
+        other => panic!("Expected Help, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_help_subcommand_renders_grouped() {
+    let app = app_with_groups();
+    let cmd = test_cmd();
+    let result = app.get_matches_from(cmd, ["myapp", "help"]);
+    let output = extract_help(result);
+    assert!(output.contains("CORE"), "output:\n{output}");
+    assert!(output.contains("status"), "output:\n{output}");
+}
+
+#[test]
+fn test_help_flag_renders_grouped() {
+    let app = app_with_groups();
+    let cmd = test_cmd();
+    let result = app.get_matches_from(cmd, ["myapp", "--help"]);
+    let output = extract_help(result);
+    assert!(output.contains("CORE"), "output:\n{output}");
+    assert!(output.contains("status"), "output:\n{output}");
+}
+
+#[test]
+fn test_help_short_flag_renders_grouped() {
+    let app = app_with_groups();
+    let cmd = test_cmd();
+    let result = app.get_matches_from(cmd, ["myapp", "-h"]);
+    let output = extract_help(result);
+    assert!(output.contains("CORE"), "output:\n{output}");
+    assert!(output.contains("status"), "output:\n{output}");
+}
+
+#[test]
+fn test_all_help_forms_produce_same_output() {
+    let cmd_factory = || test_cmd();
+
+    let app = app_with_groups();
+    let help_sub = extract_help(app.get_matches_from(cmd_factory(), ["myapp", "help"]));
+
+    let app = app_with_groups();
+    let help_long = extract_help(app.get_matches_from(cmd_factory(), ["myapp", "--help"]));
+
+    let app = app_with_groups();
+    let help_short = extract_help(app.get_matches_from(cmd_factory(), ["myapp", "-h"]));
+
+    assert_eq!(help_sub, help_long, "help vs --help differ");
+    assert_eq!(help_sub, help_short, "help vs -h differ");
+}
+
+#[test]
+fn test_subcommand_help_flag_renders_subcommand_help() {
+    let app = app_with_groups();
+    let cmd = test_cmd();
+    let result = app.get_matches_from(cmd, ["myapp", "status", "--help"]);
+    let output = extract_help(result);
+    assert!(output.contains("status"), "output:\n{output}");
+    // Should show the subcommand's help, not the root help
+    assert!(
+        !output.contains("CORE"),
+        "should not show root groups:\n{output}"
+    );
+}
+
+#[test]
+fn test_subcommand_help_short_flag() {
+    let app = app_with_groups();
+    let cmd = test_cmd();
+    let result = app.get_matches_from(cmd, ["myapp", "status", "-h"]);
+    let output = extract_help(result);
+    assert!(output.contains("status"), "output:\n{output}");
+}
+
+#[test]
+fn test_help_handling_off_does_not_intercept() {
+    // Without help_handling, the "help" subcommand is NOT added by standout
+    let app = App::new();
+    let cmd = test_cmd();
+    let result = app.get_matches_from(cmd, ["myapp", "status"]);
+    // Should get normal matches, not help
+    match result {
+        HelpResult::Matches(m) => {
+            assert_eq!(m.subcommand_name(), Some("status"));
+        }
+        other => panic!("Expected Matches, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_help_handling_off_help_flag_returns_clap_error() {
+    // Without help_handling, --help goes through clap's error path
+    let app = App::new();
+    let cmd = test_cmd();
+    let result = app.get_matches_from(cmd, ["myapp", "--help"]);
+    match result {
+        HelpResult::Error(e) => {
+            assert_eq!(e.kind(), clap::error::ErrorKind::DisplayHelp);
+        }
+        other => panic!("Expected Error(DisplayHelp), got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_build_errors_on_groups_without_help_handling() {
+    let result = App::new()
+        .command_groups(vec![CommandGroup {
+            title: "Core".into(),
+            help: None,
+            commands: vec![Some("init".into())],
+        }])
+        .build();
+    match result {
+        Err(e) => {
+            let msg = e.to_string();
+            assert!(
+                msg.contains("command_groups requires .help_handling(true)"),
+                "error: {msg}"
+            );
+        }
+        Ok(_) => panic!("Expected build to fail"),
+    }
+}
+
+#[test]
+fn test_build_errors_on_topics_without_help_handling() {
+    use standout::topics::{Topic, TopicType};
+    let result = App::new()
+        .add_topic(Topic::new(
+            "Guide",
+            "Some guide content here.",
+            TopicType::Text,
+            Some("guide".to_string()),
+        ))
+        .build();
+    match result {
+        Err(e) => {
+            let msg = e.to_string();
+            assert!(
+                msg.contains("topics requires .help_handling(true)"),
+                "error: {msg}"
+            );
+        }
+        Ok(_) => panic!("Expected build to fail"),
+    }
+}
+
+#[test]
+fn test_build_succeeds_with_help_handling_and_groups() {
+    let app = App::new()
+        .help_handling(true)
+        .command_groups(vec![CommandGroup {
+            title: "Core".into(),
+            help: None,
+            commands: vec![Some("init".into())],
+        }])
+        .build();
+    assert!(app.is_ok());
+}
+
+#[test]
+fn test_build_succeeds_with_help_handling_and_topics() {
+    use standout::topics::{Topic, TopicType};
+    let app = App::new()
+        .help_handling(true)
+        .add_topic(Topic::new(
+            "Guide",
+            "Some guide content here.",
+            TopicType::Text,
+            Some("guide".to_string()),
+        ))
+        .build();
+    assert!(app.is_ok());
+}
+
+#[test]
+fn test_help_flag_works_with_required_args() {
+    // A subcommand with required positional args should still show help
+    // when --help is passed (clap's native short-circuit behavior).
+    let app = App::new().help_handling(true);
+    let cmd = Command::new("myapp").subcommand(
+        Command::new("greet")
+            .about("Greet someone")
+            .arg(clap::Arg::new("name").required(true)),
+    );
+    let result = app.get_matches_from(cmd, ["myapp", "greet", "--help"]);
+    let output = extract_help(result);
+    assert!(output.contains("greet"), "output:\n{output}");
 }
