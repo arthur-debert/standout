@@ -71,6 +71,7 @@ struct PendingCommand {
 /// use standout::cli::App;
 ///
 /// let standout = App::new()
+///     .help_handling(true)
 ///     .topics_dir(".").unwrap()
 ///     .output_flag(Some("format"))
 ///     .build();
@@ -138,6 +139,13 @@ pub struct AppBuilder {
 
     /// Command groups for organized help display.
     pub(crate) help_command_groups: Option<Vec<CommandGroup>>,
+
+    /// Whether standout intercepts and renders help (default: false).
+    ///
+    /// When true, standout disables clap's built-in help and renders its own
+    /// themed, grouped help for all invocation forms (`help`, `--help`, `-h`).
+    /// Required when using `command_groups` or topics.
+    pub(crate) help_handling: bool,
 }
 
 impl Default for AppBuilder {
@@ -172,6 +180,7 @@ impl AppBuilder {
             app_state: Rc::new(Extensions::new()),
             template_engine: Rc::new(Box::new(standout_render::template::MiniJinjaEngine::new())),
             help_command_groups: None,
+            help_handling: false,
         }
     }
 
@@ -375,6 +384,24 @@ impl AppBuilder {
             }
         }
 
+        // Validate help configuration: features that require help interception
+        // must not be used without enabling it.
+        if !self.help_handling {
+            let has_groups = self.help_command_groups.is_some();
+            let has_topics = !self.registry.list_topics().is_empty();
+            if has_groups || has_topics {
+                let feature = if has_groups {
+                    "command_groups"
+                } else {
+                    "topics"
+                };
+                panic!(
+                    "{feature} requires .help_handling(true) — \
+                     standout cannot render grouped/topic help without intercepting help"
+                );
+            }
+        }
+
         // Finalize commands (now theme is resolved and will be captured correctly)
         self.ensure_commands_finalized();
 
@@ -497,6 +524,10 @@ impl AppBuilder {
     }
 
     /// Attempts to get matches from the given arguments, intercepting `help` requests.
+    ///
+    /// When `help_handling` is enabled, all help invocations (`help`, `--help`, `-h`)
+    /// are intercepted and rendered through standout. When disabled, only output flags
+    /// are augmented and clap handles help natively.
     pub fn get_matches_from<I, T>(&self, cmd: Command, itr: I) -> HelpResult
     where
         I: IntoIterator<Item = T>,
@@ -509,6 +540,10 @@ impl AppBuilder {
             Err(e) => return HelpResult::Error(e),
         };
 
+        if !self.help_handling {
+            return HelpResult::Matches(matches);
+        }
+
         // Extract output mode
         let output_mode = self.extract_output_mode(&matches);
 
@@ -519,6 +554,7 @@ impl AppBuilder {
             ..Default::default()
         };
 
+        // Check for the `help` subcommand (e.g. `myapp help`, `myapp help build`)
         if let Some((name, sub_matches)) = matches.subcommand() {
             if name == "help" {
                 let use_pager = sub_matches.get_flag("page");
@@ -530,12 +566,12 @@ impl AppBuilder {
                             &mut cmd,
                             &keywords,
                             use_pager,
-                            Some(config),
+                            Some(config.clone()),
                         );
                     }
                 }
                 // If "help" is called without args, return the root help with topics
-                if let Ok(h) = render_help_with_topics(&cmd, &self.registry, Some(config)) {
+                if let Ok(h) = render_help_with_topics(&cmd, &self.registry, Some(config.clone())) {
                     return if use_pager {
                         HelpResult::PagedHelp(h)
                     } else {
@@ -545,7 +581,49 @@ impl AppBuilder {
             }
         }
 
+        // Check for the --help/-h flag (e.g. `myapp --help`, `myapp build --help`).
+        // The flag is global, so we walk the match tree to find where it was set.
+        if let Some(help_path) = Self::find_help_flag(&matches) {
+            if help_path.is_empty() {
+                // Root-level --help: render root help with topics
+                if let Ok(h) = render_help_with_topics(&cmd, &self.registry, Some(config)) {
+                    return HelpResult::Help(h);
+                }
+            } else {
+                // Subcommand-level --help: render that subcommand's help
+                let keywords: Vec<&str> = help_path.iter().map(|s| s.as_str()).collect();
+                return self.handle_help_request(&mut cmd, &keywords, false, Some(config));
+            }
+        }
+
         HelpResult::Matches(matches)
+    }
+
+    /// Finds the help target when `--help` is set.
+    ///
+    /// With `global(true)`, clap propagates the flag value back up to the root,
+    /// so `get_flag("help")` is true at every level. Instead of trying to detect
+    /// *where* the flag was typed, we find the deepest matched subcommand — that's
+    /// the command the user wants help for.
+    ///
+    /// Returns `Some(path)` where path is the subcommand chain (empty = root).
+    /// Returns `None` if `--help` is not set.
+    fn find_help_flag(matches: &ArgMatches) -> Option<Vec<String>> {
+        if !matches.get_flag("help") {
+            return None;
+        }
+        // --help is set. Walk down to the deepest matched subcommand.
+        let mut path = vec![];
+        let mut current = matches;
+        while let Some((name, sub_matches)) = current.subcommand() {
+            if name == "help" {
+                // The "help" subcommand is handled by the other code path
+                return None;
+            }
+            path.push(name.to_string());
+            current = sub_matches;
+        }
+        Some(path)
     }
 
     /// Handles a request for specific help e.g. `help foo`
@@ -617,26 +695,45 @@ impl AppBuilder {
 
     /// Augments a command with help subcommand and output flags.
     ///
-    /// This is the full augmentation used for parsing, which includes the
-    /// help subcommand with topic support.
+    /// When `help_handling` is enabled, this disables clap's built-in help
+    /// (both the subcommand and the `--help`/`-h` flag) and replaces them
+    /// with standout's own, ensuring all help invocations go through the
+    /// same rendering path.
+    ///
+    /// When `help_handling` is disabled, clap's built-in help is left intact.
     pub fn augment_command_with_help(&self, cmd: Command) -> Command {
-        // Add help subcommand
-        let cmd = cmd.disable_help_subcommand(true).subcommand(
-            Command::new("help")
-                .about("Print this message or the help of the given subcommand(s)")
+        let cmd = if self.help_handling {
+            // Disable both clap's help subcommand AND help flag so standout
+            // handles all help rendering uniformly.
+            cmd.disable_help_subcommand(true)
+                .disable_help_flag(true)
                 .arg(
-                    Arg::new("topic")
-                        .action(ArgAction::Set)
-                        .num_args(1..)
-                        .help("The subcommand or topic to print help for"),
-                )
-                .arg(
-                    Arg::new("page")
-                        .long("page")
+                    Arg::new("help")
+                        .short('h')
+                        .long("help")
                         .action(ArgAction::SetTrue)
-                        .help("Display help through a pager"),
-                ),
-        );
+                        .global(true)
+                        .help("Print help"),
+                )
+                .subcommand(
+                    Command::new("help")
+                        .about("Print this message or the help of the given subcommand(s)")
+                        .arg(
+                            Arg::new("topic")
+                                .action(ArgAction::Set)
+                                .num_args(1..)
+                                .help("The subcommand or topic to print help for"),
+                        )
+                        .arg(
+                            Arg::new("page")
+                                .long("page")
+                                .action(ArgAction::SetTrue)
+                                .help("Display help through a pager"),
+                        ),
+                )
+        } else {
+            cmd
+        };
 
         // Add output flags
         self.augment_command_for_dispatch(cmd)

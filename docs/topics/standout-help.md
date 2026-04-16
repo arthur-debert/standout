@@ -1,18 +1,28 @@
 # Styled Help
 
-Standout replaces clap's built-in help with themed, template-driven output. Instead of clap's fixed format, your `--help` renders through the same MiniJinja + style-tag pipeline as the rest of your CLI.
+Standout can replace clap's built-in help with themed, template-driven output. Instead of clap's fixed format, your `--help` renders through the same MiniJinja + style-tag pipeline as the rest of your CLI.
 
-Out of the box, this gives you bold headers, consistent alignment, and a "Learn More" section linking to help topics. For CLIs with many commands, you can organize subcommands into named groups with section headers, help text, and visual separators.
+This gives you bold headers, consistent alignment, and a "Learn More" section linking to help topics. For CLIs with many commands, you can organize subcommands into named groups with section headers, help text, and visual separators.
 
-## How It Works
+## Enabling Help Handling
 
-When you use `App`, standout:
+Help interception is **opt-in**. Enable it with `.help_handling(true)`:
 
-1. Disables clap's default help subcommand
-2. Registers its own `help` subcommand (with `--page` for pager support)
-3. Intercepts `help` requests and renders them through a MiniJinja template with style tags
+```rust
+App::builder()
+    .help_handling(true)
+    .build()?;
+```
 
-No configuration is required for basic use. `App::builder().build()` gives you styled help automatically.
+When enabled, standout:
+
+1. Disables clap's default `help` subcommand and `--help`/`-h` flag
+2. Registers its own `help` subcommand (with `--page` for pager support) and a custom `--help`/`-h` flag
+3. Intercepts all help requests (`help`, `--help`, `-h` — at root and subcommand level) and renders them through a MiniJinja template with style tags
+
+All three invocation forms produce identical output. Subcommand-level help (e.g. `myapp build --help`) also works, rendering that subcommand's help through standout.
+
+**Required for features:** `command_groups` and topics require `help_handling(true)`. If you configure either without it, `build()` will panic.
 
 ## Default Behavior
 
@@ -42,6 +52,7 @@ CLIs with many commands (20+) benefit from organized help. The `CommandGroup` st
 use standout::cli::{App, CommandGroup};
 
 App::builder()
+    .help_handling(true)
     .command_groups(vec![
         CommandGroup {
             title: "Commands".into(),
