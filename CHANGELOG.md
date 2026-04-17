@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.5.0] - 2026-04-17
+
 ### Added
 
 - **Framework warnings now render as a styled banner after the command output.** Non-fatal problems that standout detects during setup — stylesheet hot-reload failures, template walk errors, etc. — used to emit `Warning:` lines via `eprintln!` *before* the command ran, jammed on top of the real output as plain text. They now flow through a new thread-local collector (`standout::warnings`) and are flushed to stderr at the end of `App::run`, under a `Standout :: Warnings` banner with each entry on its own tab-indented line.
@@ -1211,7 +1213,8 @@ let output = render_with_output(template, &data, &theme, OutputMode::Term)?;
   - Command handler system with `dispatch_from` convenience method
   - Archive variant support in clap integration
 
-[Unreleased]: https://github.com/arthur-debert/standout/compare/standout-v7.4.0...HEAD
+[Unreleased]: https://github.com/arthur-debert/standout/compare/standout-v7.5.0...HEAD
+[7.5.0]: https://github.com/arthur-debert/standout/compare/standout-v7.4.0...standout-v7.5.0
 [7.4.0]: https://github.com/arthur-debert/standout/compare/standout-v7.3.0...standout-v7.4.0
 [7.3.0]: https://github.com/arthur-debert/standout/compare/standout-v7.2.0...standout-v7.3.0
 [7.2.0]: https://github.com/arthur-debert/standout/compare/standout-v7.1.0...standout-v7.2.0
