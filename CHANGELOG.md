@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.4.0] - 2026-04-17
+
 ### Fixed
 
 - **CSS stylesheets now hot-reload correctly in debug builds.** `EmbeddedStyles::into::<StylesheetRegistry>()` was parsing every on-disk stylesheet as YAML, so `.css` files failed with a YAML error and the registry silently fell back to the compile-time embedded content — making edits appear to be "cached" until the next rebuild. The hot-reload path and `StylesheetRegistry::add_inline` now use the same auto-detecting CSS/YAML parser as the release embedded path.
@@ -1201,7 +1203,8 @@ let output = render_with_output(template, &data, &theme, OutputMode::Term)?;
   - Command handler system with `dispatch_from` convenience method
   - Archive variant support in clap integration
 
-[Unreleased]: https://github.com/arthur-debert/standout/compare/standout-v7.3.0...HEAD
+[Unreleased]: https://github.com/arthur-debert/standout/compare/standout-v7.4.0...HEAD
+[7.4.0]: https://github.com/arthur-debert/standout/compare/standout-v7.3.0...standout-v7.4.0
 [7.3.0]: https://github.com/arthur-debert/standout/compare/standout-v7.2.0...standout-v7.3.0
 [7.2.0]: https://github.com/arthur-debert/standout/compare/standout-v7.1.0...standout-v7.2.0
 [7.1.0]: https://github.com/arthur-debert/standout/compare/standout-v7.0.0...standout-v7.1.0
