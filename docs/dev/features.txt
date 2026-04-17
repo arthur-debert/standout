@@ -229,7 +229,9 @@ Template Extensions Supported:
   - .stpl: simple engine templates
 
 Stylesheet Extensions:
-  - .yaml, .yml: YAML stylesheets (priority order)
+  - .css: CSS stylesheets (preferred, highest priority)
+  - .yaml, .yml: YAML stylesheets (legacy)
+  Format is auto-detected from content; extension controls discovery/priority only.
 
 
 HELP SYSTEM

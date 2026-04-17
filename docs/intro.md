@@ -93,7 +93,7 @@ src/
         list.jinja
         add.jinja  # each command has its own template, by default name-matched
     styles/
-        default.yml
+        default.css
 ```
 
 And your application:

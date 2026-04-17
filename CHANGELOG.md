@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **CSS stylesheets now hot-reload correctly in debug builds.** `EmbeddedStyles::into::<StylesheetRegistry>()` was parsing every on-disk stylesheet as YAML, so `.css` files failed with a YAML error and the registry silently fell back to the compile-time embedded content — making edits appear to be "cached" until the next rebuild. The hot-reload path and `StylesheetRegistry::add_inline` now use the same auto-detecting CSS/YAML parser as the release embedded path.
+
+### Changed
+
+- `StylesheetRegistry::add_inline` parameter renamed `yaml` → `content`; it accepts either CSS or YAML (format auto-detected). The method's behavior is strictly wider than before, so no caller changes are required.
+- Docs and doc-examples across `standout-render`, `standout-macros`, and top-level docs updated to describe stylesheets as CSS (preferred) with legacy YAML, instead of YAML-only.
+
 ## [7.3.0] - 2026-04-16
 
 ### Added

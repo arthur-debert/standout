@@ -1,0 +1,16 @@
+/* CSS variant for priority tests — both light.css and light.yaml exist
+ * with the same base name. Priority resolution must pick THIS file
+ * (.css beats .yaml per STYLESHEET_EXTENSIONS).
+ *
+ * The style name `css_wins` is unique to this file; tests assert it
+ * resolves so we know the CSS file was picked (not the YAML one).
+ */
+
+.css_wins {
+    color: blue;
+    font-weight: bold;
+}
+
+.header {
+    color: blue;
+}

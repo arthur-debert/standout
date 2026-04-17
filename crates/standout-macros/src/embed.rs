@@ -136,7 +136,7 @@ fn resolve_path(path: &str) -> PathBuf {
 /// Collects all files from a directory with matching extensions.
 ///
 /// Returns a vector of (name_with_ext, content) pairs where name_with_ext
-/// is the relative path from root INCLUDING the extension (e.g., "themes/dark.yaml").
+/// is the relative path from root INCLUDING the extension (e.g., "themes/dark.css").
 ///
 /// NO extension stripping or priority logic is done here - that's the registry's job.
 fn collect_files(dir: &Path, extensions: &[&str]) -> Result<Vec<(String, String)>, String> {

@@ -1,0 +1,8 @@
+# YAML variant for priority tests — must LOSE to light.css.
+# The style `yaml_loses` is unique to this file: if a test ever sees
+# this style when resolving `themes/light`, .css/.yaml priority has
+# regressed.
+yaml_loses:
+  fg: magenta
+header:
+  fg: magenta

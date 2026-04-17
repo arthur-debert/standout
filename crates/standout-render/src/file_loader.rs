@@ -33,9 +33,9 @@
 //! │   └── report/
 //! │       └── summary.jinja
 //! └── styles/
-//!     ├── default.yaml
+//!     ├── default.css
 //!     └── themes/
-//!         └── dark.yaml
+//!         └── dark.css
 //! ```
 //!
 //! ## Name Resolution
@@ -46,7 +46,7 @@
 //! |-----------|-----------------|
 //! | `templates/list.jinja` | `"list"` |
 //! | `templates/report/summary.jinja` | `"report/summary"` |
-//! | `styles/themes/dark.yaml` | `"themes/dark"` |
+//! | `styles/themes/dark.css` | `"themes/dark"` |
 //!
 //! ## Development Usage
 //!
@@ -56,7 +56,7 @@
 //! use standout_render::file_loader::{FileRegistry, FileRegistryConfig};
 //!
 //! let config = FileRegistryConfig {
-//!     extensions: &[".yaml", ".yml"],
+//!     extensions: &[".css", ".yaml", ".yml"],
 //!     transform: |content| Ok(content.to_string()),
 //! };
 //!
@@ -91,10 +91,10 @@
 //! base name, the extension appearing earlier wins for extensionless lookups:
 //!
 //! ```rust,ignore
-//! // With extensions: [".yaml", ".yml"]
-//! // If both default.yaml and default.yml exist:
-//! registry.get("default")     // → default.yaml (higher priority)
-//! registry.get("default.yml") // → default.yml (explicit)
+//! // With extensions: [".css", ".yaml", ".yml"]
+//! // If both default.css and default.yaml exist:
+//! registry.get("default")      // → default.css (higher priority)
+//! registry.get("default.yaml") // → default.yaml (explicit)
 //! ```
 //!
 //! # Extension-Agnostic Resolution
@@ -104,11 +104,11 @@
 //! callers to use any known extension regardless of the actual file extension:
 //!
 //! ```rust,ignore
-//! // File on disk: config.yaml
-//! // Registry has: "config" and "config.yaml"
-//! registry.get("config")       // → found (extensionless key)
-//! registry.get("config.yaml")  // → found (exact match)
-//! registry.get("config.yml")   // → found (strips .yml, falls back to "config")
+//! // File on disk: theme.css
+//! // Registry has: "theme" and "theme.css"
+//! registry.get("theme")        // → found (extensionless key)
+//! registry.get("theme.css")    // → found (exact match)
+//! registry.get("theme.yaml")   // → found (strips .yaml, falls back to "theme")
 //! ```
 //!
 //! # Collision Detection
@@ -123,7 +123,7 @@
 //! | Resource | Extensions | Transform |
 //! |----------|------------|-----------|
 //! | Templates | `.jinja`, `.jinja2`, `.j2`, `.txt` | Identity |
-//! | Stylesheets | `.yaml`, `.yml` | YAML parsing |
+//! | Stylesheets | `.css`, `.yaml`, `.yml` | Auto-detect CSS or YAML |
 //! | Custom | User-defined | User-defined |
 //!
 //! The registry is generic over content type `T`, enabling consistent behavior
@@ -396,9 +396,9 @@ pub enum LoadedEntry<T> {
 ///     transform: |content| Ok(content.to_string()),
 /// }
 ///
-/// // For stylesheet files (YAML parsing)
+/// // For stylesheet files (auto-detects CSS or YAML)
 /// FileRegistryConfig {
-///     extensions: &[".yaml", ".yml"],
+///     extensions: &[".css", ".yaml", ".yml"],
 ///     transform: |content| parse_style_definitions(content),
 /// }
 /// ```

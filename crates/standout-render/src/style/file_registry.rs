@@ -1,7 +1,9 @@
 //! Stylesheet registry for file-based theme loading.
 //!
 //! This module provides [`StylesheetRegistry`], which manages theme resolution
-//! from multiple sources: inline YAML, filesystem directories, or embedded content.
+//! from multiple sources: inline content, filesystem directories, or embedded
+//! content. Stylesheets may be written in CSS (preferred) or YAML (legacy);
+//! the format is auto-detected from the content itself.
 //!
 //! # Design
 //!
@@ -24,7 +26,7 @@
 //!
 //! 1. Inline stylesheets (added via [`StylesheetRegistry::add_inline`]) have highest priority
 //! 2. File stylesheets are searched in directory registration order (first directory wins)
-//! 3. Names can be specified with or without extension: both `"darcula"` and `"darcula.yaml"` resolve
+//! 3. Names can be specified with or without extension: both `"darcula"` and `"darcula.css"` resolve
 //!
 //! # Supported Extensions
 //!
@@ -32,11 +34,12 @@
 //!
 //! | Priority | Extension | Description |
 //! |----------|-----------|-------------|
-//! | 1 (highest) | `.yaml` | Standard YAML extension |
-//! | 2 (lowest) | `.yml` | Short YAML extension |
+//! | 1 (highest) | `.css`  | CSS stylesheet (preferred) |
+//! | 2           | `.yaml` | YAML stylesheet (legacy) |
+//! | 3 (lowest)  | `.yml`  | YAML stylesheet, short extension (legacy) |
 //!
 //! If multiple files exist with the same base name but different extensions
-//! (e.g., `darcula.yaml` and `darcula.yml`), the higher-priority extension wins.
+//! (e.g., `darcula.css` and `darcula.yaml`), the higher-priority extension wins.
 //!
 //! # Collision Handling
 //!
@@ -90,7 +93,7 @@ fn stylesheet_config() -> FileRegistryConfig<Theme> {
 ///
 /// CSS is detected by the presence of a CSS class selector (`.name {`),
 /// which distinguishes it from YAML inline maps that also use `{`.
-fn parse_theme_content(content: &str) -> Result<Theme, StylesheetError> {
+pub(crate) fn parse_theme_content(content: &str) -> Result<Theme, StylesheetError> {
     let trimmed = content.trim_start();
     // CSS files start with class selectors (.name), comments (/*), or @media queries
     if trimmed.starts_with('.') || trimmed.starts_with("/*") || trimmed.starts_with("@media") {
@@ -125,11 +128,9 @@ fn parse_theme_content(content: &str) -> Result<Theme, StylesheetError> {
 /// ```rust,ignore
 /// let mut registry = StylesheetRegistry::new();
 ///
-/// // Add inline theme (highest priority)
+/// // Add inline theme (highest priority) — CSS or YAML, auto-detected
 /// registry.add_inline("custom", r#"
-/// header:
-///   fg: cyan
-///   bold: true
+/// .header { color: cyan; font-weight: bold; }
 /// "#)?;
 ///
 /// // Add from directory
@@ -161,7 +162,11 @@ impl StylesheetRegistry {
         }
     }
 
-    /// Adds an inline theme from a YAML string.
+    /// Adds an inline theme from stylesheet content (CSS or YAML).
+    ///
+    /// The format is auto-detected: content starting with a class selector
+    /// (`.name`), a comment (`/*`), or `@media` is parsed as CSS; everything
+    /// else is parsed as YAML.
     ///
     /// Inline themes have the highest priority and will shadow any
     /// file-based themes with the same name.
@@ -169,29 +174,34 @@ impl StylesheetRegistry {
     /// # Arguments
     ///
     /// * `name` - The theme name for resolution
-    /// * `yaml` - The YAML content defining the theme
+    /// * `content` - The stylesheet content (CSS or YAML) defining the theme
     ///
     /// # Errors
     ///
-    /// Returns an error if the YAML content cannot be parsed.
+    /// Returns an error if the content cannot be parsed.
     ///
     /// # Example
     ///
     /// ```rust,ignore
+    /// // CSS
     /// registry.add_inline("custom", r#"
+    /// .header { color: cyan; font-weight: bold; }
+    /// .muted { opacity: 0.6; }
+    /// "#)?;
+    ///
+    /// // YAML
+    /// registry.add_inline("legacy", r#"
     /// header:
     ///   fg: cyan
     ///   bold: true
-    /// muted:
-    ///   dim: true
     /// "#)?;
     /// ```
     pub fn add_inline(
         &mut self,
         name: impl Into<String>,
-        yaml: &str,
+        content: &str,
     ) -> Result<(), StylesheetError> {
-        let theme = Theme::from_yaml(yaml)?;
+        let theme = parse_theme_content(content)?;
         self.inline.insert(name.into(), theme);
         Ok(())
     }
@@ -212,9 +222,10 @@ impl StylesheetRegistry {
     /// Adds a stylesheet directory to search for files.
     ///
     /// Themes in the directory are resolved by their filename without
-    /// extension. For example, with directory `./themes`:
+    /// extension. Both `.css` (preferred) and `.yaml`/`.yml` (legacy) files
+    /// are recognized. For example, with directory `./themes`:
     ///
-    /// - `"darcula"` → `./themes/darcula.yaml`
+    /// - `"darcula"` → `./themes/darcula.css`
     /// - `"monokai"` → `./themes/monokai.yaml`
     ///
     /// # Errors
@@ -266,15 +277,17 @@ impl StylesheetRegistry {
     ///
     /// # Arguments
     ///
-    /// * `entries` - Slice of `(name_with_ext, yaml_content)` pairs where `name_with_ext`
-    ///   is the relative path including extension (e.g., `"themes/dark.yaml"`)
+    /// * `entries` - Slice of `(name_with_ext, stylesheet_content)` pairs where
+    ///   `name_with_ext` is the relative path including extension
+    ///   (e.g., `"themes/dark.css"` or `"themes/dark.yaml"`)
     ///
     /// # Processing
     ///
     /// This method applies the same logic as runtime file loading:
     ///
-    /// 1. YAML parsing: Each entry's content is parsed as a theme definition
-    /// 2. Extension stripping: `"themes/dark.yaml"` → `"themes/dark"`
+    /// 1. Stylesheet parsing: Each entry's content is parsed as a theme
+    ///    definition, auto-detecting CSS vs YAML
+    /// 2. Extension stripping: `"themes/dark.css"` → `"themes/dark"`
     /// 3. Extension priority: When multiple files share a base name, the
     ///    higher-priority extension wins (see [`STYLESHEET_EXTENSIONS`])
     /// 4. Dual registration: Each theme is accessible by both its base
@@ -282,7 +295,7 @@ impl StylesheetRegistry {
     ///
     /// # Errors
     ///
-    /// Returns an error if any YAML content fails to parse.
+    /// Returns an error if any stylesheet content fails to parse.
     ///
     /// # Example
     ///
@@ -291,7 +304,7 @@ impl StylesheetRegistry {
     ///
     /// // Typically generated by embed_styles! macro
     /// let entries: &[(&str, &str)] = &[
-    ///     ("default.yaml", "header:\n  fg: cyan\n  bold: true"),
+    ///     ("default.css", ".header { color: cyan; font-weight: bold; }"),
     ///     ("themes/dark.yaml", "panel:\n  fg: white"),
     /// ];
     ///
@@ -299,7 +312,7 @@ impl StylesheetRegistry {
     ///
     /// // Access by base name or full name
     /// assert!(registry.get("default").is_ok());
-    /// assert!(registry.get("default.yaml").is_ok());
+    /// assert!(registry.get("default.css").is_ok());
     /// assert!(registry.get("themes/dark").is_ok());
     /// ```
     pub fn from_embedded_entries(entries: &[(&str, &str)]) -> Result<Self, StylesheetError> {

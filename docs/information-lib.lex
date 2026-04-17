@@ -1046,20 +1046,22 @@ THEME: Themes & Styles
 43. How do I load themes from files?
 
 	Single file:
-		let theme = Theme::from_file("themes/dark.yaml")?;
+		let theme = Theme::from_file("themes/dark.css")?;
 	:: rust ::
 
-	The theme name is extracted from the filename (without extension).
+	The theme name is extracted from the filename (without extension). CSS
+	(preferred) and YAML (legacy) are both accepted; the format is auto-detected
+	from content.
 
 	Directory of themes (StylesheetRegistry):
 		let mut registry = StylesheetRegistry::new();
 		registry.load_directory("themes/")?;
 
-		let dark = registry.get("dark")?;   // themes/dark.yaml
-		let light = registry.get("light")?; // themes/light.yaml
+		let dark = registry.get("dark")?;   // themes/dark.css
+		let light = registry.get("light")?; // themes/light.css
 	:: rust ::
 
-	Supported extensions: .yaml, .yml
+	Supported extensions: .css (preferred), .yaml, .yml (legacy)
 
 
 44. How do I validate a theme?
@@ -1288,7 +1290,7 @@ THEME: App Configuration
 	:: rust ::
 
 	embed_templates! collects files matching: .jinja, .jinja2, .j2, .txt
-	embed_styles! collects files matching: .yaml, .yml
+	embed_styles! collects files matching: .css (preferred), .yaml, .yml (legacy)
 
 	The macros produce EmbeddedSource<T> containing:
 	  - Static array of (filename, content) pairs

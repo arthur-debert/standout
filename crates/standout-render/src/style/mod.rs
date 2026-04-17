@@ -1,4 +1,7 @@
-//! Style system for named styles, aliases, and YAML-based stylesheets.
+//! Style system for named styles, aliases, and stylesheets.
+//!
+//! Stylesheets can be written in CSS (preferred) or YAML (legacy). The
+//! [`StylesheetRegistry`] auto-detects the format from content when loading.
 //!
 //! This module provides the complete styling infrastructure:
 //!
@@ -8,11 +11,12 @@
 //! - [`Styles`]: A registry of named styles
 //! - [`StyleValidationError`]: Errors from style validation
 //!
-//! ## YAML Stylesheet Parsing
+//! ## Stylesheet Parsing
 //!
-//! - [`parse_stylesheet`]: Parse YAML into theme variants
+//! - [`parse_css`]: Parse CSS source into theme variants
+//! - [`parse_stylesheet`]: Parse YAML source into theme variants (legacy)
 //! - [`ThemeVariants`]: Styles resolved for base/light/dark modes
-//! - [`StylesheetRegistry`]: File-based theme management
+//! - [`StylesheetRegistry`]: File-based theme management (auto-detects CSS/YAML)
 //!
 //! ## YAML Schema
 //!
@@ -96,5 +100,6 @@ pub use attributes::StyleAttributes;
 pub use color::ColorDef;
 pub use css_parser::parse_css;
 pub use definition::StyleDefinition;
+pub(crate) use file_registry::parse_theme_content;
 pub use file_registry::{StylesheetRegistry, STYLESHEET_EXTENSIONS};
 pub use parser::{parse_stylesheet, ThemeVariants};

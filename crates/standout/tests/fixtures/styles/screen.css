@@ -1,0 +1,12 @@
+/* Pure CSS fixture — regression test for the hot-reload CSS parsing bug
+ * where CSS files were mis-parsed as YAML.
+ */
+
+.header {
+    color: cyan;
+    font-weight: bold;
+}
+
+.muted {
+    opacity: 0.6;
+}

@@ -102,11 +102,15 @@ pub fn embed_templates(input: TokenStream) -> TokenStream {
 /// # Supported Extensions
 ///
 /// Files are recognized by extension (in priority order):
-/// - `.yaml` (highest priority)
-/// - `.yml` (lowest priority)
+/// - `.css` (highest priority — preferred format)
+/// - `.yaml` (legacy)
+/// - `.yml` (legacy, lowest priority)
+///
+/// The format is auto-detected from the content itself at parse time, so the
+/// extension only matters for file discovery and priority resolution.
 ///
 /// When multiple files share the same base name with different extensions
-/// (e.g., `dark.yaml` and `dark.yml`), the higher-priority extension wins.
+/// (e.g., `dark.css` and `dark.yaml`), the higher-priority extension wins.
 ///
 /// # Hot Reload Behavior
 ///
