@@ -686,6 +686,20 @@ impl Default for Theme {
         //   purple:  53 (#5f005f)                   purple: 225 (#ffd7ff)
 
         Self::new()
+            // ── Framework warnings ──────────────────────────────────────
+            // Banner shown before the per-warning list when the framework
+            // emits deferred warnings (e.g. stylesheet hot-reload failures).
+            // Black text on orange (ANSI 256 #208) with bold for prominence.
+            // Items are rendered without extra styling; the leading tab is
+            // applied by the CLI flush path, not the style.
+            .add(
+                "standout_warning_banner",
+                Style::new()
+                    .fg(Color::Black)
+                    .bg(Color::Color256(208))
+                    .bold(),
+            )
+            .add("standout_warning_item", Style::new())
             // ── Base (gray) ─────────────────────────────────────────────
             .add("table_row_even", Style::new())
             .add_adaptive(

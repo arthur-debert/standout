@@ -156,6 +156,7 @@ pub mod tabular;
 pub mod template;
 pub mod theme;
 mod util;
+pub mod warnings;
 
 // Error type
 pub use error::RenderError;

@@ -321,17 +321,18 @@ impl AppBuilder {
         I: IntoIterator<Item = T>,
         T: Into<std::ffi::OsString> + Clone,
     {
-        match self.dispatch_from(cmd, args) {
-            RunResult::Handled(output) => {
+        let result = self.dispatch_from(cmd, args);
+        let handled = match result {
+            RunResult::Handled(ref output) => {
                 if !output.is_empty() {
                     println!("{}", output);
                 }
                 true
             }
-            RunResult::Binary(bytes, filename) => {
+            RunResult::Binary(ref bytes, ref filename) => {
                 // For binary output, write to stdout or the suggested file
                 // By default, we write to the suggested filename
-                if let Err(e) = std::fs::write(&filename, &bytes) {
+                if let Err(e) = std::fs::write(filename, bytes) {
                     eprintln!("Error writing {}: {}", filename, e);
                 } else {
                     eprintln!("Wrote {} bytes to {}", bytes.len(), filename);
@@ -340,7 +341,18 @@ impl AppBuilder {
             }
             RunResult::Silent => true, // Handler ran successfully, no output
             RunResult::NoMatch(_) => false,
-        }
+        };
+
+        // After the primary output has been flushed to stdout, render any
+        // framework warnings collected during setup/dispatch to stderr so
+        // they appear last on the user's terminal. `OutputMode::Auto` is a
+        // safe default here: the renderer's final decision on styling is
+        // driven by whether stderr itself is a color-capable TTY.
+        let default_theme = crate::Theme::default();
+        let theme = self.theme.as_ref().unwrap_or(&default_theme);
+        standout_render::warnings::flush_to_stderr(theme, OutputMode::Auto);
+
+        handled
     }
 
     /// Runs the CLI and returns the rendered output as a string.
