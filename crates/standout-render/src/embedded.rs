@@ -30,9 +30,8 @@ use std::marker::PhantomData;
 use std::path::Path;
 
 use crate::file_loader::{build_embedded_registry, walk_dir};
-use crate::style::{StylesheetRegistry, STYLESHEET_EXTENSIONS};
+use crate::style::{parse_theme_content, StylesheetRegistry, STYLESHEET_EXTENSIONS};
 use crate::template::{walk_template_dir, TemplateRegistry};
-use crate::theme::Theme;
 
 /// Marker type for template resources.
 #[derive(Debug, Clone, Copy)]
@@ -151,7 +150,8 @@ impl From<EmbeddedStyles> for StylesheetRegistry {
     ///
     /// # Panics
     ///
-    /// Panics if embedded YAML content fails to parse (should be caught in dev).
+    /// Panics if embedded stylesheet content (CSS or YAML) fails to parse
+    /// (should be caught in dev).
     fn from(source: EmbeddedStyles) -> Self {
         if source.should_hot_reload() {
             // Debug mode with existing source path: load from filesystem
@@ -192,8 +192,8 @@ impl From<EmbeddedStyles> for StylesheetRegistry {
                 .collect();
 
             let inline =
-                match build_embedded_registry(&entries_refs, STYLESHEET_EXTENSIONS, |yaml| {
-                    Theme::from_yaml(yaml)
+                match build_embedded_registry(&entries_refs, STYLESHEET_EXTENSIONS, |content| {
+                    parse_theme_content(content)
                 }) {
                     Ok(map) => map,
                     Err(e) => {

@@ -1,8 +1,8 @@
 //! Theme struct for building style collections.
 //!
 //! Themes are named collections of styles that can adapt to the user's
-//! display mode (light/dark). They support both programmatic construction
-//! and YAML-based file loading.
+//! display mode (light/dark). They support programmatic construction and
+//! file loading from CSS (preferred) or YAML (legacy) stylesheets.
 //!
 //! # Adaptive Styles
 //!

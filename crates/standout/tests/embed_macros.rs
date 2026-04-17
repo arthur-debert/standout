@@ -146,6 +146,66 @@ fn test_embed_styles_extension_priority() {
 }
 
 // =============================================================================
+// CSS stylesheet tests
+//
+// Regression coverage for a bug where the debug hot-reload path parsed every
+// on-disk stylesheet as YAML, causing `.css` files to fail to parse and silently
+// fall back to the compile-time embedded copy. Both fixtures below are `.css`
+// so they exercise `parse_theme_content`'s CSS branch end-to-end through the
+// embed macro and the hot-reload path.
+// =============================================================================
+
+#[test]
+fn test_embed_styles_css_file() {
+    let mut styles: StylesheetRegistry = embed_styles!("tests/fixtures/styles").into();
+
+    // screen.css has no YAML sibling — if CSS parsing were broken, this would
+    // fail at load time or return a theme with no styles.
+    let theme = styles.get("screen").expect("screen.css should load");
+    let resolved = theme.resolve_styles(None);
+    assert!(
+        resolved.has("header"),
+        "CSS .header class should be registered"
+    );
+    assert!(
+        resolved.has("muted"),
+        "CSS .muted class should be registered"
+    );
+}
+
+#[test]
+fn test_embed_styles_css_accessible_by_full_name() {
+    let mut styles: StylesheetRegistry = embed_styles!("tests/fixtures/styles").into();
+
+    let theme = styles
+        .get("screen.css")
+        .expect("screen.css should be accessible by full filename");
+    let resolved = theme.resolve_styles(None);
+    assert!(resolved.has("header"));
+}
+
+#[test]
+fn test_embed_styles_css_beats_yaml_priority() {
+    // Both themes/light.css and themes/light.yaml exist with the same base name.
+    // Per STYLESHEET_EXTENSIONS = [".css", ".yaml", ".yml"], the CSS file wins.
+    let mut styles: StylesheetRegistry = embed_styles!("tests/fixtures/styles").into();
+
+    let theme = styles
+        .get("themes/light")
+        .expect("themes/light should resolve");
+    let resolved = theme.resolve_styles(None);
+
+    assert!(
+        resolved.has("css_wins"),
+        "CSS file must win priority — expected `css_wins` style from light.css"
+    );
+    assert!(
+        !resolved.has("yaml_loses"),
+        "YAML file must lose priority — `yaml_loses` should not be present"
+    );
+}
+
+// =============================================================================
 // EmbeddedSource tests
 // =============================================================================
 
