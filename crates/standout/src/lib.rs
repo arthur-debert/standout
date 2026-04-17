@@ -234,6 +234,7 @@ pub use standout_render::context;
 pub use standout_render::file_loader;
 pub use standout_render::style;
 pub use standout_render::tabular;
+pub use standout_render::warnings;
 
 // Error type (from standout-render)
 pub use standout_render::RenderError;

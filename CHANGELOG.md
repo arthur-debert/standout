@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Framework warnings now render as a styled banner after the command output.** Non-fatal problems that standout detects during setup — stylesheet hot-reload failures, template walk errors, etc. — used to emit `Warning:` lines via `eprintln!` *before* the command ran, jammed on top of the real output as plain text. They now flow through a new thread-local collector (`standout::warnings`) and are flushed to stderr at the end of `App::run`, under a `Standout :: Warnings` banner with each entry on its own tab-indented line.
+
+  Two new styles in `Theme::default()` — `standout_warning_banner` (black on orange #208, bold) and `standout_warning_item` — control the look; user themes can override either. Styling is applied only when stderr supports color; piped/redirected stderr still gets plain text. `OutputMode::Text` forces plain output.
+
+  Public API: `standout::warnings::{push_warning, drain_warnings, has_warnings, flush_to_stderr}`.
+
 ## [7.4.0] - 2026-04-17
 
 ### Fixed
