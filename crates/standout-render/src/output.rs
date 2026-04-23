@@ -19,11 +19,16 @@
 //!
 //! ## Auto Mode Resolution
 //!
-//! `Auto` queries terminal capabilities via the `console` crate:
+//! `Auto` queries terminal color capability via
+//! [`detect_color_capability`](crate::detect_color_capability) (which by
+//! default wraps the `console` crate):
 //! - TTY with color support → behaves like `Term` (ANSI codes applied)
 //! - Piped output or no color support → behaves like `Text` (tags stripped)
 //!
-//! This detection happens at render time, not startup.
+//! This detection happens at render time, not startup. Tests can override
+//! the result via
+//! [`set_color_capability_detector`](crate::set_color_capability_detector)
+//! — see the [`environment`](crate::environment) module.
 //!
 //! ## Structured Modes
 //!

@@ -180,8 +180,9 @@ pub use output::{write_binary_output, write_output, OutputDestination, OutputMod
 
 // Environment detection exports
 pub use environment::{
-    detect_color_capability, detect_is_tty, detect_terminal_width, reset_detectors,
-    set_color_capability_detector, set_terminal_width_detector, set_tty_detector,
+    detect_color_capability, detect_is_tty, detect_terminal_width,
+    reset_detectors as reset_environment_detectors, set_color_capability_detector,
+    set_terminal_width_detector, set_tty_detector, DetectorGuard,
 };
 
 // Render module exports
