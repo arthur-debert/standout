@@ -6,7 +6,9 @@
 
 **Test your data. Render your view.**
 
-Standout is a CLI framework for Rust that enforces separation between logic and presentation. Your handlers return structs, not strings—making CLI logic as testable as any other code.
+Standout is a CLI framework for Rust built around one claim: a shell application's logic should be as testable as any other Rust code, and its full pipeline — argv in, rendered output out — should be testable in-process, not through brittle subprocess-and-regex dances. Handlers return structs, not strings. A dedicated test harness runs the whole app against a controlled environment (piped stdin, env vars, fixture files, clipboard, terminal width, color capability) in microseconds.
+
+If you've been writing CLI integration tests by spawning the binary and grepping stdout, Standout is built to replace most of them. See **[Introduction to Testing](https://standout.magik.works/guides/intro-to-testing.html)**.
 
 ## The Problem
 
@@ -47,9 +49,30 @@ fn test_list_filters_completed() {
 
 Because your logic returns a struct, you test the struct. No stdout capture, no regex, no brittleness.
 
+For full-pipeline tests — "run the CLI as if it were invoked from a shell, with *this* env, *this* piped stdin, *these* fixture files" — the `standout-test` crate runs the whole app in-process:
+
+```rust
+use standout_test::TestHarness;
+
+#[test]
+#[serial]
+fn list_reads_from_env_configured_file() {
+    let result = TestHarness::new()
+        .env("TODO_FILE", "other.txt")
+        .fixture("other.txt", "buy milk\nwrite tests\n")
+        .no_color()
+        .run(&app, cmd, ["myapp", "list"]);
+
+    result.assert_success();
+    result.assert_stdout_contains("buy milk");
+}
+```
+
+No subprocess. No stdout plumbing. Env vars, cwd, stdin, clipboard, terminal width, and color capability are all controllable, and every override is restored on drop — even on panic. See **[Introduction to Testing](https://standout.magik.works/guides/intro-to-testing.html)** for the full tour.
+
 ## Features
 
-- **Testable by design** — Handlers return data; framework handles rendering
+- **Testable by design** — Handlers return data; `standout-test` runs the full pipeline in-process against a controlled environment
 - **Multiple output modes** — Rich terminal, JSON, YAML, CSV from the same handler
 - **MiniJinja templates** — Familiar syntax with partials, filters, and hot reload
 - **CSS/YAML styling** — Semantic styles with light/dark mode support
@@ -93,7 +116,8 @@ myapp list --output json    # JSON for scripting
 
 You can find comprehensive documentation in our book: **[standout.magik.works](https://standout.magik.works/)**
 
-- [Introduction to Standout](https://standout.magik.works/guides/intro-to-standout.html) — Start here
+- [Introduction to Testing](https://standout.magik.works/guides/intro-to-testing.html) — The primary value prop: why Standout CLIs are testable end-to-end, in-process, without subprocess spawning
+- [Introduction to Standout](https://standout.magik.works/guides/intro-to-standout.html) — Adopting the framework in an existing CLI
 - [Rendering System](https://standout.magik.works/topics/rendering-system.html) — Templates and styles
 - [Tabular Layouts](https://standout.magik.works/topics/tabular.html) — Tables and alignment
 - [All Topics](https://standout.magik.works/topics/index.html) — Complete reference
