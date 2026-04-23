@@ -147,6 +147,7 @@
 pub mod colorspace;
 pub mod context;
 mod embedded;
+pub mod environment;
 mod error;
 pub mod file_loader;
 pub mod output;
@@ -176,6 +177,13 @@ pub use theme::{
 
 // Output module exports
 pub use output::{write_binary_output, write_output, OutputDestination, OutputMode};
+
+// Environment detection exports
+pub use environment::{
+    detect_color_capability, detect_is_tty, detect_terminal_width,
+    reset_detectors as reset_environment_detectors, set_color_capability_detector,
+    set_terminal_width_detector, set_tty_detector, DetectorGuard,
+};
 
 // Render module exports
 pub use template::{

@@ -19,11 +19,16 @@
 //!
 //! ## Auto Mode Resolution
 //!
-//! `Auto` queries terminal capabilities via the `console` crate:
+//! `Auto` queries terminal color capability via
+//! [`detect_color_capability`](crate::detect_color_capability) (which by
+//! default wraps the `console` crate):
 //! - TTY with color support → behaves like `Term` (ANSI codes applied)
 //! - Piped output or no color support → behaves like `Text` (tags stripped)
 //!
-//! This detection happens at render time, not startup.
+//! This detection happens at render time, not startup. Tests can override
+//! the result via
+//! [`set_color_capability_detector`](crate::set_color_capability_detector)
+//! — see the [`environment`](crate::environment) module.
 //!
 //! ## Structured Modes
 //!
@@ -36,7 +41,7 @@
 //! Use [`render_auto`](crate::render_auto) to automatically dispatch between
 //! templated and structured rendering based on output mode.
 
-use console::Term;
+use crate::environment::detect_color_capability;
 use std::io::Write;
 
 /// Destination for rendered output.
@@ -185,7 +190,7 @@ impl OutputMode {
     /// - `Json` returns `false` (structured output, no ANSI codes)
     pub fn should_use_color(&self) -> bool {
         match self {
-            OutputMode::Auto => Term::stdout().features().colors_supported(),
+            OutputMode::Auto => detect_color_capability(),
             OutputMode::Term => true,
             OutputMode::Text => false,
             OutputMode::TermDebug => false, // Handled specially

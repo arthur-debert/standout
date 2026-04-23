@@ -98,7 +98,7 @@ impl AppBuilder {
             serde_json::to_value(data).map_err(|e| SetupError::Config(e.to_string()))?;
         let render_ctx = RenderContext::new(
             mode,
-            super::super::app::get_terminal_width(),
+            standout_render::detect_terminal_width(),
             &theme,
             &json_data,
         );
