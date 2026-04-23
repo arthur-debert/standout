@@ -5,7 +5,7 @@ use std::sync::Arc;
 use clap::ArgMatches;
 
 use crate::collector::InputCollector;
-use crate::env::{RealStdin, StdinReader};
+use crate::env::{DefaultStdin, StdinReader};
 use crate::InputError;
 
 /// Collect input from piped stdin.
@@ -35,22 +35,28 @@ use crate::InputError;
 /// let source = StdinSource::with_reader(MockStdin::piped("test input"));
 /// ```
 #[derive(Clone)]
-pub struct StdinSource<R: StdinReader = RealStdin> {
+pub struct StdinSource<R: StdinReader = DefaultStdin> {
     reader: Arc<R>,
     trim: bool,
 }
 
-impl StdinSource<RealStdin> {
-    /// Create a new stdin source using real stdin.
+impl StdinSource<DefaultStdin> {
+    /// Create a new stdin source.
+    ///
+    /// The source reads via
+    /// [`DefaultStdin`](crate::env::DefaultStdin), which honors a test
+    /// override installed through
+    /// [`set_default_stdin_reader`](crate::env::set_default_stdin_reader)
+    /// and otherwise falls back to real stdin.
     pub fn new() -> Self {
         Self {
-            reader: Arc::new(RealStdin),
+            reader: Arc::new(DefaultStdin),
             trim: true,
         }
     }
 }
 
-impl Default for StdinSource<RealStdin> {
+impl Default for StdinSource<DefaultStdin> {
     fn default() -> Self {
         Self::new()
     }
@@ -117,9 +123,10 @@ impl<R: StdinReader + 'static> InputCollector<String> for StdinSource<R> {
 /// Convenience function to read stdin if piped.
 ///
 /// Returns `Ok(Some(content))` if stdin is piped and has content,
-/// `Ok(None)` if stdin is a terminal or empty.
+/// `Ok(None)` if stdin is a terminal or empty. Honors any reader installed
+/// via [`set_default_stdin_reader`](crate::env::set_default_stdin_reader).
 pub fn read_if_piped() -> Result<Option<String>, InputError> {
-    let reader = RealStdin;
+    let reader = DefaultStdin;
     if reader.is_terminal() {
         return Ok(None);
     }

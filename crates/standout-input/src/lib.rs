@@ -77,3 +77,9 @@ pub use sources::{
 
 // Re-export mock types for testing
 pub use env::{MockClipboard, MockEnv, MockStdin};
+
+// Re-export process-global default reader controls (used by test harnesses)
+pub use env::{
+    reset_default_clipboard_reader, reset_default_stdin_reader, set_default_clipboard_reader,
+    set_default_stdin_reader, DefaultClipboard, DefaultStdin,
+};

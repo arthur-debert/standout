@@ -10,3 +10,4 @@ tmp/
 local
 site/
 book/
+.claude/
