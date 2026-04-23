@@ -24,13 +24,22 @@
 //! # }
 //! ```
 //!
-//! # Concurrency
+//! # Concurrency and restoration
 //!
 //! The harness mutates process-global state (env vars, cwd, environment
 //! detectors, default input readers). Tests that instantiate a
 //! `TestHarness` must be annotated `#[serial]` (from the re-exported
-//! `serial_test` crate). A `Drop` impl restores every override, including
-//! on panic unwind.
+//! `serial_test` crate).
+//!
+//! A `Drop` impl restores every override on both normal exit and panic
+//! unwind, with two nuances:
+//!
+//! - Env vars and cwd are restored to the values captured at `run()` time.
+//! - Terminal detectors and default input readers are reset to the
+//!   library defaults, not to whatever was installed before `run()`. This
+//!   matches the behavior of [`standout_render::DetectorGuard`]. Don't
+//!   mix a `TestHarness` with a manually installed detector override on
+//!   the same thread.
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -79,6 +88,7 @@ pub struct TestHarness {
     is_tty: Option<bool>,
     color_capable: Option<bool>,
     output_mode: Option<OutputMode>,
+    output_flag_name: String,
     stdin: StdinMode,
     clipboard: Option<String>,
 }
@@ -96,6 +106,7 @@ impl TestHarness {
             is_tty: None,
             color_capable: None,
             output_mode: None,
+            output_flag_name: "output".to_string(),
             stdin: StdinMode::Inherit,
             clipboard: None,
         }
@@ -161,10 +172,24 @@ impl TestHarness {
 
     /// Forces a specific [`OutputMode`] regardless of the `--output` flag.
     ///
-    /// Internally this injects `--output=<mode>` as the last argument when
-    /// [`TestHarness::run`] is called.
+    /// Internally this injects `--<flag>=<mode>` as the last argument when
+    /// [`TestHarness::run`] is called. `<flag>` defaults to `output`;
+    /// override it with [`output_flag_name`](Self::output_flag_name) for
+    /// apps that renamed the flag via `AppBuilder::output_flag(...)`.
     pub fn output_mode(mut self, mode: OutputMode) -> Self {
         self.output_mode = Some(mode);
+        self
+    }
+
+    /// Configures the CLI flag name used to force [`output_mode`](Self::output_mode).
+    ///
+    /// Defaults to `"output"` (matching `AppBuilder`'s default). Change it
+    /// if the app under test was built with a renamed flag (e.g.
+    /// `AppBuilder::output_flag(Some("format"))`).
+    ///
+    /// No-op when [`output_mode`](Self::output_mode) isn't set.
+    pub fn output_flag_name(mut self, name: impl Into<String>) -> Self {
+        self.output_flag_name = name.into();
         self
     }
 
@@ -214,17 +239,23 @@ impl TestHarness {
     ///
     /// The first call to `fixture` creates a fresh `tempfile::TempDir`
     /// which becomes the default cwd. Access it via [`tempdir`](Self::tempdir).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `path` is absolute or contains a `..` component — both
+    /// would let the fixture escape the harness-owned tempdir and
+    /// potentially clobber files in the user's real filesystem.
     pub fn fixture(mut self, path: impl AsRef<Path>, content: impl Into<String>) -> Self {
-        let path = path.as_ref().to_path_buf();
+        let path = validate_fixture_path(path.as_ref());
         self.fixtures.push((path, content.into().into_bytes()));
         self.ensure_tempdir();
         self
     }
 
     /// Declares a binary fixture file. Same as [`fixture`](Self::fixture)
-    /// but takes raw bytes.
+    /// but takes raw bytes. Applies the same path validation.
     pub fn fixture_bytes(mut self, path: impl AsRef<Path>, content: impl Into<Vec<u8>>) -> Self {
-        let path = path.as_ref().to_path_buf();
+        let path = validate_fixture_path(path.as_ref());
         self.fixtures.push((path, content.into()));
         self.ensure_tempdir();
         self
@@ -283,16 +314,23 @@ impl TestHarness {
         }
 
         // 2. Env vars. Save originals so we can restore even on panic.
+        // Record each original only once per key (before any mutation), so
+        // if the same key appears in both env_set and env_remove, or is
+        // listed multiple times, restore brings back the true original.
+        // Precedence: set is applied first, then remove — so removal wins
+        // when both are requested for the same key.
         for (k, v) in &self.env_set {
             restore
                 .env_originals
-                .insert(k.clone(), std::env::var(k).ok());
+                .entry(k.clone())
+                .or_insert_with(|| std::env::var(k).ok());
             std::env::set_var(k, v);
         }
         for k in &self.env_remove {
             restore
                 .env_originals
-                .insert(k.clone(), std::env::var(k).ok());
+                .entry(k.clone())
+                .or_insert_with(|| std::env::var(k).ok());
             std::env::remove_var(k);
         }
 
@@ -357,10 +395,10 @@ impl TestHarness {
             restore.reset_clipboard = true;
         }
 
-        // 5. Argv: append --output=<mode> if forced.
+        // 5. Argv: append --<flag>=<mode> if an output mode was forced.
         let mut argv: Vec<OsString> = args.into_iter().map(|a| a.into()).collect();
         if let Some(mode) = self.output_mode {
-            argv.push(format!("--output={}", output_mode_flag(mode)).into());
+            argv.push(format!("--{}={}", self.output_flag_name, output_mode_flag(mode)).into());
         }
 
         let outcome = app.run_to_string(cmd, argv);
@@ -379,6 +417,33 @@ impl Default for TestHarness {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn validate_fixture_path(path: &Path) -> PathBuf {
+    use std::path::Component;
+    if path.is_absolute() {
+        panic!(
+            "TestHarness::fixture: path {:?} is absolute; only relative paths are allowed so \
+             the fixture is confined to the harness tempdir",
+            path
+        );
+    }
+    for component in path.components() {
+        match component {
+            Component::ParentDir => panic!(
+                "TestHarness::fixture: path {:?} contains a `..` component; only relative \
+                 paths that stay inside the tempdir are allowed",
+                path
+            ),
+            Component::Prefix(_) | Component::RootDir => panic!(
+                "TestHarness::fixture: path {:?} has a root or prefix component; only \
+                 relative paths inside the tempdir are allowed",
+                path
+            ),
+            _ => {}
+        }
+    }
+    path.to_path_buf()
 }
 
 fn output_mode_flag(mode: OutputMode) -> &'static str {
@@ -479,8 +544,9 @@ impl TestResult {
 
     // --- assertions ----------------------------------------------------------
 
-    /// Panics unless the run ended in `RunResult::Handled` or
-    /// `RunResult::Silent` (successful dispatch).
+    /// Panics unless the run ended in a successful dispatch
+    /// (`RunResult::Handled`, `RunResult::Silent`, or `RunResult::Binary`).
+    /// `RunResult::NoMatch` triggers a panic.
     #[track_caller]
     pub fn assert_success(&self) {
         match &self.outcome {

@@ -13,9 +13,8 @@
 //! implementation.
 //!
 //! Tests can swap in a mock without touching handler code by calling
-//! [`set_default_stdin_reader`] / [`set_default_clipboard_reader`] — the
-//! [`TestHarness`](../../standout_test/index.html) in the `standout-test`
-//! crate wires these automatically.
+//! [`set_default_stdin_reader`] / [`set_default_clipboard_reader`]. The
+//! `TestHarness` in the `standout-test` crate wires these automatically.
 
 use once_cell::sync::Lazy;
 use std::io::{self, IsTerminal, Read};

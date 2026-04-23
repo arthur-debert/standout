@@ -233,10 +233,9 @@ fn output_mode_override_forces_json() {
 #[test]
 #[serial]
 fn terminal_width_override_is_observable_via_detector() {
-    // The harness installs the override for the duration of run(); we
-    // can't easily probe it inside a handler without adding a context
-    // provider, so we assert the render layer sees it by forcing an
-    // auto-mode render and observing no ANSI (no_color) + text mode.
+    // The override stays installed for the lifetime of the TestResult
+    // (restored when it drops), so we can probe the detector directly
+    // while the result is still in scope.
     let app = build_echo_app("{{ msg }}");
     let result = TestHarness::new().terminal_width(42).no_color().run(
         &app,
@@ -244,6 +243,79 @@ fn terminal_width_override_is_observable_via_detector() {
         vec!["app", "echo", "hi"],
     );
     result.assert_stdout_eq("hi");
+    assert_eq!(standout_render::detect_terminal_width(), Some(42));
+    assert!(!standout_render::detect_color_capability());
+    drop(result);
+    // After drop, detectors are reset to library defaults — the override
+    // should no longer be visible.
+    let _ = standout_render::detect_terminal_width();
+}
+
+#[test]
+#[serial]
+#[should_panic(expected = "absolute")]
+fn fixture_rejects_absolute_path() {
+    let _ = TestHarness::new().fixture("/etc/passwd", "nope");
+}
+
+#[test]
+#[serial]
+#[should_panic(expected = "..")]
+fn fixture_rejects_parent_dir_escape() {
+    let _ = TestHarness::new().fixture("../outside", "nope");
+}
+
+#[test]
+#[serial]
+fn env_set_then_remove_restores_true_original() {
+    std::env::set_var("STANDOUT_DOUBLE_PROBE", "original");
+
+    let app = build_echo_app("{{ msg }}");
+    {
+        let _result = TestHarness::new()
+            .env("STANDOUT_DOUBLE_PROBE", "transient")
+            .env_remove("STANDOUT_DOUBLE_PROBE")
+            .run(&app, echo_command(), vec!["app", "echo", "x"]);
+    }
+
+    // If the harness recorded the mid-run value as the "original" it
+    // would restore "transient" here; the fix records only the first
+    // value seen per key.
+    assert_eq!(
+        std::env::var("STANDOUT_DOUBLE_PROBE").as_deref(),
+        Ok("original")
+    );
+    std::env::remove_var("STANDOUT_DOUBLE_PROBE");
+}
+
+#[test]
+#[serial]
+fn output_flag_name_is_configurable() {
+    // Build an app whose output flag is renamed to --format.
+    let app = standout::cli::App::builder()
+        .output_flag(Some("format"))
+        .command(
+            "echo",
+            |m, _ctx| {
+                let msg = m
+                    .get_one::<String>("msg")
+                    .cloned()
+                    .unwrap_or_else(|| "no-arg".into());
+                Ok(Output::Render(json!({ "msg": msg })))
+            },
+            "{{ msg }}",
+        )
+        .unwrap()
+        .build()
+        .unwrap();
+
+    let result = TestHarness::new()
+        .output_mode(OutputMode::Json)
+        .output_flag_name("format")
+        .run(&app, echo_command(), vec!["app", "echo", "hello"]);
+    let out = result.stdout();
+    assert!(out.contains("\"msg\""), "expected JSON output, got: {out}");
+    assert!(out.contains("\"hello\""));
 }
 
 #[test]
