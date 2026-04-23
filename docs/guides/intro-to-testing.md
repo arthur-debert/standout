@@ -349,17 +349,19 @@ fn list_prefers_env_var_over_cwd_file() {
 #[test]
 #[serial]
 fn add_reads_from_piped_stdin_when_no_arg() {
-    let result = TestHarness::new()
+    // Capture the fixture tempdir path *before* .run() consumes the
+    // builder, so we can read files back after the handler has written
+    // to them. The tempdir itself lives inside the returned TestResult
+    // and stays alive until that result drops at end of scope.
+    let harness = TestHarness::new()
         .fixture("todos.txt", "")
-        .piped_stdin("buy milk")
-        .run(&app(), command(), ["todo", "add"]);
+        .piped_stdin("buy milk");
+    let todos_path = harness.tempdir().unwrap().join("todos.txt");
 
+    let result = harness.run(&app(), command(), ["todo", "add"]);
     result.assert_success();
 
-    // The handler wrote to todos.txt in the fixture tempdir — read it back
-    // to confirm the side effect.
-    let path = TestHarness::new().tempdir().unwrap().join("todos.txt");
-    let contents = std::fs::read_to_string(path).unwrap();
+    let contents = std::fs::read_to_string(todos_path).unwrap();
     assert!(contents.contains("buy milk"));
 }
 
@@ -431,8 +433,8 @@ TestHarness::new()
     // terminal detectors (see standout-render::environment)
     .terminal_width(80)
     .no_terminal_width()
-    .is_tty() | .no_tty()
-    .with_color() | .no_color()
+    .is_tty()                                 // or .no_tty()
+    .with_color()                             // or .no_color()
 
     // forced output mode (injects --output=<mode> into argv)
     .output_mode(OutputMode::Json)

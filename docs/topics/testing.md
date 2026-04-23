@@ -52,7 +52,10 @@ Argument parsing is clap's responsibility, and clap has an extensive test suite 
 - Clipboard reader (same mechanism for `ClipboardSource::new()`)
 - Forced `OutputMode` (injected as `--output=<mode>` into argv)
 
-A `RestoreState` held inside the returned `TestResult` runs on drop — on both normal exit and panic unwind — and undoes every mutation. This means a failing assertion never leaks state into sibling tests.
+A `RestoreState` held inside the returned `TestResult` runs on drop — on both normal exit and panic unwind — and tears down every override, so a failing assertion never leaks state into sibling tests. Two nuances worth knowing:
+
+- **Env vars and cwd** are restored to the values captured at `run()` time. This is a true "put it back the way you found it."
+- **Terminal detectors and default stdin/clipboard readers** are reset to the library defaults, not to whatever was installed before `run()`. If you mix `TestHarness` with a manually installed `set_*_detector` / `set_default_*_reader` on the same thread, the harness's drop will wipe your override. Keep them separate, or scope the manual override entirely outside the harness.
 
 The harness is `#[must_use]`: a `TestHarness::new()` without a `.run(...)` does nothing and gets flagged by the compiler.
 
@@ -82,6 +85,7 @@ These drive `OutputMode::Auto`'s color decision and the render context's termina
 `StdinSource::new()` and `ClipboardSource::new()` resolve their reader through the `DefaultStdin` / `DefaultClipboard` shims. Each shim first consults a process-global override; if none is installed, it falls back to the real OS-backed reader.
 
 ```rust
+use std::sync::Arc;
 use standout_input::{
     set_default_stdin_reader, reset_default_stdin_reader,
     set_default_clipboard_reader, reset_default_clipboard_reader,
