@@ -53,7 +53,7 @@ Because your logic returns a struct, you test the struct. No stdout capture, no 
 What Standout provides:
 
 - Enforced architecture splitting data and presentation
-- Logic is testable as any Rust code
+- Logic is testable as any Rust code — and full CLI invocations are testable in-process via the [`standout-test`](guides/intro-to-testing.md) harness, without subprocess spawning or stdout parsing
 - Boilerplateless: declaratively link your handlers to command names and templates, Standout handles the rest
 - Autodispatch: save keystrokes with auto dispatch from the known command tree
 - Free [output handling](topics/output-modes.md): rich terminal with graceful degradation, plus structured data (JSON, YAML, CSV)
@@ -197,6 +197,7 @@ See the [Partial Adoption Guide](crates/dispatch/topics/partial-adoption.md) for
 ## Next Steps
 
 - **[Introduction to Standout](guides/intro-to-standout.md)** — Adopting Standout in a working CLI. Start here.
+- **[Introduction to Testing](guides/intro-to-testing.md)** — Why Standout CLIs are testable by design, and how the `standout-test` harness replaces slow, brittle subprocess tests with fast in-process ones.
 - [Introduction to Rendering](crates/render/guides/intro-to-rendering.md) — Creating polished terminal output
 - [Introduction to Tabular](crates/render/guides/intro-to-tabular.md) — Building aligned, readable tabular layouts
 - [All Topics](topics/index.md) — In-depth documentation for specific systems

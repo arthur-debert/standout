@@ -9,6 +9,7 @@
 - [Complete Working Example](./guides/complete-example.md)
 - [Quick Start](./guides/tldr-intro-to-standout.md)
 - [Introduction to Standout](./guides/intro-to-standout.md)
+- [Introduction to Testing](./guides/intro-to-testing.md)
 
 ---
 
@@ -35,3 +36,4 @@
 
 - [Output Modes](./topics/output-modes.md)
 - [App Configuration](./topics/app-configuration.md)
+- [Testing](./topics/testing.md)
