@@ -9,4 +9,5 @@ members = [
     "crates/standout-render",
     "crates/standout-pipe",
     "crates/standout-seeker",
+    "crates/standout-test",
 ]

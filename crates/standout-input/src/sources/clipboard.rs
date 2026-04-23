@@ -5,7 +5,7 @@ use std::sync::Arc;
 use clap::ArgMatches;
 
 use crate::collector::InputCollector;
-use crate::env::{ClipboardReader, RealClipboard};
+use crate::env::{ClipboardReader, DefaultClipboard};
 use crate::InputError;
 
 /// Collect input from the system clipboard.
@@ -39,22 +39,28 @@ use crate::InputError;
 /// let source = ClipboardSource::with_reader(MockClipboard::with_content("clipboard text"));
 /// ```
 #[derive(Clone)]
-pub struct ClipboardSource<R: ClipboardReader = RealClipboard> {
+pub struct ClipboardSource<R: ClipboardReader = DefaultClipboard> {
     reader: Arc<R>,
     trim: bool,
 }
 
-impl ClipboardSource<RealClipboard> {
-    /// Create a new clipboard source using real system clipboard.
+impl ClipboardSource<DefaultClipboard> {
+    /// Create a new clipboard source.
+    ///
+    /// Reads via
+    /// [`DefaultClipboard`](crate::env::DefaultClipboard), which honors a
+    /// test override installed through
+    /// [`set_default_clipboard_reader`](crate::env::set_default_clipboard_reader)
+    /// and otherwise falls back to the platform clipboard.
     pub fn new() -> Self {
         Self {
-            reader: Arc::new(RealClipboard),
+            reader: Arc::new(DefaultClipboard),
             trim: true,
         }
     }
 }
 
-impl Default for ClipboardSource<RealClipboard> {
+impl Default for ClipboardSource<DefaultClipboard> {
     fn default() -> Self {
         Self::new()
     }
