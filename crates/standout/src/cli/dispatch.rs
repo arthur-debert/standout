@@ -70,7 +70,7 @@ pub(crate) fn render_handler_output<T: Serialize>(
 
                 let render_ctx = RenderContext::new(
                     output_mode,
-                    crate::cli::app::get_terminal_width(),
+                    standout_render::detect_terminal_width(),
                     theme,
                     &json_data,
                 );

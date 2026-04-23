@@ -8,11 +8,6 @@ use clap::Command;
 use standout_dispatch::verify::{verify_handler_args, ExpectedArg};
 use std::collections::HashMap;
 
-/// Gets the current terminal width, or None if not available.
-pub(crate) fn get_terminal_width() -> Option<usize> {
-    terminal_size::terminal_size().map(|(w, _)| w.0 as usize)
-}
-
 pub(crate) fn find_subcommand_recursive<'a>(
     cmd: &'a Command,
     keywords: &[&str],

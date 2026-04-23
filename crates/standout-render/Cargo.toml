@@ -22,6 +22,7 @@ quick-xml = { version = "0.36", features = ["serialize"] }
 csv = "1.3"
 unicode-width = "0.2"
 cssparser = "0.31"
+terminal_size = "0.4"
 standout-bbparser = { version = "7.5.0", path = "../standout-bbparser" }
 
 [dev-dependencies]

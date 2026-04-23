@@ -36,7 +36,7 @@
 //! Use [`render_auto`](crate::render_auto) to automatically dispatch between
 //! templated and structured rendering based on output mode.
 
-use console::Term;
+use crate::environment::detect_color_capability;
 use std::io::Write;
 
 /// Destination for rendered output.
@@ -185,7 +185,7 @@ impl OutputMode {
     /// - `Json` returns `false` (structured output, no ANSI codes)
     pub fn should_use_color(&self) -> bool {
         match self {
-            OutputMode::Auto => Term::stdout().features().colors_supported(),
+            OutputMode::Auto => detect_color_capability(),
             OutputMode::Term => true,
             OutputMode::Text => false,
             OutputMode::TermDebug => false, // Handled specially
