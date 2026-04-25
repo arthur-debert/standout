@@ -43,6 +43,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Heavier input backends are opt-in via standout features.** `standout` depends on `standout-input` with `default-features = false` and only enables `simple-prompts` (free, no extra deps) by default. Users who want the editor backend or inquire's TUI prompts add `features = ["input-editor"]` or `features = ["input-inquire"]` to their `standout` dependency. This preserves the "minimal by default" promise of `standout-input` — a default `standout` install no longer pulls `tempfile`, `which`, or `shell-words` transitively.
 
+- **`.prompt()` shortcut on every interactive input source.** `InquireText`, `InquireConfirm`, `InquireSelect<T>`, `InquireMultiSelect<T>`, `InquirePassword`, `InquireEditor`, `TextPromptSource`, `ConfirmPromptSource`, and `EditorSource` now expose an inherent `prompt() -> Result<T, InputError>` method that bypasses the chain machinery and the `&clap::ArgMatches` parameter the `InputCollector` trait requires. Intended for wizard / setup helper / REPL flows that drive standout themselves and have no clap parser involved:
+
+  ```rust
+  use standout::input::{InquireSelect, InquireText};
+
+  let pack = InquireText::new("Pack name:").help("a-z0-9-").prompt()?;
+  let env  = InquireSelect::new("Environment:", vec!["dev", "staging", "prod"]).prompt()?;
+  ```
+
+  `Ok(None)` from the underlying `collect` (typically empty submission) maps to `InputError::NoInput`; cancellation maps to `InputError::PromptCancelled`. The `InputCollector` impls and chain behavior are unchanged.
+
+- **New "Interactive Flows" topic** (`docs/crates/input/topics/interactive-flows.md`) walks through composing the new `.prompt()` API with a user-owned step graph and standout's `Renderer` / `Theme` to build wizards. The introduction guide gains a "Standalone Prompts" section that links into the new topic.
+
+- **Wizard handlers are testable in process via `PromptResponder`.** Every interactive source's `.prompt()` shortcut now consults a process-global responder before doing any TTY work. Tests install a `ScriptedResponder` with a typed queue of answers; production wizard code is unchanged:
+
+  ```rust
+  use standout_input::{PromptResponse, ScriptedResponder};
+  use std::sync::Arc;
+
+  let result = TestHarness::new()
+      .prompts(Arc::new(ScriptedResponder::new([
+          PromptResponse::text("buy milk"),  // first text prompt
+          PromptResponse::Bool(true),        // first confirm
+          PromptResponse::Choice(2),         // first select -> options[2]
+      ])))
+      .run(&app, cmd, ["mycli", "setup"]);
+  ```
+
+  Open prompts (`Text`/`Password`/`Editor`) take a `Text(String)`; finite-choice prompts (`Confirm`/`Select`/`MultiSelect`) take a `Bool` / `Choice(usize)` / `Choices(Vec<usize>)`. Position-based responses are deliberate: a `Choice(2)` test keeps working when "Production" gets renamed to "Live". `ScriptedResponder` panics on kind mismatch so a wizard-step reorder fails loudly. `Cancel` and `Skip` cover the abort and re-ask paths.
+
+  New public API: `PromptResponder` trait, `ScriptedResponder`, `PromptKind`, `PromptContext`, `PromptResponse` (in `standout_input`); `set_default_prompt_responder` / `reset_default_prompt_responder`; `TestHarness::prompts(...)` (in `standout-test`). The "Testing Wizards" section in the Interactive Flows topic documents the pattern; the Testing guide and topic cross-link it.
+
+  This closes the testability gap that the `.prompt()` shortcut alone left open — the inquire adapters were previously untestable in CI without a real PTY.
+
 ## [7.5.0] - 2026-04-17
 
 ### Added

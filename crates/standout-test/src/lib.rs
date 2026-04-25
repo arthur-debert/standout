@@ -50,8 +50,9 @@ use clap::Command;
 use standout::cli::{App, RunResult};
 use standout_input::env::{MockClipboard, MockStdin};
 use standout_input::{
-    reset_default_clipboard_reader, reset_default_stdin_reader, set_default_clipboard_reader,
-    set_default_stdin_reader,
+    reset_default_clipboard_reader, reset_default_prompt_responder, reset_default_stdin_reader,
+    set_default_clipboard_reader, set_default_prompt_responder, set_default_stdin_reader,
+    PromptResponder,
 };
 use standout_render::{
     reset_environment_detectors, set_color_capability_detector, set_terminal_width_detector,
@@ -91,6 +92,7 @@ pub struct TestHarness {
     output_flag_name: String,
     stdin: StdinMode,
     clipboard: Option<String>,
+    prompts: Option<Arc<dyn PromptResponder>>,
 }
 
 impl TestHarness {
@@ -109,6 +111,7 @@ impl TestHarness {
             output_flag_name: "output".to_string(),
             stdin: StdinMode::Inherit,
             clipboard: None,
+            prompts: None,
         }
     }
 
@@ -220,6 +223,40 @@ impl TestHarness {
     /// `ClipboardSource::new()` will read it.
     pub fn clipboard(mut self, content: impl Into<String>) -> Self {
         self.clipboard = Some(content.into());
+        self
+    }
+
+    // --- interactive prompts --------------------------------------------------
+
+    /// Installs a [`PromptResponder`](standout_input::PromptResponder) that
+    /// every `.prompt()` call on a [`standout_input`] interactive source
+    /// will route through during the run.
+    ///
+    /// Use this to test wizard / setup / REPL flows that call
+    /// `InquireText::new(...).prompt()`, `InquireSelect::new(...).prompt()`,
+    /// etc., without launching real prompts. The
+    /// [`ScriptedResponder`](standout_input::ScriptedResponder) bundled with
+    /// `standout-input` covers the common case:
+    ///
+    /// ```ignore
+    /// use standout_input::{PromptResponse, ScriptedResponder};
+    /// use std::sync::Arc;
+    ///
+    /// let result = TestHarness::new()
+    ///     .prompts(Arc::new(ScriptedResponder::new([
+    ///         PromptResponse::text("buy milk"),       // first text prompt
+    ///         PromptResponse::Bool(true),             // first confirm
+    ///         PromptResponse::Choice(2),              // first select -> options[2]
+    ///     ])))
+    ///     .run(&app, cmd, ["mycli", "setup"]);
+    /// ```
+    ///
+    /// The responder is installed via
+    /// [`set_default_prompt_responder`](standout_input::set_default_prompt_responder)
+    /// for the duration of the run and reset on drop, matching the
+    /// stdin / clipboard pattern.
+    pub fn prompts(mut self, responder: Arc<dyn PromptResponder>) -> Self {
+        self.prompts = Some(responder);
         self
     }
 
@@ -394,6 +431,10 @@ impl TestHarness {
             set_default_clipboard_reader(Arc::new(MockClipboard::with_content(content)));
             restore.reset_clipboard = true;
         }
+        if let Some(responder) = self.prompts.take() {
+            set_default_prompt_responder(responder);
+            restore.reset_prompts = true;
+        }
 
         // 5. Argv: append --<flag>=<mode> if an output mode was forced.
         let mut argv: Vec<OsString> = args.into_iter().map(|a| a.into()).collect();
@@ -470,6 +511,7 @@ struct RestoreState {
     reset_env_detectors: bool,
     reset_stdin: bool,
     reset_clipboard: bool,
+    reset_prompts: bool,
 }
 
 impl Drop for RestoreState {
@@ -491,6 +533,9 @@ impl Drop for RestoreState {
         }
         if self.reset_clipboard {
             reset_default_clipboard_reader();
+        }
+        if self.reset_prompts {
+            reset_default_prompt_responder();
         }
     }
 }

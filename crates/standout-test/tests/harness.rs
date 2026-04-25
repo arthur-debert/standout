@@ -190,6 +190,127 @@ fn clipboard_reaches_handler() {
     result.assert_stdout_eq("clipboard-content");
 }
 
+/// Drives a tiny three-step "wizard" handler from the harness, scripting
+/// every response. The handler talks to the simple-prompt sources via
+/// `.prompt()`; the responder intercepts each call before any TTY is touched.
+#[test]
+#[serial]
+fn scripted_prompts_drive_a_wizard_handler() {
+    use standout_input::{
+        ConfirmPromptSource, PromptResponse, ScriptedResponder, TextPromptSource,
+    };
+    use std::sync::Arc;
+
+    let app = App::builder()
+        .command(
+            "wizard",
+            |_m, _ctx| {
+                let name = TextPromptSource::new("Name: ").prompt().unwrap();
+                let proceed = ConfirmPromptSource::new("Continue? ").prompt().unwrap();
+                let title = TextPromptSource::new("Title: ").prompt().unwrap();
+                Ok(Output::Render(json!({
+                    "name": name,
+                    "proceed": proceed,
+                    "title": title,
+                })))
+            },
+            "{{ name }}/{{ proceed }}/{{ title }}",
+        )
+        .unwrap()
+        .build()
+        .unwrap();
+
+    let cmd = Command::new("app").subcommand(Command::new("wizard"));
+    let responder = Arc::new(ScriptedResponder::new([
+        PromptResponse::text("Ada"),
+        PromptResponse::Bool(true),
+        PromptResponse::text("Engineer"),
+    ]));
+
+    let result = TestHarness::new()
+        .prompts(responder)
+        .run(&app, cmd, vec!["app", "wizard"]);
+
+    result.assert_stdout_eq("Ada/true/Engineer");
+}
+
+/// Scripted Cancel surfaces as PromptCancelled inside the handler — the
+/// handler propagates it however it wants (here, a fixed "cancelled" body).
+#[test]
+#[serial]
+fn scripted_cancel_propagates_to_handler() {
+    use standout_input::{PromptResponse, ScriptedResponder, TextPromptSource};
+    use std::sync::Arc;
+
+    let app = App::builder()
+        .command(
+            "wizard",
+            |_m, _ctx| {
+                let body = match TextPromptSource::new("Name: ").prompt() {
+                    Ok(name) => format!("ok:{name}"),
+                    Err(e) => format!("err:{e}"),
+                };
+                Ok(Output::Render(json!({ "body": body })))
+            },
+            "{{ body }}",
+        )
+        .unwrap()
+        .build()
+        .unwrap();
+
+    let cmd = Command::new("app").subcommand(Command::new("wizard"));
+    let responder = Arc::new(ScriptedResponder::new([PromptResponse::Cancel]));
+
+    let result = TestHarness::new()
+        .prompts(responder)
+        .run(&app, cmd, vec!["app", "wizard"]);
+
+    result.assert_stdout_contains("err:");
+    result.assert_stdout_contains("cancelled");
+}
+
+/// Confirms the responder is reset on `TestResult` drop — a second harness
+/// run with no `.prompts(...)` falls back to the real backend (which under
+/// `cargo test` means no TTY, so prompt() returns NoInput).
+#[test]
+#[serial]
+fn responder_is_reset_between_runs() {
+    use standout_input::{PromptResponse, ScriptedResponder, TextPromptSource};
+    use std::sync::Arc;
+
+    let app = App::builder()
+        .command(
+            "wizard",
+            |_m, _ctx| {
+                let body = match TextPromptSource::new("Name: ").prompt() {
+                    Ok(name) => format!("ok:{name}"),
+                    Err(e) => format!("err:{e}"),
+                };
+                Ok(Output::Render(json!({ "body": body })))
+            },
+            "{{ body }}",
+        )
+        .unwrap()
+        .build()
+        .unwrap();
+    let cmd = Command::new("app").subcommand(Command::new("wizard"));
+
+    // First run: scripted responder, gets the value.
+    let first = TestHarness::new()
+        .prompts(Arc::new(ScriptedResponder::new([PromptResponse::text(
+            "Ada",
+        )])))
+        .run(&app, cmd.clone(), vec!["app", "wizard"]);
+    first.assert_stdout_eq("ok:Ada");
+    drop(first); // ensure restore runs before the next harness builds
+
+    // Second run: no .prompts(...). The responder should be cleared, so
+    // prompt() falls through to TextPromptSource's no-TTY path and returns
+    // NoInput.
+    let second = TestHarness::new().run(&app, cmd, vec!["app", "wizard"]);
+    second.assert_stdout_contains("err:");
+}
+
 #[test]
 #[serial]
 fn fixture_files_are_materialized_in_cwd() {
