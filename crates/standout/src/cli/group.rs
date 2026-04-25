@@ -479,6 +479,67 @@ impl<H> CommandConfig<H> {
         self
     }
 
+    /// Registers a declarative input chain for this command.
+    ///
+    /// The chain is resolved during pre-dispatch — before the handler runs —
+    /// and the resolved value is stored in an [`Inputs`](standout_input::Inputs)
+    /// bag on `ctx.extensions` under `name`. The handler retrieves it with
+    /// [`CommandContextInput::input`](crate::cli::CommandContextInput::input):
+    ///
+    /// ```ignore
+    /// use standout::cli::{App, CommandContextInput, Output};
+    /// use standout::input::{ArgSource, EditorSource, InputChain, StdinSource};
+    ///
+    /// App::builder()
+    ///     .command_with("create", |_m, ctx| {
+    ///         let body: &String = ctx.input("body")?;
+    ///         Ok(Output::Render(serde_json::json!({ "body": body })))
+    ///     }, |cfg| {
+    ///         cfg.template("create.jinja")
+    ///            .input("body", InputChain::<String>::new()
+    ///                .try_source(ArgSource::new("body"))
+    ///                .try_source(StdinSource::new())
+    ///                .try_source(EditorSource::new()))
+    ///     })?
+    ///     .build()?;
+    /// ```
+    ///
+    /// Multiple `.input(...)` calls on the same command accumulate; each
+    /// registers a pre-dispatch hook that writes into the shared bag, so
+    /// commands can declare several named inputs of any types.
+    ///
+    /// `name` accepts anything convertible into `Cow<'static, str>` — string
+    /// literals, owned `String`s built at runtime (e.g. from config), and
+    /// explicit `Cow`s all work.
+    pub fn input<T>(
+        self,
+        name: impl Into<std::borrow::Cow<'static, str>>,
+        chain: standout_input::InputChain<T>,
+    ) -> Self
+    where
+        T: Clone + Send + Sync + 'static,
+    {
+        let name = name.into();
+        self.pre_dispatch(move |matches, ctx| {
+            // Pre-dispatch hooks receive the top-level ArgMatches, but the
+            // chain's sources reference args defined on the deepest subcommand
+            // (the same matches the handler sees). Resolve against those.
+            let sub_matches = crate::cli::dispatch::get_deepest_matches(matches);
+            let resolved = chain.resolve_with_source(sub_matches).map_err(|e| {
+                crate::cli::hooks::HookError::pre_dispatch(format!("input `{}`: {}", name, e))
+            })?;
+            if !ctx.extensions.contains::<standout_input::Inputs>() {
+                ctx.extensions.insert(standout_input::Inputs::new());
+            }
+            let bag = ctx
+                .extensions
+                .get_mut::<standout_input::Inputs>()
+                .expect("Inputs just inserted");
+            bag.insert(name.clone(), resolved);
+            Ok(())
+        })
+    }
+
     /// Pipes the output to a shell command in passthrough mode.
     ///
     /// The output is sent to the command's stdin, but the original output

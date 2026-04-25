@@ -681,28 +681,41 @@ See [Output Piping](../crates/standout-pipe/docs/topics/piping.md) for the full 
 
 ## Bonus: Declarative Input Collection
 
-Need to accept input from CLI arguments, piped stdin, environment variables, or interactive prompts? `standout-input` provides declarative input chains:
+Need to accept input from CLI arguments, piped stdin, environment variables, or interactive prompts? `standout-input` provides declarative input chains, and the `App` builder integrates them as a first-class part of command configuration:
 
 ```rust
-use standout_input::{InputChain, ArgSource, StdinSource, EnvSource, EditorSource};
+use standout::cli::{App, CommandContextInput, Output};
+use standout::input::{ArgSource, EditorSource, EnvSource, InputChain, StdinSource};
 
-// Try each source in order until one provides input
-let body = InputChain::<String>::new()
-    .try_source(ArgSource::new("body"))           // 1. --body argument
-    .try_source(StdinSource::new())                // 2. Piped stdin
-    .try_source(EnvSource::new("PR_BODY"))         // 3. Environment variable
-    .try_source(EditorSource::new().extension(".md"))  // 4. Open editor
-    .validate(|s| !s.is_empty(), "Body cannot be empty")
-    .resolve(&matches)?;
+App::builder()
+    .command_with("create", create, |cfg| {
+        cfg.template("create.jinja")
+            .input("body", InputChain::<String>::new()
+                .try_source(ArgSource::new("body"))           // 1. --body argument
+                .try_source(StdinSource::new())                // 2. Piped stdin
+                .try_source(EnvSource::new("PR_BODY"))         // 3. Environment variable
+                .try_source(EditorSource::new().extension(".md"))  // 4. Open editor
+                .validate(|s| !s.is_empty(), "Body cannot be empty"))
+    })?
+    .build()?;
+
+fn create(_m: &ArgMatches, ctx: &CommandContext) -> HandlerResult<Value> {
+    // The chain has already been resolved before the handler runs.
+    let body: &String = ctx.input("body")?;
+    /* business logic ... */
+}
 ```
 
 Features:
 - **Declarative priority**: Source order is explicit in the chain
-- **Testable**: All sources accept mocks for CI-safe testing
+- **Framework-integrated**: `.input(name, chain)` registers the chain alongside `template`, `hooks`, and `pipe_*`; resolution happens in pre-dispatch
+- **Testable**: All sources accept mocks for CI-safe testing (the `TestHarness` from `standout-test` wires them automatically)
 - **Validated**: Chain-level validation with retry support for interactive sources
 - **Feature-gated**: Control dependencies (editor, prompts, inquire TUI)
 
-See [Introduction to Input](../crates/input/guides/intro-to-input.md) for the full guide.
+The chain still works standalone via `chain.resolve(&matches)?` for cases where input shape depends on already-resolved values.
+
+See [Introduction to Input](../crates/input/guides/intro-to-input.md) and [Framework Integration](../crates/input/topics/framework-integration.md) for the full guide.
 
 Aside from exposing the library primitives, Standout leverages best-in-breed crates like MiniJinja and console::Style under the hood. The lock-in is really negligible: you can use Standout's BB parser or swap it, manually dispatch handlers, and use the renderers directly in your clap dispatch.
 

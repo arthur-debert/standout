@@ -147,7 +147,9 @@ pub use help::{
 };
 
 // Re-export handler types
-pub use handler::{CommandContext, FnHandler, Handler, HandlerResult, Output, RunResult};
+pub use handler::{
+    CommandContext, CommandContextInput, FnHandler, Handler, HandlerResult, Output, RunResult,
+};
 
 // Re-export hook types
 pub use hooks::{HookError, HookPhase, Hooks, RenderedOutput};

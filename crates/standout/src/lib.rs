@@ -310,6 +310,9 @@ pub use standout_macros::{Tabular, TabularRow};
 // Seeker query engine (re-export from standout-seeker)
 pub use standout_seeker as seeker;
 
+// Declarative input collection (re-export from standout-input)
+pub use standout_input as input;
+
 // Seeker derive macro (requires `features = ["macros"]`)
 pub use standout_macros::Seekable;
 

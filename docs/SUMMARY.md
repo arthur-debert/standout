@@ -32,6 +32,15 @@
 
 ---
 
+# Input (standout-input)
+
+- [Introduction to Input](./crates/input/guides/intro-to-input.md)
+- [Input Sources](./crates/input/topics/input-sources.md)
+- [Backends](./crates/input/topics/backends.md)
+- [Framework Integration](./crates/input/topics/framework-integration.md)
+
+---
+
 # Framework Topics
 
 - [Output Modes](./topics/output-modes.md)
