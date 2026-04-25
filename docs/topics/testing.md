@@ -50,6 +50,7 @@ Argument parsing is clap's responsibility, and clap has an extensive test suite 
 - Terminal detectors: width, TTY, color capability
 - Stdin reader (process-global override consulted by `StdinSource::new()`)
 - Clipboard reader (same mechanism for `ClipboardSource::new()`)
+- Interactive prompt responder (process-global override consulted by every interactive source's `.prompt()` shortcut, so wizard handlers are testable in process — see [Interactive Flows → Testing Wizards](../crates/input/topics/interactive-flows.md#testing-wizards))
 - Forced `OutputMode` (injected as `--output=<mode>` into argv)
 
 A `RestoreState` held inside the returned `TestResult` runs on drop — on both normal exit and panic unwind — and tears down every override, so a failing assertion never leaks state into sibling tests. Two nuances worth knowing:
@@ -100,6 +101,28 @@ reset_default_stdin_reader();
 Handlers that use `StdinSource::new()` / `ClipboardSource::new()` / `read_if_piped()` pick up the mock transparently — no handler refactor needed.
 
 Handlers that need per-instance control keep using `StdinSource::with_reader(MockStdin::piped(...))` as before.
+
+### `standout-input` prompt responder
+
+The `.prompt()` shortcut on every interactive source (`InquireText`, `InquireSelect`, `TextPromptSource`, `EditorSource`, …) consults a process-global [`PromptResponder`](https://docs.rs/standout-input/latest/standout_input/trait.PromptResponder.html) before opening any real prompt. Install one to make wizard handlers testable in-process:
+
+```rust
+use std::sync::Arc;
+use standout_input::{
+    set_default_prompt_responder, reset_default_prompt_responder,
+    ScriptedResponder, PromptResponse,
+};
+
+set_default_prompt_responder(Arc::new(ScriptedResponder::new([
+    PromptResponse::text("buy milk"),
+    PromptResponse::Bool(true),
+    PromptResponse::Choice(2),       // -> options[2] for an InquireSelect
+])));
+// ... run test ...
+reset_default_prompt_responder();
+```
+
+Open prompts (`Text`/`Password`/`Editor`) take a `Text(String)`; finite-choice prompts (`Confirm`/`Select`/`MultiSelect`) take a `Bool` / `Choice(usize)` / `Choices(Vec<usize>)`. Position-based responses are deliberate: a test that picked `Choice(2)` keeps working when you rename `"Production"` to `"Live"`. `ScriptedResponder` panics on kind mismatch so a wizard reorder fails loudly. `PromptResponse::Cancel` and `PromptResponse::Skip` are kind-agnostic and let tests cover the abort and re-ask paths without real signal handling. See [Interactive Flows](../crates/input/topics/interactive-flows.md) for the wizard-shape walkthrough and `TestHarness::prompts(...)` for the harness-level wiring.
 
 ### Env vars and cwd
 

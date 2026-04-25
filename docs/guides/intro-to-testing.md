@@ -249,7 +249,32 @@ Same story for the system clipboard:
 
 `ClipboardSource::new()` returns the mock content; no shelling out to `pbpaste` / `xclip`.
 
-### 4.5 Terminal state
+### 4.5 Interactive prompts (wizards)
+
+Apps that drive their own interactive shell — wizards, setup helpers, REPLs — call `InquireText::new(...).prompt()`, `InquireSelect::new(...).prompt()`, etc. Without a seam those calls need a real TTY and become level-3 territory. With `.prompts(...)`, the harness intercepts every prompt at the boundary so a wizard handler is fully testable in process:
+
+```rust
+use standout_input::{PromptResponse, ScriptedResponder};
+use std::sync::Arc;
+
+#[test]
+#[serial]
+fn setup_wizard_completes_with_scripted_answers() {
+    let result = TestHarness::new()
+        .prompts(Arc::new(ScriptedResponder::new([
+            PromptResponse::text("foo"),     // pack name
+            PromptResponse::Bool(true),      // confirm
+            PromptResponse::Choice(2),       // env -> options[2]
+        ])))
+        .run(&app, cmd, ["mycli", "setup"]);
+
+    result.assert_stdout_contains("created pack `foo`");
+}
+```
+
+Open prompts (`Text`/`Password`/`Editor`) take `PromptResponse::Text(...)`; finite-choice prompts (`Confirm`/`Select`/`MultiSelect`) take a `Bool`/`Choice(usize)`/`Choices(Vec<usize>)`. Position-based responses make tests resilient to copy changes: `Choice(2)` keeps working when "Production" is renamed to "Live". `ScriptedResponder` panics on kind mismatch, so a wizard-step reorder fails loudly. See [Interactive Flows → Testing Wizards](../crates/input/topics/interactive-flows.md#testing-wizards) for the full pattern.
+
+### 4.6 Terminal state
 
 Three orthogonal knobs, all routed through Phase 1's environment detectors:
 
@@ -263,7 +288,7 @@ Three orthogonal knobs, all routed through Phase 1's environment detectors:
 
 Useful for snapshot testing: pin the width, turn off color, and the rendered string is deterministic across developer machines and CI.
 
-### 4.6 Forcing an output mode
+### 4.7 Forcing an output mode
 
 Sometimes you want to assert on structured output regardless of what the user's `--output` flag would have chosen. Instead of manually appending `--output=json` to argv:
 
@@ -447,6 +472,13 @@ TestHarness::new()
 
     // clipboard (same)
     .clipboard("content")
+
+    // interactive prompts (routed through standout-input's PromptResponder)
+    .prompts(Arc::new(ScriptedResponder::new([
+        PromptResponse::text("answer"),
+        PromptResponse::Bool(true),
+        PromptResponse::Choice(2),     // -> options[2]
+    ])))
 
     // execute
     .run(&app, cmd, ["binname", "subcommand", "--flag"])

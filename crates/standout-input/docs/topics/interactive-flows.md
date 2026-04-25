@@ -211,6 +211,75 @@ You wrote ~50 lines of glue and got: themed dynamic text per step, polished TUI 
 
 ---
 
+## Testing Wizards
+
+A wizard built on `.prompt()` is fully testable in process — no real TTY, no `expectrl` subprocess. Every interactive source consults a [`PromptResponder`](https://docs.rs/standout-input/latest/standout_input/trait.PromptResponder.html) before it touches stdin; in tests you install a `ScriptedResponder` and the production wizard code is unchanged.
+
+```rust
+use serial_test::serial;
+use standout_input::{PromptResponse, ScriptedResponder};
+use standout_test::TestHarness;
+use std::sync::Arc;
+
+#[test]
+#[serial]
+fn setup_wizard_creates_pack_and_picks_environment() {
+    let result = TestHarness::new()
+        .prompts(Arc::new(ScriptedResponder::new([
+            PromptResponse::text("foo"),     // pack name
+            PromptResponse::Bool(true),      // confirm dirty
+            PromptResponse::Choice(2),       // env: dev=0, staging=1, prod=2 -> "prod"
+        ])))
+        .run(&app(), command(), ["mycli", "setup"]);
+
+    result.assert_success();
+    result.assert_stdout_contains("Created pack `foo` in prod");
+}
+```
+
+Two design choices to keep tests honest:
+
+- **Open prompts** (`InquireText`, `InquirePassword`, `InquireEditor`, `TextPromptSource`, `EditorSource`) take `PromptResponse::Text("...")` — the answer *is* the value.
+- **Finite-choice prompts** take a *position*, not a label. `Choice(2)` picks `options[2]` from whatever the wizard passed to `InquireSelect::new`. Renaming `"Production"` to `"Live"` in the option list doesn't break a test that picked index 2 — the wizard logic is unchanged, only copy moved. Same for `Confirm`: assert on the bool, not on `"y"`/`"yes"`.
+
+`ScriptedResponder` validates each response against the prompt kind the source actually asked for. A wizard reorder bug — e.g., a `Confirm` step swapped to land where a `Text` was expected — fails the test loudly with the position, the prompt kind, and the queued response, rather than producing a silently wrong assertion three steps later.
+
+Two kind-agnostic responses cover the cancel and skip branches:
+
+```rust
+PromptResponse::Cancel  // -> Err(InputError::PromptCancelled) inside the wizard
+PromptResponse::Skip    // -> Err(InputError::NoInput)        — same path as "no TTY"
+```
+
+Use them to test the wizard's abort and re-ask logic without involving real signal handling.
+
+For lower-level tests that don't need the harness, install the responder directly:
+
+```rust
+use std::sync::Arc;
+use standout_input::{
+    set_default_prompt_responder, reset_default_prompt_responder,
+    ScriptedResponder, PromptResponse,
+};
+
+#[test]
+#[serial(prompt_responder)]
+fn pack_name_validation_re_asks_on_invalid() {
+    set_default_prompt_responder(Arc::new(ScriptedResponder::new([
+        PromptResponse::text("BadName!"),  // first try, rejected by validator
+        PromptResponse::text("good-name"), // re-ask, accepted
+    ])));
+
+    assert_eq!(prompt_pack_name(&Ctx::fresh()).unwrap(), Answer::Text("good-name".into()));
+
+    reset_default_prompt_responder();
+}
+```
+
+This serializes on the `prompt_responder` axis (the global override is process-wide, like stdin / clipboard). The harness handles the install + reset for you when used as `.prompts(...)`.
+
+---
+
 ## When to Reach for the Framework Instead
 
 If your interactive flow is launched as a subcommand of an otherwise-normal CLI app (e.g. `mycli setup`), you can still use `App::builder()` for everything *outside* the wizard — argument parsing, help rendering, the other commands. Just have the `setup` handler call your wizard `run()` function. The handler itself produces `Output::Silent` (or a small summary) and lets the wizard own its own stdout while it runs. See [Framework Integration](framework-integration.md) for the broader CLI integration story.
