@@ -92,6 +92,24 @@ pub trait InputCollector<T>: Send + Sync {
     }
 }
 
+/// Returns a process-wide static [`ArgMatches`] with no arguments.
+///
+/// Used by the `.prompt()` shortcuts on interactive sources, which need to
+/// satisfy `InputCollector::collect`'s `&ArgMatches` parameter even when no
+/// CLI parser is involved (the typical case for wizard/REPL flows that own
+/// their own driver). Initialized lazily on first call and reused thereafter.
+#[allow(dead_code)] // Becomes used once `.prompt()` shortcuts land on each source.
+pub(crate) fn empty_matches() -> &'static ArgMatches {
+    use std::sync::OnceLock;
+    static MATCHES: OnceLock<ArgMatches> = OnceLock::new();
+    MATCHES.get_or_init(|| {
+        clap::Command::new("__standout_input_prompt__")
+            .no_binary_name(true)
+            .try_get_matches_from(std::iter::empty::<&str>())
+            .expect("empty command always parses with no args")
+    })
+}
+
 /// Information about how input was resolved.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedInput<T> {
