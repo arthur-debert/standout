@@ -44,9 +44,9 @@ pub fn list(
 }
 
 // `add` reads its title from a declarative input chain registered in
-// `main.rs`: `--title <T>` first, falling back to piped stdin. The chain is
-// resolved during pre-dispatch and the value lands in `ctx.extensions`,
-// reachable through `ctx.input::<String>("title")`.
+// `build_app` in `src/lib.rs`: `--title <T>` first, falling back to piped
+// stdin. The chain is resolved during pre-dispatch and the value lands in
+// `ctx.extensions`, reachable through `ctx.input::<String>("title")`.
 #[handler]
 pub fn add(#[ctx] ctx: &CommandContext) -> Result<Output<TodoActionResult>, anyhow::Error> {
     let title: &String = ctx.input("title")?;
