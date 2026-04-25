@@ -1,0 +1,9 @@
+[title]Your Todos[/title] [muted]({{ total }})[/muted]
+{% if total == 0 %}
+[muted]Nothing here yet. Add one with `tdoo add "<title>"`.[/muted]
+{%- else %}
+{% for todo in todos -%}
+{%- set status = "done" if todo.done else "pending" -%}
+[index]{{ ("#" ~ todo.id) | col(4, align="right") }}[/index]  [{{ status }}]{{ todo.title | col(40, truncate="end") }}[/{{ status }}]
+{% endfor -%}
+{%- endif %}
