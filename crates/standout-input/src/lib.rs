@@ -53,6 +53,7 @@ mod collector;
 pub mod env;
 mod error;
 mod inputs;
+mod responder;
 pub mod sources;
 
 // Re-export core types
@@ -60,6 +61,10 @@ pub use chain::InputChain;
 pub use collector::{InputCollector, InputSourceKind, ResolvedInput};
 pub use error::InputError;
 pub use inputs::{Inputs, MissingInput};
+pub use responder::{
+    reset_default_prompt_responder, set_default_prompt_responder, PromptContext, PromptKind,
+    PromptResponder, PromptResponse, ScriptedResponder,
+};
 
 // Re-export sources at crate root for convenience
 pub use sources::{
