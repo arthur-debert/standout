@@ -98,7 +98,7 @@ pub trait InputCollector<T>: Send + Sync {
 /// satisfy `InputCollector::collect`'s `&ArgMatches` parameter even when no
 /// CLI parser is involved (the typical case for wizard/REPL flows that own
 /// their own driver). Initialized lazily on first call and reused thereafter.
-#[allow(dead_code)] // Becomes used once `.prompt()` shortcuts land on each source.
+#[cfg(any(feature = "editor", feature = "simple-prompts", feature = "inquire"))]
 pub(crate) fn empty_matches() -> &'static ArgMatches {
     use std::sync::OnceLock;
     static MATCHES: OnceLock<ArgMatches> = OnceLock::new();

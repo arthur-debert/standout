@@ -212,6 +212,23 @@ impl<R: EditorRunner> EditorSource<R> {
     }
 }
 
+impl<R: EditorRunner + 'static> EditorSource<R> {
+    /// Open the editor and return the saved content.
+    ///
+    /// This is the standalone counterpart to [`InputCollector::collect`]:
+    /// it skips the chain machinery (no `&ArgMatches` to plumb through) and
+    /// is intended for wizard or REPL flows that drive standout themselves.
+    ///
+    /// Returns the editor content on success, or an [`InputError`] if no
+    /// editor is available, the editor failed, or `require_save` is set and
+    /// the user closed without saving. If `require_save` is unset and the
+    /// editor exits with empty content, [`InputError::NoInput`] is returned.
+    pub fn prompt(&self) -> Result<String, InputError> {
+        self.collect(crate::collector::empty_matches())?
+            .ok_or(InputError::NoInput)
+    }
+}
+
 impl<R: EditorRunner + 'static> InputCollector<String> for EditorSource<R> {
     fn name(&self) -> &'static str {
         "editor"

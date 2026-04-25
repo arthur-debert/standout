@@ -76,6 +76,17 @@ impl InquireText {
         self.help_message = Some(help.into());
         self
     }
+
+    /// Show the prompt and return the entered value.
+    ///
+    /// Standalone counterpart to [`InputCollector::collect`] for wizard /
+    /// REPL flows that drive standout themselves and have no `&ArgMatches`
+    /// to plumb through. Returns [`InputError::PromptCancelled`] on Esc /
+    /// Ctrl+C, and [`InputError::NoInput`] if the user submits empty input.
+    pub fn prompt(&self) -> Result<String, InputError> {
+        self.collect(crate::collector::empty_matches())?
+            .ok_or(InputError::NoInput)
+    }
 }
 
 impl InputCollector<String> for InquireText {
@@ -154,6 +165,16 @@ impl InquireConfirm {
         self.help_message = Some(help.into());
         self
     }
+
+    /// Show the prompt and return the user's yes/no answer.
+    ///
+    /// Standalone counterpart to [`InputCollector::collect`] for wizard /
+    /// REPL flows that drive standout themselves. Returns
+    /// [`InputError::PromptCancelled`] on Esc / Ctrl+C.
+    pub fn prompt(&self) -> Result<bool, InputError> {
+        self.collect(crate::collector::empty_matches())?
+            .ok_or(InputError::NoInput)
+    }
 }
 
 impl InputCollector<bool> for InquireConfirm {
@@ -228,6 +249,17 @@ impl<T: Display + Clone + Send + Sync + 'static> InquireSelect<T> {
     pub fn page_size(mut self, size: usize) -> Self {
         self.page_size = size;
         self
+    }
+
+    /// Show the selection prompt and return the chosen option.
+    ///
+    /// Standalone counterpart to [`InputCollector::collect`] for wizard /
+    /// REPL flows that drive standout themselves. Returns
+    /// [`InputError::PromptCancelled`] on Esc / Ctrl+C, and
+    /// [`InputError::NoInput`] if the option list is empty.
+    pub fn prompt(&self) -> Result<T, InputError> {
+        self.collect(crate::collector::empty_matches())?
+            .ok_or(InputError::NoInput)
     }
 }
 
@@ -321,6 +353,17 @@ impl<T: Display + Clone + Send + Sync + 'static> InquireMultiSelect<T> {
     pub fn max_selections(mut self, max: usize) -> Self {
         self.max_selections = Some(max);
         self
+    }
+
+    /// Show the multi-selection prompt and return the chosen options.
+    ///
+    /// Standalone counterpart to [`InputCollector::collect`] for wizard /
+    /// REPL flows that drive standout themselves. Returns
+    /// [`InputError::PromptCancelled`] on Esc / Ctrl+C, and
+    /// [`InputError::NoInput`] if the option list is empty.
+    pub fn prompt(&self) -> Result<Vec<T>, InputError> {
+        self.collect(crate::collector::empty_matches())?
+            .ok_or(InputError::NoInput)
     }
 }
 
@@ -439,6 +482,17 @@ impl InquirePassword {
         self.confirmation = Some(message.into());
         self
     }
+
+    /// Show the password prompt and return the entered value.
+    ///
+    /// Standalone counterpart to [`InputCollector::collect`] for wizard /
+    /// REPL flows that drive standout themselves. Returns
+    /// [`InputError::PromptCancelled`] on Esc / Ctrl+C, and
+    /// [`InputError::NoInput`] if the user submits empty input.
+    pub fn prompt(&self) -> Result<String, InputError> {
+        self.collect(crate::collector::empty_matches())?
+            .ok_or(InputError::NoInput)
+    }
 }
 
 impl InputCollector<String> for InquirePassword {
@@ -531,6 +585,17 @@ impl InquireEditor {
     pub fn render_config(mut self, config: RenderConfig<'static>) -> Self {
         self.render_config = Some(config);
         self
+    }
+
+    /// Show the editor prompt (press 'e' to open) and return the saved text.
+    ///
+    /// Standalone counterpart to [`InputCollector::collect`] for wizard /
+    /// REPL flows that drive standout themselves. Returns
+    /// [`InputError::PromptCancelled`] on Esc / Ctrl+C, and
+    /// [`InputError::NoInput`] if the user submits empty content.
+    pub fn prompt(&self) -> Result<String, InputError> {
+        self.collect(crate::collector::empty_matches())?
+            .ok_or(InputError::NoInput)
     }
 }
 

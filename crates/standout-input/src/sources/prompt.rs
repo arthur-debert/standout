@@ -97,6 +97,23 @@ impl<T: TerminalIO> TextPromptSource<T> {
     }
 }
 
+impl<T: TerminalIO + 'static> TextPromptSource<T> {
+    /// Prompt the user for text and return the entered value.
+    ///
+    /// Standalone counterpart to [`InputCollector::collect`] for wizard /
+    /// REPL flows that drive standout themselves and have no `&ArgMatches`
+    /// to plumb through. Returns the entered text on success.
+    ///
+    /// Errors:
+    /// - [`InputError::PromptCancelled`] on EOF (Ctrl+D)
+    /// - [`InputError::NoInput`] if the user submits empty input
+    /// - [`InputError::PromptFailed`] on terminal I/O failure
+    pub fn prompt(&self) -> Result<String, InputError> {
+        self.collect(crate::collector::empty_matches())?
+            .ok_or(InputError::NoInput)
+    }
+}
+
 impl<T: TerminalIO + 'static> InputCollector<String> for TextPromptSource<T> {
     fn name(&self) -> &'static str {
         "prompt"
@@ -198,6 +215,23 @@ impl<T: TerminalIO> ConfirmPromptSource<T> {
     pub fn default(mut self, default: bool) -> Self {
         self.default = Some(default);
         self
+    }
+}
+
+impl<T: TerminalIO + 'static> ConfirmPromptSource<T> {
+    /// Prompt the user for a yes/no answer and return the resolved boolean.
+    ///
+    /// Standalone counterpart to [`InputCollector::collect`] for wizard /
+    /// REPL flows that drive standout themselves and have no `&ArgMatches`
+    /// to plumb through.
+    ///
+    /// Errors:
+    /// - [`InputError::PromptCancelled`] on EOF (Ctrl+D)
+    /// - [`InputError::NoInput`] if the prompt source declines (e.g. no TTY)
+    /// - [`InputError::PromptFailed`] on terminal I/O failure
+    pub fn prompt(&self) -> Result<bool, InputError> {
+        self.collect(crate::collector::empty_matches())?
+            .ok_or(InputError::NoInput)
     }
 }
 
