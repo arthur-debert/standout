@@ -62,7 +62,7 @@ parsed CLI args → PRE-DISPATCH → handler → POST-DISPATCH → render → PO
 2. Calls `chain.resolve_with_source(matches)`.
 3. Stashes the result in an [`Inputs`](https://docs.rs/standout-input/latest/standout_input/struct.Inputs.html) bag on `ctx.extensions` under `name`.
 
-If resolution returns an error, dispatch stops and the framework reports `Hook error: input \`body\`: <message>`. The handler does not run.
+If resolution returns an error, dispatch stops and the framework reports `` Hook error: input `body`: <error message> ``. The handler does not run.
 
 ---
 
