@@ -102,7 +102,9 @@ impl<T: TerminalIO + 'static> TextPromptSource<T> {
     ///
     /// Standalone counterpart to [`InputCollector::collect`] for wizard /
     /// REPL flows that drive standout themselves and have no `&ArgMatches`
-    /// to plumb through. Returns the entered text on success.
+    /// to plumb through. Returns the entered text on success. Routes
+    /// through any installed
+    /// [`PromptResponder`](crate::PromptResponder).
     ///
     /// Errors:
     /// - [`InputError::PromptCancelled`] on EOF (Ctrl+D)
@@ -110,6 +112,11 @@ impl<T: TerminalIO + 'static> TextPromptSource<T> {
     ///   submits empty input
     /// - [`InputError::PromptFailed`] on terminal I/O failure
     pub fn prompt(&self) -> Result<String, InputError> {
+        if let Some(value) =
+            crate::responder::intercept_text(crate::PromptKind::Text, &self.prompt)?
+        {
+            return Ok(value);
+        }
         let matches = crate::collector::empty_matches();
         if !self.is_available(matches) {
             return Err(InputError::NoInput);
@@ -227,7 +234,8 @@ impl<T: TerminalIO + 'static> ConfirmPromptSource<T> {
     ///
     /// Standalone counterpart to [`InputCollector::collect`] for wizard /
     /// REPL flows that drive standout themselves and have no `&ArgMatches`
-    /// to plumb through.
+    /// to plumb through. Routes through any installed
+    /// [`PromptResponder`](crate::PromptResponder).
     ///
     /// Errors:
     /// - [`InputError::PromptCancelled`] on EOF (Ctrl+D)
@@ -237,6 +245,11 @@ impl<T: TerminalIO + 'static> ConfirmPromptSource<T> {
     ///   that isn't a y/yes/n/no variant
     /// - [`InputError::PromptFailed`] on terminal I/O failure
     pub fn prompt(&self) -> Result<bool, InputError> {
+        if let Some(value) =
+            crate::responder::intercept_bool(crate::PromptKind::Confirm, &self.prompt)?
+        {
+            return Ok(value);
+        }
         let matches = crate::collector::empty_matches();
         if !self.is_available(matches) {
             return Err(InputError::NoInput);
@@ -613,5 +626,47 @@ mod tests {
                 .default(true);
         let value = source.prompt().unwrap();
         assert!(value);
+    }
+
+    // === .prompt() via PromptResponder ===
+
+    use crate::{
+        reset_default_prompt_responder, set_default_prompt_responder, PromptResponse,
+        ScriptedResponder,
+    };
+    use serial_test::serial;
+    use std::sync::Arc;
+
+    struct ResponderGuard;
+    impl ResponderGuard {
+        fn install(responder: ScriptedResponder) -> Self {
+            set_default_prompt_responder(Arc::new(responder));
+            Self
+        }
+    }
+    impl Drop for ResponderGuard {
+        fn drop(&mut self) {
+            reset_default_prompt_responder();
+        }
+    }
+
+    #[test]
+    #[serial(prompt_responder)]
+    fn text_prompt_routes_through_responder_even_without_tty() {
+        // The non-terminal MockTerminal would normally return NoInput from
+        // prompt(); the responder gate runs *first*, so the responder wins.
+        let _g = ResponderGuard::install(ScriptedResponder::new([PromptResponse::text("Ada")]));
+        let source = TextPromptSource::with_terminal("Name: ", MockTerminal::non_terminal());
+        let value = source.prompt().unwrap();
+        assert_eq!(value, "Ada");
+    }
+
+    #[test]
+    #[serial(prompt_responder)]
+    fn confirm_prompt_routes_through_responder() {
+        let _g = ResponderGuard::install(ScriptedResponder::new([PromptResponse::Bool(false)]));
+        let source = ConfirmPromptSource::with_terminal("OK?", MockTerminal::non_terminal());
+        let value = source.prompt().unwrap();
+        assert!(!value);
     }
 }
