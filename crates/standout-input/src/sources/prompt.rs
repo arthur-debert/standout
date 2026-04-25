@@ -627,4 +627,46 @@ mod tests {
         let value = source.prompt().unwrap();
         assert!(value);
     }
+
+    // === .prompt() via PromptResponder ===
+
+    use crate::{
+        reset_default_prompt_responder, set_default_prompt_responder, PromptResponse,
+        ScriptedResponder,
+    };
+    use serial_test::serial;
+    use std::sync::Arc;
+
+    struct ResponderGuard;
+    impl ResponderGuard {
+        fn install(responder: ScriptedResponder) -> Self {
+            set_default_prompt_responder(Arc::new(responder));
+            Self
+        }
+    }
+    impl Drop for ResponderGuard {
+        fn drop(&mut self) {
+            reset_default_prompt_responder();
+        }
+    }
+
+    #[test]
+    #[serial(prompt_responder)]
+    fn text_prompt_routes_through_responder_even_without_tty() {
+        // The non-terminal MockTerminal would normally return NoInput from
+        // prompt(); the responder gate runs *first*, so the responder wins.
+        let _g = ResponderGuard::install(ScriptedResponder::new([PromptResponse::text("Ada")]));
+        let source = TextPromptSource::with_terminal("Name: ", MockTerminal::non_terminal());
+        let value = source.prompt().unwrap();
+        assert_eq!(value, "Ada");
+    }
+
+    #[test]
+    #[serial(prompt_responder)]
+    fn confirm_prompt_routes_through_responder() {
+        let _g = ResponderGuard::install(ScriptedResponder::new([PromptResponse::Bool(false)]));
+        let source = ConfirmPromptSource::with_terminal("OK?", MockTerminal::non_terminal());
+        let value = source.prompt().unwrap();
+        assert!(!value);
+    }
 }

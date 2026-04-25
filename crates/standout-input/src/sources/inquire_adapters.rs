@@ -800,4 +800,132 @@ mod tests {
         assert_eq!(source.name(), "editor");
         assert!(source.can_retry());
     }
+
+    // === .prompt() via PromptResponder ===
+    //
+    // Inquire sources can't be unit-tested with a real terminal in CI, but
+    // an installed PromptResponder short-circuits each .prompt() before any
+    // raw-mode work happens. These tests cover the prompt() shortcut
+    // end-to-end via the scripted responder. They share one #[serial] axis
+    // (`prompt_responder`) because the override is process-global.
+
+    use crate::{
+        reset_default_prompt_responder, set_default_prompt_responder, PromptResponse,
+        ScriptedResponder,
+    };
+    use serial_test::serial;
+    use std::sync::Arc;
+
+    /// RAII guard so a panicking test still resets the global responder.
+    struct ResponderGuard;
+    impl ResponderGuard {
+        fn install(responder: ScriptedResponder) -> Self {
+            set_default_prompt_responder(Arc::new(responder));
+            Self
+        }
+    }
+    impl Drop for ResponderGuard {
+        fn drop(&mut self) {
+            reset_default_prompt_responder();
+        }
+    }
+
+    #[test]
+    #[serial(prompt_responder)]
+    fn inquire_text_prompt_via_responder() {
+        let _g = ResponderGuard::install(ScriptedResponder::new([PromptResponse::text("Bob")]));
+        let value = InquireText::new("Name?").prompt().unwrap();
+        assert_eq!(value, "Bob");
+    }
+
+    #[test]
+    #[serial(prompt_responder)]
+    fn inquire_text_prompt_cancel_via_responder() {
+        let _g = ResponderGuard::install(ScriptedResponder::new([PromptResponse::Cancel]));
+        let err = InquireText::new("Name?").prompt().unwrap_err();
+        assert!(matches!(err, InputError::PromptCancelled));
+    }
+
+    #[test]
+    #[serial(prompt_responder)]
+    fn inquire_text_prompt_skip_via_responder() {
+        let _g = ResponderGuard::install(ScriptedResponder::new([PromptResponse::Skip]));
+        let err = InquireText::new("Name?").prompt().unwrap_err();
+        assert!(matches!(err, InputError::NoInput));
+    }
+
+    #[test]
+    #[serial(prompt_responder)]
+    fn inquire_confirm_prompt_via_responder() {
+        let _g = ResponderGuard::install(ScriptedResponder::new([
+            PromptResponse::Bool(true),
+            PromptResponse::Bool(false),
+        ]));
+        assert!(InquireConfirm::new("Yes?").prompt().unwrap());
+        assert!(!InquireConfirm::new("Yes?").prompt().unwrap());
+    }
+
+    #[test]
+    #[serial(prompt_responder)]
+    fn inquire_select_prompt_via_responder_returns_typed_value() {
+        let _g = ResponderGuard::install(ScriptedResponder::new([PromptResponse::Choice(2)]));
+        let env: &'static str = InquireSelect::new("Env:", vec!["dev", "staging", "prod"])
+            .prompt()
+            .unwrap();
+        assert_eq!(env, "prod");
+    }
+
+    #[test]
+    #[serial(prompt_responder)]
+    fn inquire_select_prompt_cancel_via_responder() {
+        let _g = ResponderGuard::install(ScriptedResponder::new([PromptResponse::Cancel]));
+        let err = InquireSelect::new("Env:", vec!["dev", "prod"])
+            .prompt()
+            .unwrap_err();
+        assert!(matches!(err, InputError::PromptCancelled));
+    }
+
+    #[test]
+    #[serial(prompt_responder)]
+    fn inquire_multiselect_prompt_via_responder_returns_typed_values() {
+        let _g = ResponderGuard::install(ScriptedResponder::new([PromptResponse::choices([0, 2])]));
+        let picks: Vec<&'static str> = InquireMultiSelect::new("Pick:", vec!["a", "b", "c", "d"])
+            .prompt()
+            .unwrap();
+        assert_eq!(picks, vec!["a", "c"]);
+    }
+
+    #[test]
+    #[serial(prompt_responder)]
+    fn inquire_password_prompt_via_responder() {
+        let _g = ResponderGuard::install(ScriptedResponder::new([PromptResponse::text("hunter2")]));
+        let value = InquirePassword::new("Pwd:").prompt().unwrap();
+        assert_eq!(value, "hunter2");
+    }
+
+    #[test]
+    #[serial(prompt_responder)]
+    fn inquire_editor_prompt_via_responder() {
+        let _g = ResponderGuard::install(ScriptedResponder::new([PromptResponse::text(
+            "edited content",
+        )]));
+        let value = InquireEditor::new("Notes:").prompt().unwrap();
+        assert_eq!(value, "edited content");
+    }
+
+    #[test]
+    #[serial(prompt_responder)]
+    fn responder_advances_through_multi_step_wizard() {
+        let _g = ResponderGuard::install(ScriptedResponder::new([
+            PromptResponse::text("foo"),
+            PromptResponse::Bool(true),
+            PromptResponse::Choice(1),
+        ]));
+        assert_eq!(InquireText::new("Name:").prompt().unwrap(), "foo");
+        assert!(InquireConfirm::new("OK?").prompt().unwrap());
+        let env: &'static str = InquireSelect::new("Env:", vec!["dev", "prod"])
+            .prompt()
+            .unwrap();
+        assert_eq!(env, "prod");
+    }
 }

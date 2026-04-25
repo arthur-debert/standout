@@ -503,4 +503,48 @@ mod tests {
         let err = source.prompt().unwrap_err();
         assert!(matches!(err, InputError::NoInput));
     }
+
+    // === .prompt() via PromptResponder ===
+
+    use crate::{
+        reset_default_prompt_responder, set_default_prompt_responder, PromptResponse,
+        ScriptedResponder,
+    };
+    use serial_test::serial;
+    use std::sync::Arc;
+
+    struct ResponderGuard;
+    impl ResponderGuard {
+        fn install(responder: ScriptedResponder) -> Self {
+            set_default_prompt_responder(Arc::new(responder));
+            Self
+        }
+    }
+    impl Drop for ResponderGuard {
+        fn drop(&mut self) {
+            reset_default_prompt_responder();
+        }
+    }
+
+    #[test]
+    #[serial(prompt_responder)]
+    fn editor_prompt_routes_through_responder_without_launching_editor() {
+        let _g = ResponderGuard::install(ScriptedResponder::new([PromptResponse::text(
+            "edited body",
+        )]));
+        // Even with a no-editor mock runner, the responder gate runs first
+        // and wins — the editor is never launched in tests.
+        let source = EditorSource::with_runner(MockEditorRunner::no_editor());
+        let value = source.prompt().unwrap();
+        assert_eq!(value, "edited body");
+    }
+
+    #[test]
+    #[serial(prompt_responder)]
+    fn editor_prompt_responder_cancel_propagates() {
+        let _g = ResponderGuard::install(ScriptedResponder::new([PromptResponse::Cancel]));
+        let source = EditorSource::with_runner(MockEditorRunner::no_editor());
+        let err = source.prompt().unwrap_err();
+        assert!(matches!(err, InputError::PromptCancelled));
+    }
 }
