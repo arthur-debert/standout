@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.5.1] - 2026-04-25
+
 ### Added
 
 - **`standout-input` is now wired into the `App` builder.** Commands can attach declarative input chains alongside templates, hooks, and piping with the new `CommandConfig::input(name, chain)` method. Chains run in pre-dispatch — before the handler — and the resolved values land in a name-keyed `Inputs` bag on `ctx.extensions`. Handlers retrieve them via the new `CommandContextInput` extension trait:
@@ -1283,7 +1285,8 @@ let output = render_with_output(template, &data, &theme, OutputMode::Term)?;
   - Command handler system with `dispatch_from` convenience method
   - Archive variant support in clap integration
 
-[Unreleased]: https://github.com/arthur-debert/standout/compare/standout-v7.5.0...HEAD
+[Unreleased]: https://github.com/arthur-debert/standout/compare/standout-v7.5.1...HEAD
+[7.5.1]: https://github.com/arthur-debert/standout/compare/standout-v7.5.0...standout-v7.5.1
 [7.5.0]: https://github.com/arthur-debert/standout/compare/standout-v7.4.0...standout-v7.5.0
 [7.4.0]: https://github.com/arthur-debert/standout/compare/standout-v7.3.0...standout-v7.4.0
 [7.3.0]: https://github.com/arthur-debert/standout/compare/standout-v7.2.0...standout-v7.3.0
