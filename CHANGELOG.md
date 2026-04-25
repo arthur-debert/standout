@@ -56,6 +56,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **New "Interactive Flows" topic** (`docs/crates/input/topics/interactive-flows.md`) walks through composing the new `.prompt()` API with a user-owned step graph and standout's `Renderer` / `Theme` to build wizards. The introduction guide gains a "Standalone Prompts" section that links into the new topic.
 
+- **Wizard handlers are testable in process via `PromptResponder`.** Every interactive source's `.prompt()` shortcut now consults a process-global responder before doing any TTY work. Tests install a `ScriptedResponder` with a typed queue of answers; production wizard code is unchanged:
+
+  ```rust
+  use standout_input::{PromptResponse, ScriptedResponder};
+  use std::sync::Arc;
+
+  let result = TestHarness::new()
+      .prompts(Arc::new(ScriptedResponder::new([
+          PromptResponse::text("buy milk"),  // first text prompt
+          PromptResponse::Bool(true),        // first confirm
+          PromptResponse::Choice(2),         // first select -> options[2]
+      ])))
+      .run(&app, cmd, ["mycli", "setup"]);
+  ```
+
+  Open prompts (`Text`/`Password`/`Editor`) take a `Text(String)`; finite-choice prompts (`Confirm`/`Select`/`MultiSelect`) take a `Bool` / `Choice(usize)` / `Choices(Vec<usize>)`. Position-based responses are deliberate: a `Choice(2)` test keeps working when "Production" gets renamed to "Live". `ScriptedResponder` panics on kind mismatch so a wizard-step reorder fails loudly. `Cancel` and `Skip` cover the abort and re-ask paths.
+
+  New public API: `PromptResponder` trait, `ScriptedResponder`, `PromptKind`, `PromptContext`, `PromptResponse` (in `standout_input`); `set_default_prompt_responder` / `reset_default_prompt_responder`; `TestHarness::prompts(...)` (in `standout-test`). The "Testing Wizards" section in the Interactive Flows topic documents the pattern; the Testing guide and topic cross-link it.
+
+  This closes the testability gap that the `.prompt()` shortcut alone left open — the inquire adapters were previously untestable in CI without a real PTY.
+
 ## [7.5.0] - 2026-04-17
 
 ### Added
