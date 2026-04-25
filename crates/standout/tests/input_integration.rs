@@ -19,6 +19,29 @@ fn body_command() -> Command {
         .subcommand(Command::new("create").arg(Arg::new("body").long("body").short('b')))
 }
 
+/// RAII guard that installs a stdin reader on construction and resets it
+/// on drop — including on panic, so a failing assertion or panic inside
+/// the dispatcher cannot leak the override into the next test.
+struct StdinGuard;
+
+impl StdinGuard {
+    fn piped(content: &str) -> Self {
+        set_default_stdin_reader(Arc::new(MockStdin::piped(content)));
+        Self
+    }
+
+    fn terminal() -> Self {
+        set_default_stdin_reader(Arc::new(MockStdin::terminal()));
+        Self
+    }
+}
+
+impl Drop for StdinGuard {
+    fn drop(&mut self) {
+        reset_default_stdin_reader();
+    }
+}
+
 #[test]
 fn arg_value_reaches_handler_via_ctx_input() {
     let app = App::builder()
@@ -140,7 +163,7 @@ fn input_source_reports_default_kind_when_falling_back() {
 #[test]
 #[serial(stdin)]
 fn stdin_fallback_when_arg_absent() {
-    set_default_stdin_reader(Arc::new(MockStdin::piped("from stdin\n")));
+    let _stdin = StdinGuard::piped("from stdin\n");
 
     let app = App::builder()
         .command_with(
@@ -168,7 +191,6 @@ fn stdin_fallback_when_arg_absent() {
         .unwrap();
 
     let result = app.run_to_string(body_command(), vec!["test", "create"]);
-    reset_default_stdin_reader();
 
     if let RunResult::Handled(out) = result {
         // StdinSource trims trailing newlines.
@@ -181,10 +203,10 @@ fn stdin_fallback_when_arg_absent() {
 #[test]
 #[serial(stdin)]
 fn arg_wins_over_stdin_when_both_available() {
-    // No stdin reader override is needed; with arg present, stdin source must
-    // not be reached. The MockStdin terminal mode avoids accidentally reading
-    // real stdin if precedence is wrong.
-    set_default_stdin_reader(Arc::new(MockStdin::terminal()));
+    // With arg present, stdin source must not be reached. The MockStdin
+    // terminal mode avoids accidentally reading real stdin if precedence is
+    // wrong.
+    let _stdin = StdinGuard::terminal();
 
     let app = App::builder()
         .command_with(
@@ -212,7 +234,6 @@ fn arg_wins_over_stdin_when_both_available() {
         .unwrap();
 
     let result = app.run_to_string(body_command(), vec!["test", "create", "--body", "from arg"]);
-    reset_default_stdin_reader();
 
     if let RunResult::Handled(out) = result {
         assert_eq!(out, "argument: from arg");
