@@ -43,6 +43,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Heavier input backends are opt-in via standout features.** `standout` depends on `standout-input` with `default-features = false` and only enables `simple-prompts` (free, no extra deps) by default. Users who want the editor backend or inquire's TUI prompts add `features = ["input-editor"]` or `features = ["input-inquire"]` to their `standout` dependency. This preserves the "minimal by default" promise of `standout-input` — a default `standout` install no longer pulls `tempfile`, `which`, or `shell-words` transitively.
 
+- **`.prompt()` shortcut on every interactive input source.** `InquireText`, `InquireConfirm`, `InquireSelect<T>`, `InquireMultiSelect<T>`, `InquirePassword`, `InquireEditor`, `TextPromptSource`, `ConfirmPromptSource`, and `EditorSource` now expose an inherent `prompt() -> Result<T, InputError>` method that bypasses the chain machinery and the `&clap::ArgMatches` parameter the `InputCollector` trait requires. Intended for wizard / setup helper / REPL flows that drive standout themselves and have no clap parser involved:
+
+  ```rust
+  use standout::input::{InquireSelect, InquireText};
+
+  let pack = InquireText::new("Pack name:").help("a-z0-9-").prompt()?;
+  let env  = InquireSelect::new("Environment:", vec!["dev", "staging", "prod"]).prompt()?;
+  ```
+
+  `Ok(None)` from the underlying `collect` (typically empty submission) maps to `InputError::NoInput`; cancellation maps to `InputError::PromptCancelled`. The `InputCollector` impls and chain behavior are unchanged.
+
+- **New "Interactive Flows" topic** (`docs/crates/input/topics/interactive-flows.md`) walks through composing the new `.prompt()` API with a user-owned step graph and standout's `Renderer` / `Theme` to build wizards. The introduction guide gains a "Standalone Prompts" section that links into the new topic.
+
 ## [7.5.0] - 2026-04-17
 
 ### Added
