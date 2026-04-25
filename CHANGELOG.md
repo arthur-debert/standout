@@ -41,6 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Book navigation now lists the input crate.** `docs/SUMMARY.md` gains an "Input (standout-input)" section linking to the introduction, sources, backends, and a new framework-integration topic. The pages were already present on disk but were not reachable from the rendered mdBook.
 
+- **Heavier input backends are opt-in via standout features.** `standout` depends on `standout-input` with `default-features = false` and only enables `simple-prompts` (free, no extra deps) by default. Users who want the editor backend or inquire's TUI prompts add `features = ["input-editor"]` or `features = ["input-inquire"]` to their `standout` dependency. This preserves the "minimal by default" promise of `standout-input` — a default `standout` install no longer pulls `tempfile`, `which`, or `shell-words` transitively.
+
 ## [7.5.0] - 2026-04-17
 
 ### Added
