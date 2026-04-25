@@ -198,6 +198,41 @@ See [Backends](../topics/backends.md) for full documentation on each source.
 
 ---
 
+## Standalone Prompts (No Chain)
+
+Chains shine for CLI commands that need fallback between sources. For interactive flows that drive standout themselves — wizards, REPLs, setup helpers — every interactive source has a `.prompt()` shortcut that skips the chain machinery and the `&ArgMatches` plumbing entirely:
+
+```rust
+use standout_input::{InquireConfirm, InquireSelect, InquireText};
+
+let pack: String = InquireText::new("Pack name:")
+    .help("a-z0-9-")
+    .prompt()?;
+
+let env: String = InquireSelect::new("Environment:", vec!["dev", "staging", "prod"])
+    .prompt()?
+    .to_string();
+
+let proceed: bool = InquireConfirm::new("Continue?")
+    .default(true)
+    .prompt()?;
+```
+
+`prompt()` returns `Result<T, InputError>` directly — no `Option` to unwrap. Empty submissions map to [`InputError::NoInput`], cancellation (Esc / Ctrl+C / Ctrl+D) maps to `InputError::PromptCancelled`, so a re-ask loop is just `match` on the error.
+
+Available on every interactive source:
+
+| Source | Returns |
+|--------|---------|
+| `TextPromptSource`, `ConfirmPromptSource` | `Result<String, _>`, `Result<bool, _>` |
+| `EditorSource` | `Result<String, _>` |
+| `InquireText`, `InquireConfirm`, `InquirePassword`, `InquireEditor` | as above |
+| `InquireSelect<T>`, `InquireMultiSelect<T>` | `Result<T, _>`, `Result<Vec<T>, _>` |
+
+The `InputCollector` impls are unchanged — these sources still work in chains exactly as before. See [Interactive Flows](../topics/interactive-flows.md) for a full wizard walkthrough that pairs `.prompt()` with standout's renderer.
+
+---
+
 ## Common Patterns
 
 ### The `gh pr create` Pattern
