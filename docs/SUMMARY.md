@@ -38,6 +38,7 @@
 - [Input Sources](./crates/input/topics/input-sources.md)
 - [Backends](./crates/input/topics/backends.md)
 - [Framework Integration](./crates/input/topics/framework-integration.md)
+- [Interactive Flows](./crates/input/topics/interactive-flows.md)
 
 ---
 
