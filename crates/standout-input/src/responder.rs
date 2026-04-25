@@ -25,8 +25,9 @@
 //! [`Editor`](PromptKind::Editor)) take a `String`, since the value *is* the
 //! free-form answer.
 //!
-//! See the [Testing Wizards](https://docs.rs/standout-input/latest/) section
-//! of the Interactive Flows topic for a full example.
+//! See the "Testing Wizards" section in the
+//! [Interactive Flows topic](../../docs/topics/interactive-flows.md) for a
+//! full example.
 
 use std::sync::Arc;
 
@@ -211,16 +212,18 @@ impl PromptResponder for ScriptedResponder {
             }
         }
 
-        if let PromptResponse::Choice(i) = response {
+        // Range-check by reference so we don't move the response we're
+        // about to return.
+        if let PromptResponse::Choice(i) = &response {
             let n = ctx.options.unwrap_or(0);
             assert!(
-                i < n,
+                *i < n,
                 "ScriptedResponder: Choice({i}) is out of range for select prompt \
                  with {n} option(s) ({:?})",
                 ctx.message
             );
         }
-        if let PromptResponse::Choices(ref indices) = response {
+        if let PromptResponse::Choices(indices) = &response {
             let n = ctx.options.unwrap_or(0);
             for &i in indices {
                 assert!(
@@ -507,6 +510,12 @@ mod tests {
         let _ = r.respond(ctx(PromptKind::Text, None));
     }
 
+    // current_prompt_responder() is only compiled when at least one
+    // prompt-producing feature is enabled, so the test that exercises it
+    // shares the same cfg gate. Under --no-default-features the install /
+    // reset path is unobservable from the public API, so there's no test
+    // to write.
+    #[cfg(any(feature = "editor", feature = "simple-prompts", feature = "inquire"))]
     #[test]
     #[serial(prompt_responder)]
     fn install_and_reset_default_responder() {
