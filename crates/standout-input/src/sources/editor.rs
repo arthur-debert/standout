@@ -488,8 +488,22 @@ mod tests {
     // The happy path with the mock runner is covered by the existing
     // editor_collects_content / editor_failure / editor_no_editor_error tests
     // on collect(), which prompt() delegates to once the TTY gate passes.
+    //
+    // Every test that calls .prompt() shares one #[serial] axis
+    // (`prompt_responder`) because the global responder override is
+    // process-wide; without serialization a responder installed by a
+    // parallel responder-using test would leak into these vanilla
+    // shortcut tests.
+
+    use crate::{
+        reset_default_prompt_responder, set_default_prompt_responder, PromptResponse,
+        ScriptedResponder,
+    };
+    use serial_test::serial;
+    use std::sync::Arc;
 
     #[test]
+    #[serial(prompt_responder)]
     fn editor_prompt_shortcut_returns_no_input_in_non_tty() {
         let source = EditorSource::with_runner(MockEditorRunner::with_result("hello"));
         let err = source.prompt().unwrap_err();
@@ -497,6 +511,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(prompt_responder)]
     fn editor_prompt_shortcut_no_input_when_no_editor_detected() {
         // No TTY *and* no editor — both fail is_available, so NoInput either way.
         let source = EditorSource::with_runner(MockEditorRunner::no_editor());
@@ -505,13 +520,6 @@ mod tests {
     }
 
     // === .prompt() via PromptResponder ===
-
-    use crate::{
-        reset_default_prompt_responder, set_default_prompt_responder, PromptResponse,
-        ScriptedResponder,
-    };
-    use serial_test::serial;
-    use std::sync::Arc;
 
     struct ResponderGuard;
     impl ResponderGuard {

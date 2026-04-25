@@ -572,8 +572,22 @@ mod tests {
     }
 
     // === .prompt() shortcut ===
+    //
+    // Every test that calls .prompt() shares one #[serial] axis
+    // (`prompt_responder`) because the global responder override is
+    // process-wide; without serialization a responder installed by a
+    // parallel responder-using test would leak into these vanilla
+    // shortcut tests.
+
+    use crate::{
+        reset_default_prompt_responder, set_default_prompt_responder, PromptResponse,
+        ScriptedResponder,
+    };
+    use serial_test::serial;
+    use std::sync::Arc;
 
     #[test]
+    #[serial(prompt_responder)]
     fn text_prompt_shortcut_returns_value() {
         let source =
             TextPromptSource::with_terminal("Name: ", MockTerminal::with_response("Carol"));
@@ -582,6 +596,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(prompt_responder)]
     fn text_prompt_shortcut_maps_empty_to_no_input() {
         let source = TextPromptSource::with_terminal("Name: ", MockTerminal::with_response("   "));
         let err = source.prompt().unwrap_err();
@@ -589,6 +604,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(prompt_responder)]
     fn text_prompt_shortcut_propagates_cancel() {
         let source = TextPromptSource::with_terminal("Name: ", MockTerminal::eof());
         let err = source.prompt().unwrap_err();
@@ -596,6 +612,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(prompt_responder)]
     fn text_prompt_shortcut_skips_when_not_terminal() {
         // .prompt() should still surface NoInput when the underlying source
         // declines (e.g. no TTY) — the wizard caller can decide what to do.
@@ -605,6 +622,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(prompt_responder)]
     fn confirm_prompt_shortcut_returns_value() {
         let source =
             ConfirmPromptSource::with_terminal("Proceed?", MockTerminal::with_response("y"));
@@ -613,6 +631,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(prompt_responder)]
     fn confirm_prompt_shortcut_propagates_cancel() {
         let source = ConfirmPromptSource::with_terminal("Proceed?", MockTerminal::eof());
         let err = source.prompt().unwrap_err();
@@ -620,6 +639,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(prompt_responder)]
     fn confirm_prompt_shortcut_uses_default_on_empty() {
         let source =
             ConfirmPromptSource::with_terminal("Proceed?", MockTerminal::with_response(""))
@@ -629,13 +649,6 @@ mod tests {
     }
 
     // === .prompt() via PromptResponder ===
-
-    use crate::{
-        reset_default_prompt_responder, set_default_prompt_responder, PromptResponse,
-        ScriptedResponder,
-    };
-    use serial_test::serial;
-    use std::sync::Arc;
 
     struct ResponderGuard;
     impl ResponderGuard {
