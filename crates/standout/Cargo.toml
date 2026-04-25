@@ -16,6 +16,7 @@ standout-pipe = { path = "../standout-pipe", version = "7.5.0" }
 standout-bbparser = { version = "7.5.0", path = "../standout-bbparser" }
 standout-macros = { version = "7.5.0", path = "../standout-macros" }
 standout-dispatch = { version = "7.5.0", path = "../standout-dispatch" }
+standout-input = { version = "7.5.0", path = "../standout-input" }
 standout-seeker = { version = "7.5.0", path = "../standout-seeker" }
 
 # Direct dependencies (also used by standout-render, but needed here for cli module)

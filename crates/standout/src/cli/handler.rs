@@ -58,4 +58,59 @@ pub use standout_dispatch::{
     CommandContext, Extensions, FnHandler, Handler, HandlerResult, Output, RunResult,
 };
 
+use standout_input::{InputSourceKind, Inputs, MissingInput};
+
+/// Extension trait for [`CommandContext`] that exposes inputs registered with
+/// [`CommandConfig::input`](crate::cli::CommandConfig::input).
+///
+/// Handlers retrieve named, typed inputs that were resolved by the framework
+/// before the handler ran. This is the read side of the declarative input
+/// API; see [`CommandConfig::input`](crate::cli::CommandConfig::input) for the
+/// registration side.
+///
+/// ```rust,ignore
+/// use standout::cli::{CommandContextInput, Output};
+///
+/// fn handler(_m: &clap::ArgMatches, ctx: &standout::cli::CommandContext) -> standout::cli::HandlerResult<serde_json::Value> {
+///     let body: &String = ctx.input("body")?;
+///     Ok(Output::Render(serde_json::json!({ "body": body })))
+/// }
+/// ```
+pub trait CommandContextInput {
+    /// Returns the resolved value for `name`, or an error if no input with
+    /// that name and type was registered.
+    fn input<T: 'static>(&self, name: &str) -> Result<&T, MissingInput>;
+
+    /// Returns the source that provided `name`, if it was resolved.
+    ///
+    /// Useful for diagnostic output ("body came from stdin") or for branching
+    /// behavior on the source kind.
+    fn input_source(&self, name: &str) -> Option<InputSourceKind>;
+
+    /// Returns the [`Inputs`] bag for this command, if any input chain ran.
+    ///
+    /// Most handlers should prefer [`input`](Self::input); this is for cases
+    /// where the handler needs to iterate over all resolved inputs.
+    fn inputs(&self) -> Option<&Inputs>;
+}
+
+impl CommandContextInput for CommandContext {
+    fn input<T: 'static>(&self, name: &str) -> Result<&T, MissingInput> {
+        match self.extensions.get::<Inputs>() {
+            Some(bag) => bag.get_required::<T>(name),
+            None => Err(MissingInput::NotRegistered {
+                name: name.to_string(),
+            }),
+        }
+    }
+
+    fn input_source(&self, name: &str) -> Option<InputSourceKind> {
+        self.extensions.get::<Inputs>()?.source_of(name)
+    }
+
+    fn inputs(&self) -> Option<&Inputs> {
+        self.extensions.get::<Inputs>()
+    }
+}
+
 // Tests for these types are in the standout-dispatch crate.
