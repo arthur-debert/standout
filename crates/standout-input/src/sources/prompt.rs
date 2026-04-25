@@ -102,7 +102,9 @@ impl<T: TerminalIO + 'static> TextPromptSource<T> {
     ///
     /// Standalone counterpart to [`InputCollector::collect`] for wizard /
     /// REPL flows that drive standout themselves and have no `&ArgMatches`
-    /// to plumb through. Returns the entered text on success.
+    /// to plumb through. Returns the entered text on success. Routes
+    /// through any installed
+    /// [`PromptResponder`](crate::PromptResponder).
     ///
     /// Errors:
     /// - [`InputError::PromptCancelled`] on EOF (Ctrl+D)
@@ -110,6 +112,11 @@ impl<T: TerminalIO + 'static> TextPromptSource<T> {
     ///   submits empty input
     /// - [`InputError::PromptFailed`] on terminal I/O failure
     pub fn prompt(&self) -> Result<String, InputError> {
+        if let Some(value) =
+            crate::responder::intercept_text(crate::PromptKind::Text, &self.prompt)?
+        {
+            return Ok(value);
+        }
         let matches = crate::collector::empty_matches();
         if !self.is_available(matches) {
             return Err(InputError::NoInput);
@@ -227,7 +234,8 @@ impl<T: TerminalIO + 'static> ConfirmPromptSource<T> {
     ///
     /// Standalone counterpart to [`InputCollector::collect`] for wizard /
     /// REPL flows that drive standout themselves and have no `&ArgMatches`
-    /// to plumb through.
+    /// to plumb through. Routes through any installed
+    /// [`PromptResponder`](crate::PromptResponder).
     ///
     /// Errors:
     /// - [`InputError::PromptCancelled`] on EOF (Ctrl+D)
@@ -237,6 +245,11 @@ impl<T: TerminalIO + 'static> ConfirmPromptSource<T> {
     ///   that isn't a y/yes/n/no variant
     /// - [`InputError::PromptFailed`] on terminal I/O failure
     pub fn prompt(&self) -> Result<bool, InputError> {
+        if let Some(value) =
+            crate::responder::intercept_bool(crate::PromptKind::Confirm, &self.prompt)?
+        {
+            return Ok(value);
+        }
         let matches = crate::collector::empty_matches();
         if !self.is_available(matches) {
             return Err(InputError::NoInput);

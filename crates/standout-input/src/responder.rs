@@ -272,9 +272,138 @@ pub fn reset_default_prompt_responder() {
 ///
 /// Used by source `.prompt()` implementations to decide whether to short-
 /// circuit through the responder or fall through to the real backend.
-#[allow(dead_code)] // Becomes used once .prompt() implementations are wired in (next commit).
+#[cfg(any(feature = "editor", feature = "simple-prompts", feature = "inquire"))]
 pub(crate) fn current_prompt_responder() -> Option<SharedResponder> {
     RESPONDER_OVERRIDE.lock().unwrap().clone()
+}
+
+/// Helper used by source `.prompt()` shortcuts that return a free-form
+/// `String` (text / password / editor prompts).
+///
+/// If a responder is installed, dispatches and maps `Text(s) -> Ok(s)`,
+/// `Cancel -> PromptCancelled`, `Skip -> NoInput`. Returns `Ok(None)` (i.e.
+/// "fall through to the real backend") when no responder is installed, so
+/// the caller can use the original `is_available` + `collect` path.
+///
+/// `Bool` / `Choice` / `Choices` responses against an open prompt panic
+/// via `ScriptedResponder`'s validation in production tests.
+#[cfg(any(feature = "editor", feature = "simple-prompts", feature = "inquire"))]
+pub(crate) fn intercept_text(
+    kind: PromptKind,
+    message: &str,
+) -> Result<Option<String>, crate::InputError> {
+    let Some(responder) = current_prompt_responder() else {
+        return Ok(None);
+    };
+    let response = responder.respond(PromptContext {
+        kind,
+        message,
+        options: None,
+    });
+    match response {
+        PromptResponse::Text(s) => Ok(Some(s)),
+        PromptResponse::Cancel => Err(crate::InputError::PromptCancelled),
+        PromptResponse::Skip => Err(crate::InputError::NoInput),
+        other => panic!(
+            "PromptResponder returned {other:?} for a `{kind}` prompt; \
+             expected Text / Cancel / Skip"
+        ),
+    }
+}
+
+/// Helper for `.prompt()` shortcuts that return a `bool`
+/// ([`InquireConfirm`](crate::InquireConfirm),
+/// [`ConfirmPromptSource`](crate::ConfirmPromptSource)).
+#[cfg(any(feature = "simple-prompts", feature = "inquire"))]
+pub(crate) fn intercept_bool(
+    kind: PromptKind,
+    message: &str,
+) -> Result<Option<bool>, crate::InputError> {
+    let Some(responder) = current_prompt_responder() else {
+        return Ok(None);
+    };
+    let response = responder.respond(PromptContext {
+        kind,
+        message,
+        options: None,
+    });
+    match response {
+        PromptResponse::Bool(b) => Ok(Some(b)),
+        PromptResponse::Cancel => Err(crate::InputError::PromptCancelled),
+        PromptResponse::Skip => Err(crate::InputError::NoInput),
+        other => panic!(
+            "PromptResponder returned {other:?} for a `{kind}` prompt; \
+             expected Bool / Cancel / Skip"
+        ),
+    }
+}
+
+/// Helper for [`InquireSelect`](crate::InquireSelect)::prompt(). Returns
+/// the selected *index* into the source's options vector; the caller
+/// performs the `options[i].clone()` so the typed `T` flows out.
+#[cfg(feature = "inquire")]
+pub(crate) fn intercept_choice(
+    message: &str,
+    n: usize,
+) -> Result<Option<usize>, crate::InputError> {
+    let Some(responder) = current_prompt_responder() else {
+        return Ok(None);
+    };
+    let response = responder.respond(PromptContext {
+        kind: PromptKind::Select,
+        message,
+        options: Some(n),
+    });
+    match response {
+        PromptResponse::Choice(i) => {
+            assert!(
+                i < n,
+                "PromptResponder returned Choice({i}) for select prompt with {n} option(s)"
+            );
+            Ok(Some(i))
+        }
+        PromptResponse::Cancel => Err(crate::InputError::PromptCancelled),
+        PromptResponse::Skip => Err(crate::InputError::NoInput),
+        other => panic!(
+            "PromptResponder returned {other:?} for a `select` prompt; \
+             expected Choice / Cancel / Skip"
+        ),
+    }
+}
+
+/// Helper for [`InquireMultiSelect`](crate::InquireMultiSelect)::prompt().
+/// Returns the selected indices.
+#[cfg(feature = "inquire")]
+pub(crate) fn intercept_choices(
+    message: &str,
+    n: usize,
+) -> Result<Option<Vec<usize>>, crate::InputError> {
+    let Some(responder) = current_prompt_responder() else {
+        return Ok(None);
+    };
+    let response = responder.respond(PromptContext {
+        kind: PromptKind::MultiSelect,
+        message,
+        options: Some(n),
+    });
+    match response {
+        PromptResponse::Choices(indices) => {
+            for &i in &indices {
+                assert!(
+                    i < n,
+                    "PromptResponder returned Choices containing {i} for multi-select \
+                     prompt with {n} option(s)"
+                );
+            }
+            Ok(Some(indices))
+        }
+        PromptResponse::Cancel => Err(crate::InputError::PromptCancelled),
+        PromptResponse::Skip => Err(crate::InputError::NoInput),
+        other => panic!(
+            "PromptResponder returned {other:?} for a `multi-select` prompt; \
+             expected Choices / Cancel / Skip"
+        ),
+    }
 }
 
 #[cfg(test)]

@@ -224,7 +224,21 @@ impl<R: EditorRunner + 'static> EditorSource<R> {
     /// this source). User cancellation is reported as
     /// [`InputError::EditorCancelled`] when `require_save` is set and the
     /// user exits without saving.
+    ///
+    /// Routes through any installed
+    /// [`PromptResponder`](crate::PromptResponder), so wizard tests can
+    /// supply the editor's "saved" content directly without launching
+    /// `$EDITOR`.
     pub fn prompt(&self) -> Result<String, InputError> {
+        if let Some(value) = crate::responder::intercept_text(
+            crate::PromptKind::Editor,
+            // EditorSource has no user-facing "message" — use the file
+            // extension as the diagnostic hint so panic messages still
+            // identify which editor source failed.
+            &self.extension,
+        )? {
+            return Ok(value);
+        }
         let matches = crate::collector::empty_matches();
         if !self.is_available(matches) {
             return Err(InputError::NoInput);

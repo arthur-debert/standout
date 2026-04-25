@@ -84,7 +84,17 @@ impl InquireText {
     /// to plumb through. Returns [`InputError::PromptCancelled`] on Esc /
     /// Ctrl+C, and [`InputError::NoInput`] if stdin is not a TTY or the
     /// user submits empty input.
+    ///
+    /// In tests, install a [`PromptResponder`](crate::PromptResponder) via
+    /// [`set_default_prompt_responder`](crate::set_default_prompt_responder)
+    /// (or the `TestHarness::prompts(...)` builder) to intercept this call
+    /// without touching the production wizard code.
     pub fn prompt(&self) -> Result<String, InputError> {
+        if let Some(value) =
+            crate::responder::intercept_text(crate::PromptKind::Text, &self.message)?
+        {
+            return Ok(value);
+        }
         let matches = crate::collector::empty_matches();
         if !self.is_available(matches) {
             return Err(InputError::NoInput);
@@ -175,8 +185,15 @@ impl InquireConfirm {
     /// Standalone counterpart to [`InputCollector::collect`] for wizard /
     /// REPL flows that drive standout themselves. Returns
     /// [`InputError::PromptCancelled`] on Esc / Ctrl+C, and
-    /// [`InputError::NoInput`] if stdin is not a TTY.
+    /// [`InputError::NoInput`] if stdin is not a TTY. Routes through any
+    /// installed [`PromptResponder`](crate::PromptResponder) so wizard
+    /// tests can script the answer.
     pub fn prompt(&self) -> Result<bool, InputError> {
+        if let Some(value) =
+            crate::responder::intercept_bool(crate::PromptKind::Confirm, &self.message)?
+        {
+            return Ok(value);
+        }
         let matches = crate::collector::empty_matches();
         if !self.is_available(matches) {
             return Err(InputError::NoInput);
@@ -266,7 +283,15 @@ impl<T: Display + Clone + Send + Sync + 'static> InquireSelect<T> {
     /// [`InputError::PromptCancelled`] on Esc / Ctrl+C, and
     /// [`InputError::NoInput`] if stdin is not a TTY or the option list
     /// is empty.
+    ///
+    /// Routes through any installed
+    /// [`PromptResponder`](crate::PromptResponder); a scripted test
+    /// returns a `PromptResponse::Choice(i)` and the source clones
+    /// `options[i]`.
     pub fn prompt(&self) -> Result<T, InputError> {
+        if let Some(i) = crate::responder::intercept_choice(&self.message, self.options.len())? {
+            return Ok(self.options[i].clone());
+        }
         let matches = crate::collector::empty_matches();
         if !self.is_available(matches) {
             return Err(InputError::NoInput);
@@ -374,7 +399,17 @@ impl<T: Display + Clone + Send + Sync + 'static> InquireMultiSelect<T> {
     /// [`InputError::PromptCancelled`] on Esc / Ctrl+C, and
     /// [`InputError::NoInput`] if stdin is not a TTY or the option list
     /// is empty.
+    ///
+    /// Routes through any installed
+    /// [`PromptResponder`](crate::PromptResponder); a scripted test
+    /// returns a `PromptResponse::Choices([..])` and the source clones
+    /// the corresponding entries from `options`.
     pub fn prompt(&self) -> Result<Vec<T>, InputError> {
+        if let Some(indices) =
+            crate::responder::intercept_choices(&self.message, self.options.len())?
+        {
+            return Ok(indices.iter().map(|&i| self.options[i].clone()).collect());
+        }
         let matches = crate::collector::empty_matches();
         if !self.is_available(matches) {
             return Err(InputError::NoInput);
@@ -505,8 +540,14 @@ impl InquirePassword {
     /// REPL flows that drive standout themselves. Returns
     /// [`InputError::PromptCancelled`] on Esc / Ctrl+C, and
     /// [`InputError::NoInput`] if stdin is not a TTY or the user submits
-    /// empty input.
+    /// empty input. Routes through any installed
+    /// [`PromptResponder`](crate::PromptResponder).
     pub fn prompt(&self) -> Result<String, InputError> {
+        if let Some(value) =
+            crate::responder::intercept_text(crate::PromptKind::Password, &self.message)?
+        {
+            return Ok(value);
+        }
         let matches = crate::collector::empty_matches();
         if !self.is_available(matches) {
             return Err(InputError::NoInput);
@@ -613,8 +654,14 @@ impl InquireEditor {
     /// REPL flows that drive standout themselves. Returns
     /// [`InputError::PromptCancelled`] on Esc / Ctrl+C, and
     /// [`InputError::NoInput`] if stdin is not a TTY or the user submits
-    /// empty content.
+    /// empty content. Routes through any installed
+    /// [`PromptResponder`](crate::PromptResponder).
     pub fn prompt(&self) -> Result<String, InputError> {
+        if let Some(value) =
+            crate::responder::intercept_text(crate::PromptKind::Editor, &self.message)?
+        {
+            return Ok(value);
+        }
         let matches = crate::collector::empty_matches();
         if !self.is_available(matches) {
             return Err(InputError::NoInput);
