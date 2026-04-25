@@ -106,9 +106,12 @@ let proceed = InquireConfirm::new("Continue?")
 ```
 
 Behavior:
-- Esc / Ctrl+C / Ctrl+D → `InputError::PromptCancelled`
-- Empty submission → `InputError::NoInput`
+- Stdin not a TTY *or* empty submission → `InputError::NoInput`
 - Otherwise → the typed value
+- User cancellation is **backend-specific**:
+  - `Inquire*` prompts: Esc / Ctrl+C → `InputError::PromptCancelled`
+  - `TextPromptSource` / `ConfirmPromptSource`: EOF (Ctrl+D) → `InputError::PromptCancelled`; Ctrl+C terminates the process the same way it does for any line-buffered read
+  - `EditorSource` (with `require_save`): closing the editor without saving → `InputError::EditorCancelled`
 
 A re-ask on bad input is a single `match`:
 

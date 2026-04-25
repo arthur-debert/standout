@@ -218,7 +218,7 @@ let proceed: bool = InquireConfirm::new("Continue?")
     .prompt()?;
 ```
 
-`prompt()` returns `Result<T, InputError>` directly — no `Option` to unwrap. Empty submissions map to [`InputError::NoInput`], cancellation (Esc / Ctrl+C / Ctrl+D) maps to `InputError::PromptCancelled`, so a re-ask loop is just `match` on the error.
+`prompt()` returns `Result<T, InputError>` directly — no `Option` to unwrap. Stdin not being a TTY *or* an empty submission both map to [`InputError::NoInput`], so a re-ask loop is just `match` on the error. User cancellation is reported as a backend-specific variant (`PromptCancelled` for prompts, `EditorCancelled` for editors); see the [Interactive Flows topic](../topics/interactive-flows.md) for the full table.
 
 Available on every interactive source:
 
