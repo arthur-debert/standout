@@ -219,13 +219,17 @@ impl<R: EditorRunner + 'static> EditorSource<R> {
     /// it skips the chain machinery (no `&ArgMatches` to plumb through) and
     /// is intended for wizard or REPL flows that drive standout themselves.
     ///
-    /// Returns the editor content on success, or an [`InputError`] if no
-    /// editor is available, the editor failed, or `require_save` is set and
-    /// the user closed without saving. If `require_save` is unset and the
-    /// editor exits with empty content, [`InputError::NoInput`] is returned.
+    /// Returns [`InputError::NoInput`] if stdin is not a TTY or no editor
+    /// can be detected (the same conditions under which a chain would skip
+    /// this source). User cancellation is reported as
+    /// [`InputError::EditorCancelled`] when `require_save` is set and the
+    /// user exits without saving.
     pub fn prompt(&self) -> Result<String, InputError> {
-        self.collect(crate::collector::empty_matches())?
-            .ok_or(InputError::NoInput)
+        let matches = crate::collector::empty_matches();
+        if !self.is_available(matches) {
+            return Err(InputError::NoInput);
+        }
+        self.collect(matches)?.ok_or(InputError::NoInput)
     }
 }
 
@@ -464,25 +468,25 @@ mod tests {
     }
 
     // === .prompt() shortcut ===
+    //
+    // EditorSource::is_available checks std::io::stdin().is_terminal() directly,
+    // so under `cargo test` (no TTY) prompt() always short-circuits to NoInput.
+    // The happy path with the mock runner is covered by the existing
+    // editor_collects_content / editor_failure / editor_no_editor_error tests
+    // on collect(), which prompt() delegates to once the TTY gate passes.
 
     #[test]
-    fn editor_prompt_shortcut_returns_content() {
+    fn editor_prompt_shortcut_returns_no_input_in_non_tty() {
         let source = EditorSource::with_runner(MockEditorRunner::with_result("hello"));
-        let value = source.prompt().unwrap();
-        assert_eq!(value, "hello");
+        let err = source.prompt().unwrap_err();
+        assert!(matches!(err, InputError::NoInput));
     }
 
     #[test]
-    fn editor_prompt_shortcut_propagates_no_editor() {
+    fn editor_prompt_shortcut_no_input_when_no_editor_detected() {
+        // No TTY *and* no editor — both fail is_available, so NoInput either way.
         let source = EditorSource::with_runner(MockEditorRunner::no_editor());
         let err = source.prompt().unwrap_err();
-        assert!(matches!(err, InputError::NoEditor));
-    }
-
-    #[test]
-    fn editor_prompt_shortcut_propagates_failure() {
-        let source = EditorSource::with_runner(MockEditorRunner::failure("editor crashed"));
-        let err = source.prompt().unwrap_err();
-        assert!(matches!(err, InputError::EditorFailed(_)));
+        assert!(matches!(err, InputError::NoInput));
     }
 }

@@ -82,10 +82,14 @@ impl InquireText {
     /// Standalone counterpart to [`InputCollector::collect`] for wizard /
     /// REPL flows that drive standout themselves and have no `&ArgMatches`
     /// to plumb through. Returns [`InputError::PromptCancelled`] on Esc /
-    /// Ctrl+C, and [`InputError::NoInput`] if the user submits empty input.
+    /// Ctrl+C, and [`InputError::NoInput`] if stdin is not a TTY or the
+    /// user submits empty input.
     pub fn prompt(&self) -> Result<String, InputError> {
-        self.collect(crate::collector::empty_matches())?
-            .ok_or(InputError::NoInput)
+        let matches = crate::collector::empty_matches();
+        if !self.is_available(matches) {
+            return Err(InputError::NoInput);
+        }
+        self.collect(matches)?.ok_or(InputError::NoInput)
     }
 }
 
@@ -170,10 +174,14 @@ impl InquireConfirm {
     ///
     /// Standalone counterpart to [`InputCollector::collect`] for wizard /
     /// REPL flows that drive standout themselves. Returns
-    /// [`InputError::PromptCancelled`] on Esc / Ctrl+C.
+    /// [`InputError::PromptCancelled`] on Esc / Ctrl+C, and
+    /// [`InputError::NoInput`] if stdin is not a TTY.
     pub fn prompt(&self) -> Result<bool, InputError> {
-        self.collect(crate::collector::empty_matches())?
-            .ok_or(InputError::NoInput)
+        let matches = crate::collector::empty_matches();
+        if !self.is_available(matches) {
+            return Err(InputError::NoInput);
+        }
+        self.collect(matches)?.ok_or(InputError::NoInput)
     }
 }
 
@@ -256,10 +264,14 @@ impl<T: Display + Clone + Send + Sync + 'static> InquireSelect<T> {
     /// Standalone counterpart to [`InputCollector::collect`] for wizard /
     /// REPL flows that drive standout themselves. Returns
     /// [`InputError::PromptCancelled`] on Esc / Ctrl+C, and
-    /// [`InputError::NoInput`] if the option list is empty.
+    /// [`InputError::NoInput`] if stdin is not a TTY or the option list
+    /// is empty.
     pub fn prompt(&self) -> Result<T, InputError> {
-        self.collect(crate::collector::empty_matches())?
-            .ok_or(InputError::NoInput)
+        let matches = crate::collector::empty_matches();
+        if !self.is_available(matches) {
+            return Err(InputError::NoInput);
+        }
+        self.collect(matches)?.ok_or(InputError::NoInput)
     }
 }
 
@@ -360,10 +372,14 @@ impl<T: Display + Clone + Send + Sync + 'static> InquireMultiSelect<T> {
     /// Standalone counterpart to [`InputCollector::collect`] for wizard /
     /// REPL flows that drive standout themselves. Returns
     /// [`InputError::PromptCancelled`] on Esc / Ctrl+C, and
-    /// [`InputError::NoInput`] if the option list is empty.
+    /// [`InputError::NoInput`] if stdin is not a TTY or the option list
+    /// is empty.
     pub fn prompt(&self) -> Result<Vec<T>, InputError> {
-        self.collect(crate::collector::empty_matches())?
-            .ok_or(InputError::NoInput)
+        let matches = crate::collector::empty_matches();
+        if !self.is_available(matches) {
+            return Err(InputError::NoInput);
+        }
+        self.collect(matches)?.ok_or(InputError::NoInput)
     }
 }
 
@@ -488,10 +504,14 @@ impl InquirePassword {
     /// Standalone counterpart to [`InputCollector::collect`] for wizard /
     /// REPL flows that drive standout themselves. Returns
     /// [`InputError::PromptCancelled`] on Esc / Ctrl+C, and
-    /// [`InputError::NoInput`] if the user submits empty input.
+    /// [`InputError::NoInput`] if stdin is not a TTY or the user submits
+    /// empty input.
     pub fn prompt(&self) -> Result<String, InputError> {
-        self.collect(crate::collector::empty_matches())?
-            .ok_or(InputError::NoInput)
+        let matches = crate::collector::empty_matches();
+        if !self.is_available(matches) {
+            return Err(InputError::NoInput);
+        }
+        self.collect(matches)?.ok_or(InputError::NoInput)
     }
 }
 
@@ -592,10 +612,14 @@ impl InquireEditor {
     /// Standalone counterpart to [`InputCollector::collect`] for wizard /
     /// REPL flows that drive standout themselves. Returns
     /// [`InputError::PromptCancelled`] on Esc / Ctrl+C, and
-    /// [`InputError::NoInput`] if the user submits empty content.
+    /// [`InputError::NoInput`] if stdin is not a TTY or the user submits
+    /// empty content.
     pub fn prompt(&self) -> Result<String, InputError> {
-        self.collect(crate::collector::empty_matches())?
-            .ok_or(InputError::NoInput)
+        let matches = crate::collector::empty_matches();
+        if !self.is_available(matches) {
+            return Err(InputError::NoInput);
+        }
+        self.collect(matches)?.ok_or(InputError::NoInput)
     }
 }
 

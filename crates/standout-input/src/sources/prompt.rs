@@ -106,11 +106,15 @@ impl<T: TerminalIO + 'static> TextPromptSource<T> {
     ///
     /// Errors:
     /// - [`InputError::PromptCancelled`] on EOF (Ctrl+D)
-    /// - [`InputError::NoInput`] if the user submits empty input
+    /// - [`InputError::NoInput`] if stdin is not a TTY *or* the user
+    ///   submits empty input
     /// - [`InputError::PromptFailed`] on terminal I/O failure
     pub fn prompt(&self) -> Result<String, InputError> {
-        self.collect(crate::collector::empty_matches())?
-            .ok_or(InputError::NoInput)
+        let matches = crate::collector::empty_matches();
+        if !self.is_available(matches) {
+            return Err(InputError::NoInput);
+        }
+        self.collect(matches)?.ok_or(InputError::NoInput)
     }
 }
 
@@ -227,11 +231,17 @@ impl<T: TerminalIO + 'static> ConfirmPromptSource<T> {
     ///
     /// Errors:
     /// - [`InputError::PromptCancelled`] on EOF (Ctrl+D)
-    /// - [`InputError::NoInput`] if the prompt source declines (e.g. no TTY)
+    /// - [`InputError::NoInput`] if stdin is not a TTY, *or* if the user
+    ///   submits an empty line and no [`default`](Self::default) was set
+    /// - [`InputError::ValidationFailed`] if the user enters something
+    ///   that isn't a y/yes/n/no variant
     /// - [`InputError::PromptFailed`] on terminal I/O failure
     pub fn prompt(&self) -> Result<bool, InputError> {
-        self.collect(crate::collector::empty_matches())?
-            .ok_or(InputError::NoInput)
+        let matches = crate::collector::empty_matches();
+        if !self.is_available(matches) {
+            return Err(InputError::NoInput);
+        }
+        self.collect(matches)?.ok_or(InputError::NoInput)
     }
 }
 
