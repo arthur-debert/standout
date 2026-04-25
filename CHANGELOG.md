@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`standout-input` is now wired into the `App` builder.** Commands can attach declarative input chains alongside templates, hooks, and piping with the new `CommandConfig::input(name, chain)` method. Chains run in pre-dispatch — before the handler — and the resolved values land in a name-keyed `Inputs` bag on `ctx.extensions`. Handlers retrieve them via the new `CommandContextInput` extension trait:
+
+  ```rust
+  use standout::cli::{App, CommandContextInput, Output};
+  use standout::input::{ArgSource, EditorSource, InputChain, StdinSource};
+
+  App::builder()
+      .command_with("create", create, |cfg| {
+          cfg.template("create.jinja")
+              .input("body", InputChain::<String>::new()
+                  .try_source(ArgSource::new("body"))
+                  .try_source(StdinSource::new())
+                  .try_source(EditorSource::new()))
+      })?
+      .build()?;
+
+  fn create(_m: &ArgMatches, ctx: &CommandContext) -> HandlerResult<Value> {
+      let body: &String = ctx.input("body")?;
+      /* ... */
+  }
+  ```
+
+  Multiple `.input(...)` calls accumulate; a command can declare any number of named inputs of any types (including multiple inputs of the same type, which the `TypeId`-keyed `ctx.extensions` cannot disambiguate on its own).
+
+  Standalone `chain.resolve(&matches)?` still works for cases where input shape depends on already-resolved values.
+
+- **New `Inputs` storage type in `standout-input`** (`standout::input::Inputs`) — a name-keyed, type-safe container for resolved inputs, plus the `MissingInput` error type for `(name, T)` lookup failures.
+
+- **`standout::input` re-export** of the `standout-input` crate, so users do not need a separate dependency to access `InputChain` and the source types.
+
+- **Book navigation now lists the input crate.** `docs/SUMMARY.md` gains an "Input (standout-input)" section linking to the introduction, sources, backends, and a new framework-integration topic. The pages were already present on disk but were not reachable from the rendered mdBook.
+
 ## [7.5.0] - 2026-04-17
 
 ### Added
