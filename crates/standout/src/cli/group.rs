@@ -507,10 +507,19 @@ impl<H> CommandConfig<H> {
     /// Multiple `.input(...)` calls on the same command accumulate; each
     /// registers a pre-dispatch hook that writes into the shared bag, so
     /// commands can declare several named inputs of any types.
-    pub fn input<T>(self, name: &'static str, chain: standout_input::InputChain<T>) -> Self
+    ///
+    /// `name` accepts anything convertible into `Cow<'static, str>` — string
+    /// literals, owned `String`s built at runtime (e.g. from config), and
+    /// explicit `Cow`s all work.
+    pub fn input<T>(
+        self,
+        name: impl Into<std::borrow::Cow<'static, str>>,
+        chain: standout_input::InputChain<T>,
+    ) -> Self
     where
         T: Clone + Send + Sync + 'static,
     {
+        let name = name.into();
         self.pre_dispatch(move |matches, ctx| {
             // Pre-dispatch hooks receive the top-level ArgMatches, but the
             // chain's sources reference args defined on the deepest subcommand
@@ -526,7 +535,7 @@ impl<H> CommandConfig<H> {
                 .extensions
                 .get_mut::<standout_input::Inputs>()
                 .expect("Inputs just inserted");
-            bag.insert(name, resolved);
+            bag.insert(name.clone(), resolved);
             Ok(())
         })
     }

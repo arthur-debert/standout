@@ -25,6 +25,7 @@
 //! ```
 
 use std::any::{Any, TypeId};
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt;
 
@@ -36,9 +37,13 @@ use crate::collector::{InputSourceKind, ResolvedInput};
 /// while its [`InputSourceKind`] metadata is tracked separately on the
 /// internal entry. Lookups are by `(name, T)` — wrong-type lookups return
 /// `None` rather than panicking.
+///
+/// Names are stored as `Cow<'static, str>` so both string literals and
+/// runtime-generated names (e.g. config-driven command setups) work without
+/// leaking memory.
 #[derive(Default)]
 pub struct Inputs {
-    entries: HashMap<&'static str, Entry>,
+    entries: HashMap<Cow<'static, str>, Entry>,
 }
 
 struct Entry {
@@ -58,17 +63,21 @@ impl Inputs {
 
     /// Insert a resolved input under `name`.
     ///
+    /// `name` accepts anything convertible into `Cow<'static, str>` —
+    /// string literals (`"body"`), owned `String`s, and explicit `Cow`s
+    /// all work.
+    ///
     /// Returns the previous entry's source kind if `name` was already present.
     pub fn insert<T>(
         &mut self,
-        name: &'static str,
+        name: impl Into<Cow<'static, str>>,
         resolved: ResolvedInput<T>,
     ) -> Option<InputSourceKind>
     where
         T: Send + Sync + 'static,
     {
         let prev = self.entries.insert(
-            name,
+            name.into(),
             Entry {
                 type_id: TypeId::of::<T>(),
                 type_name: std::any::type_name::<T>(),
@@ -137,10 +146,10 @@ impl Inputs {
     }
 
     /// Iterate over `(name, source)` pairs.
-    pub fn iter_sources(&self) -> impl Iterator<Item = (&'static str, InputSourceKind)> + '_ {
+    pub fn iter_sources(&self) -> impl Iterator<Item = (&str, InputSourceKind)> + '_ {
         self.entries
             .iter()
-            .map(|(name, entry)| (*name, entry.source))
+            .map(|(name, entry)| (name.as_ref(), entry.source))
     }
 }
 
@@ -149,7 +158,7 @@ impl fmt::Debug for Inputs {
         let mut s = f.debug_struct("Inputs");
         for (name, entry) in &self.entries {
             s.field(
-                name,
+                name.as_ref(),
                 &format_args!("{} from {}", entry.type_name, entry.source),
             );
         }
@@ -236,6 +245,17 @@ mod tests {
             }
             other => panic!("expected TypeMismatch, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn accepts_owned_string_name() {
+        let mut inputs = Inputs::new();
+        let runtime_name: String = format!("input_{}", 42);
+        inputs.insert(runtime_name.clone(), arg("x".to_string()));
+
+        // Look up using a borrowed &str slice of an unrelated owned string —
+        // proves storage by value, not by pointer identity.
+        assert_eq!(inputs.get::<String>(runtime_name.as_str()).unwrap(), "x");
     }
 
     #[test]
