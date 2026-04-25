@@ -106,21 +106,35 @@ Handlers that need per-instance control keep using `StdinSource::with_reader(Moc
 
 The `.prompt()` shortcut on every interactive source (`InquireText`, `InquireSelect`, `TextPromptSource`, `EditorSource`, …) consults a process-global [`PromptResponder`](https://docs.rs/standout-input/latest/standout_input/trait.PromptResponder.html) before opening any real prompt. Install one to make wizard handlers testable in-process:
 
+The override is process-global, so tests installing it directly must (a) carry a `#[serial(prompt_responder)]` attribute and (b) reset on every exit path including panics — either via an RAII guard or by preferring the harness, which handles both:
+
 ```rust
 use std::sync::Arc;
+use serial_test::serial;
 use standout_input::{
     set_default_prompt_responder, reset_default_prompt_responder,
     ScriptedResponder, PromptResponse,
 };
 
-set_default_prompt_responder(Arc::new(ScriptedResponder::new([
-    PromptResponse::text("buy milk"),
-    PromptResponse::Bool(true),
-    PromptResponse::Choice(2),       // -> options[2] for an InquireSelect
-])));
-// ... run test ...
-reset_default_prompt_responder();
+struct ResponderGuard;
+impl Drop for ResponderGuard {
+    fn drop(&mut self) { reset_default_prompt_responder(); }
+}
+
+#[test]
+#[serial(prompt_responder)]
+fn pack_name_re_asks_on_invalid() {
+    set_default_prompt_responder(Arc::new(ScriptedResponder::new([
+        PromptResponse::text("BadName!"),  // rejected by validator
+        PromptResponse::text("good-name"), // accepted on re-ask
+    ])));
+    let _guard = ResponderGuard; // resets even if assertions panic
+
+    // ... call the wizard step under test, assert, etc ...
+}
 ```
+
+Most tests should reach for `TestHarness::prompts(...)` instead — the harness's `RestoreState` runs `reset_default_prompt_responder()` on drop just like it does for stdin and clipboard, so the boilerplate disappears.
 
 Open prompts (`Text`/`Password`/`Editor`) take a `Text(String)`; finite-choice prompts (`Confirm`/`Select`/`MultiSelect`) take a `Bool` / `Choice(usize)` / `Choices(Vec<usize>)`. Position-based responses are deliberate: a test that picked `Choice(2)` keeps working when you rename `"Production"` to `"Live"`. `ScriptedResponder` panics on kind mismatch so a wizard reorder fails loudly. `PromptResponse::Cancel` and `PromptResponse::Skip` are kind-agnostic and let tests cover the abort and re-ask paths without real signal handling. See [Interactive Flows](../crates/input/topics/interactive-flows.md) for the wizard-shape walkthrough and `TestHarness::prompts(...)` for the harness-level wiring.
 
