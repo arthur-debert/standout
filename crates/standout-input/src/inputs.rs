@@ -32,8 +32,10 @@ use crate::collector::{InputSourceKind, ResolvedInput};
 
 /// Name-keyed storage for resolved inputs.
 ///
-/// Each entry is a `ResolvedInput<T>` boxed as `dyn Any`. Lookups are by
-/// `(name, T)` — wrong-type lookups return `None` rather than panicking.
+/// Each entry stores the resolved `T` value boxed as `dyn Any + Send + Sync`,
+/// while its [`InputSourceKind`] metadata is tracked separately on the
+/// internal entry. Lookups are by `(name, T)` — wrong-type lookups return
+/// `None` rather than panicking.
 #[derive(Default)]
 pub struct Inputs {
     entries: HashMap<&'static str, Entry>,
