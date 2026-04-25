@@ -547,4 +547,61 @@ mod tests {
             ConfirmPromptSource::with_terminal("Proceed?", MockTerminal::with_response("y"));
         assert!(source.can_retry());
     }
+
+    // === .prompt() shortcut ===
+
+    #[test]
+    fn text_prompt_shortcut_returns_value() {
+        let source =
+            TextPromptSource::with_terminal("Name: ", MockTerminal::with_response("Carol"));
+        let value = source.prompt().unwrap();
+        assert_eq!(value, "Carol");
+    }
+
+    #[test]
+    fn text_prompt_shortcut_maps_empty_to_no_input() {
+        let source = TextPromptSource::with_terminal("Name: ", MockTerminal::with_response("   "));
+        let err = source.prompt().unwrap_err();
+        assert!(matches!(err, InputError::NoInput));
+    }
+
+    #[test]
+    fn text_prompt_shortcut_propagates_cancel() {
+        let source = TextPromptSource::with_terminal("Name: ", MockTerminal::eof());
+        let err = source.prompt().unwrap_err();
+        assert!(matches!(err, InputError::PromptCancelled));
+    }
+
+    #[test]
+    fn text_prompt_shortcut_skips_when_not_terminal() {
+        // .prompt() should still surface NoInput when the underlying source
+        // declines (e.g. no TTY) — the wizard caller can decide what to do.
+        let source = TextPromptSource::with_terminal("Name: ", MockTerminal::non_terminal());
+        let err = source.prompt().unwrap_err();
+        assert!(matches!(err, InputError::NoInput));
+    }
+
+    #[test]
+    fn confirm_prompt_shortcut_returns_value() {
+        let source =
+            ConfirmPromptSource::with_terminal("Proceed?", MockTerminal::with_response("y"));
+        let value = source.prompt().unwrap();
+        assert!(value);
+    }
+
+    #[test]
+    fn confirm_prompt_shortcut_propagates_cancel() {
+        let source = ConfirmPromptSource::with_terminal("Proceed?", MockTerminal::eof());
+        let err = source.prompt().unwrap_err();
+        assert!(matches!(err, InputError::PromptCancelled));
+    }
+
+    #[test]
+    fn confirm_prompt_shortcut_uses_default_on_empty() {
+        let source =
+            ConfirmPromptSource::with_terminal("Proceed?", MockTerminal::with_response(""))
+                .default(true);
+        let value = source.prompt().unwrap();
+        assert!(value);
+    }
 }

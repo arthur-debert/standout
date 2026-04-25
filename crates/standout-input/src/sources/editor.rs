@@ -462,4 +462,27 @@ mod tests {
         let result = source.collect(&empty_matches());
         assert!(matches!(result, Err(InputError::NoEditor)));
     }
+
+    // === .prompt() shortcut ===
+
+    #[test]
+    fn editor_prompt_shortcut_returns_content() {
+        let source = EditorSource::with_runner(MockEditorRunner::with_result("hello"));
+        let value = source.prompt().unwrap();
+        assert_eq!(value, "hello");
+    }
+
+    #[test]
+    fn editor_prompt_shortcut_propagates_no_editor() {
+        let source = EditorSource::with_runner(MockEditorRunner::no_editor());
+        let err = source.prompt().unwrap_err();
+        assert!(matches!(err, InputError::NoEditor));
+    }
+
+    #[test]
+    fn editor_prompt_shortcut_propagates_failure() {
+        let source = EditorSource::with_runner(MockEditorRunner::failure("editor crashed"));
+        let err = source.prompt().unwrap_err();
+        assert!(matches!(err, InputError::EditorFailed(_)));
+    }
 }
