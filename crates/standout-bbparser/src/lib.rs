@@ -49,6 +49,20 @@
 //! - Case-sensitive (lowercase recommended)
 //!
 //! Pattern: `[a-z_][a-z0-9_-]*`
+//!
+//! # Escaping
+//!
+//! To emit a literal `[` or `]` without it being treated as a tag delimiter,
+//! prefix it with a backslash:
+//!
+//! - `\[` → `[`
+//! - `\]` → `]`
+//!
+//! A backslash that is not followed by `[` or `]` is left alone, so file
+//! paths, regex examples, and other content containing `\` pass through
+//! unchanged. To emit a literal `\[` in the output, write `\\[` (the first
+//! `\` is kept as-is because `\\` is not a recognized escape, then `\[` is
+//! consumed as an escape and emits `[`).
 
 use console::Style;
 use std::collections::HashMap;
@@ -334,7 +348,7 @@ impl BBParser {
         while i < tokens.len() {
             match &tokens[i] {
                 Token::Text { content, .. } => {
-                    events.push(ParseEvent::Literal(std::borrow::Cow::Borrowed(content)));
+                    events.push(ParseEvent::Literal(unescape(content)));
                 }
                 Token::OpenTag { name, start, end } => {
                     if valid_opens.contains(&i) {
@@ -619,6 +633,63 @@ enum Token<'a> {
     },
 }
 
+/// Finds the byte offset of the next `[` that is not preceded by a `\` escape.
+///
+/// Both `\[` and `\]` are treated as escape sequences and skipped. Other
+/// backslashes (e.g. `\n`, `\\`, trailing `\`) are not consumed and don't
+/// affect bracket detection.
+///
+/// Byte-level scanning is safe here: `\`, `[`, and `]` are ASCII and cannot
+/// appear as continuation bytes in a UTF-8 sequence.
+fn find_unescaped_bracket(s: &str) -> Option<usize> {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' && i + 1 < bytes.len() {
+            let next = bytes[i + 1];
+            if next == b'[' || next == b']' {
+                i += 2;
+                continue;
+            }
+        }
+        if bytes[i] == b'[' {
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Replaces `\[` with `[` and `\]` with `]` in a text segment. Other
+/// backslashes pass through unchanged. Returns `Cow::Borrowed` when no
+/// actual `\[` or `\]` escape sequence is present, so backslash-containing
+/// but escape-free inputs (Windows paths, `\d+` regex examples, etc.) stay
+/// allocation-free.
+fn unescape(s: &str) -> std::borrow::Cow<'_, str> {
+    let bytes = s.as_bytes();
+    let has_escape = bytes
+        .windows(2)
+        .any(|w| w[0] == b'\\' && (w[1] == b'[' || w[1] == b']'));
+    if !has_escape {
+        return std::borrow::Cow::Borrowed(s);
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            if let Some(&next) = chars.peek() {
+                if next == '[' || next == ']' {
+                    out.push(next);
+                    chars.next();
+                    continue;
+                }
+            }
+        }
+        out.push(c);
+    }
+    std::borrow::Cow::Owned(out)
+}
+
 /// Tokenizer for BBCode-style tags.
 struct Tokenizer<'a> {
     input: &'a str,
@@ -666,8 +737,9 @@ impl<'a> Iterator for Tokenizer<'a> {
         let remaining = &self.input[self.pos..];
         let start_pos = self.pos;
 
-        // Look for the next '['
-        if let Some(bracket_pos) = remaining.find('[') {
+        // Look for the next unescaped '['. `\[` and `\]` are skipped so they
+        // can be emitted as literal characters by the text path.
+        if let Some(bracket_pos) = find_unescaped_bracket(remaining) {
             if bracket_pos > 0 {
                 // There's text before the bracket
                 let text = &remaining[..bracket_pos];
@@ -1308,6 +1380,139 @@ mod tests {
                 parser.parse("[style-with-dash]text[/style-with-dash]"),
                 "text"
             );
+        }
+    }
+
+    // ==================== Escape Sequence Tests ====================
+
+    mod escapes {
+        use super::*;
+
+        #[test]
+        fn escaped_open_bracket_is_literal() {
+            let parser = BBParser::new(test_styles(), TagTransform::Remove);
+            assert_eq!(parser.parse("\\[bold\\]"), "[bold]");
+        }
+
+        #[test]
+        fn escaped_brackets_inside_known_tag() {
+            let parser = BBParser::new(test_styles(), TagTransform::Remove);
+            assert_eq!(
+                parser.parse("[bold]hello \\[world\\][/bold]"),
+                "hello [world]"
+            );
+        }
+
+        #[test]
+        fn escapes_keep_mode_emits_literal_brackets() {
+            let parser = BBParser::new(test_styles(), TagTransform::Keep);
+            assert_eq!(parser.parse("\\[bold\\]"), "[bold]");
+        }
+
+        #[test]
+        fn escapes_apply_mode_styles_around_literals() {
+            let mut styles = HashMap::new();
+            styles.insert("bold".to_string(), Style::new().bold().force_styling(true));
+            let parser = BBParser::new(styles, TagTransform::Apply);
+            let result = parser.parse("[bold]\\[x\\][/bold]");
+            // Inner text should contain literal brackets, no `[bold]` re-emitted.
+            assert!(result.contains("[x]"));
+            assert!(!result.contains("[bold]"));
+        }
+
+        #[test]
+        fn lone_backslash_is_literal() {
+            let parser = BBParser::new(test_styles(), TagTransform::Remove);
+            assert_eq!(parser.parse("path C:\\foo\\bar"), "path C:\\foo\\bar");
+        }
+
+        #[test]
+        fn unescape_borrows_when_no_bracket_escape_present() {
+            // Backslash-containing inputs without `\[` or `\]` (Windows paths,
+            // `\d+` regex examples) must not allocate — they should round-trip
+            // through `Cow::Borrowed`.
+            assert!(matches!(
+                unescape("plain text"),
+                std::borrow::Cow::Borrowed(_)
+            ));
+            assert!(matches!(
+                unescape("C:\\foo\\bar"),
+                std::borrow::Cow::Borrowed(_)
+            ));
+            assert!(matches!(unescape("\\d+"), std::borrow::Cow::Borrowed(_)));
+            assert!(matches!(
+                unescape("trailing\\"),
+                std::borrow::Cow::Borrowed(_)
+            ));
+            // Actual escape sequences must take the owned path.
+            assert!(matches!(unescape("\\["), std::borrow::Cow::Owned(_)));
+            assert!(matches!(unescape("\\]"), std::borrow::Cow::Owned(_)));
+        }
+
+        #[test]
+        fn trailing_backslash_is_literal() {
+            let parser = BBParser::new(test_styles(), TagTransform::Remove);
+            assert_eq!(parser.parse("end\\"), "end\\");
+        }
+
+        #[test]
+        fn double_backslash_then_open_emits_backslash_then_literal_bracket() {
+            // `\\` is not an escape sequence, so the first `\` is literal;
+            // the second `\` pairs with `[` to emit a literal `[`.
+            let parser = BBParser::new(test_styles(), TagTransform::Remove);
+            assert_eq!(parser.parse("\\\\[bold]"), "\\[bold]");
+        }
+
+        #[test]
+        fn escaped_brackets_dont_create_unknown_tags() {
+            let parser = BBParser::new(test_styles(), TagTransform::Apply);
+            let (output, errors) = parser.parse_with_diagnostics("\\[unknown\\]");
+            assert_eq!(output, "[unknown]");
+            assert!(errors.is_empty());
+        }
+
+        #[test]
+        fn escapes_pass_validation() {
+            let parser = BBParser::new(test_styles(), TagTransform::Apply);
+            assert!(parser.validate("\\[anything\\]").is_ok());
+            assert!(parser.validate("[bold]a\\[b\\]c[/bold]").is_ok());
+        }
+
+        #[test]
+        fn strip_tags_handles_escapes() {
+            assert_eq!(strip_tags("\\[bold\\]"), "[bold]");
+            assert_eq!(strip_tags("[bold]a\\[b\\]c[/bold]"), "a[b]c");
+        }
+
+        #[test]
+        fn escape_does_not_apply_inside_tag_name() {
+            // `\` is not a valid tag-name char, so the bracket scanner still
+            // sees the opening `[` and the malformed content becomes an
+            // InvalidTag passthrough rather than a styled tag.
+            let parser = BBParser::new(test_styles(), TagTransform::Keep);
+            assert_eq!(parser.parse("[bo\\ld]"), "[bo\\ld]");
+        }
+
+        #[test]
+        fn escapes_with_multibyte_text() {
+            let parser = BBParser::new(test_styles(), TagTransform::Remove);
+            assert_eq!(parser.parse("café \\[é\\] 🎉"), "café [é] 🎉");
+        }
+
+        #[test]
+        fn only_open_escaped_leaves_close_unmatched() {
+            // Escaping only the open turns it into literal text; the close
+            // becomes an unexpected close. Output contains both literally,
+            // and validation surfaces the error.
+            let parser = BBParser::new(test_styles(), TagTransform::Apply);
+            let (output, errors) = parser.parse_with_diagnostics("\\[bold]hi[/bold]");
+            assert!(output.contains("[bold]hi"));
+            assert!(output.contains("[/bold]"));
+            assert!(!errors.is_empty());
+            assert!(errors
+                .errors
+                .iter()
+                .any(|e| e.kind == UnknownTagKind::UnexpectedClose));
         }
     }
 

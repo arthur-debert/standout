@@ -3,7 +3,7 @@
 //! All functions in this module correctly handle ANSI escape codes: they are
 //! preserved in output but don't count toward display width calculations.
 
-use console::{measure_text_width, pad_str, Alignment};
+use console::{measure_text_width, pad_str, strip_ansi_codes, Alignment};
 use standout_bbparser::strip_tags;
 
 /// Returns the display width of a string, ignoring ANSI escape codes.
@@ -31,6 +31,9 @@ pub fn display_width(s: &str) -> usize {
 /// Use this for any text that may contain markup. For strings known to be
 /// tag-free (e.g., separator literals), [`display_width`] avoids the overhead.
 ///
+/// ANSI is stripped first so that the `[` and `]` bytes inside CSI sequences
+/// don't get mistaken for malformed BBCode tags by the tag stripper.
+///
 /// # Example
 ///
 /// ```rust
@@ -41,7 +44,8 @@ pub fn display_width(s: &str) -> usize {
 /// assert_eq!(visible_width("\x1b[31m[red]hi[/red]\x1b[0m"), 2);
 /// ```
 pub fn visible_width(s: &str) -> usize {
-    display_width(&strip_tags(s))
+    let no_ansi = strip_ansi_codes(s);
+    measure_text_width(&strip_tags(&no_ansi))
 }
 
 /// Truncates a string from the end to fit within a maximum display width.

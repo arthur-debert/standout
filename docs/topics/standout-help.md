@@ -24,6 +24,22 @@ All three invocation forms produce identical output. Subcommand-level help (e.g.
 
 **Required for features:** `command_groups` and topics require `help_handling(true)`. If you configure either without it, `build()` will panic.
 
+## Styling User-Provided Strings
+
+When help interception is enabled, your clap `about` and `help` strings are rendered through standout's BBCode parser, so they can use any tag defined in your stylesheet:
+
+```rust
+#[command(name = "myapp", about = "[bold]myapp[/bold] — a small CLI")]
+struct Cli { /* ... */ }
+```
+
+To emit a literal `[` or `]` in help text, escape it with a backslash: `\[` and `\]`. Other backslashes (file paths, regex examples like `\d+`) pass through unchanged. To emit a literal `\[`, write `\\[`.
+
+```rust
+#[command(about = "Match pattern \\[regex: \\d+\\]")]
+// renders as: Match pattern [regex: \d+]
+```
+
 ## Default Behavior
 
 Without any group configuration, all subcommands appear in a single "Commands" section:
