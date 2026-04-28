@@ -662,9 +662,15 @@ fn find_unescaped_bracket(s: &str) -> Option<usize> {
 
 /// Replaces `\[` with `[` and `\]` with `]` in a text segment. Other
 /// backslashes pass through unchanged. Returns `Cow::Borrowed` when no
-/// backslash is present so the no-escape fast path stays allocation-free.
+/// actual `\[` or `\]` escape sequence is present, so backslash-containing
+/// but escape-free inputs (Windows paths, `\d+` regex examples, etc.) stay
+/// allocation-free.
 fn unescape(s: &str) -> std::borrow::Cow<'_, str> {
-    if !s.contains('\\') {
+    let bytes = s.as_bytes();
+    let has_escape = bytes
+        .windows(2)
+        .any(|w| w[0] == b'\\' && (w[1] == b'[' || w[1] == b']'));
+    if !has_escape {
         return std::borrow::Cow::Borrowed(s);
     }
     let mut out = String::with_capacity(s.len());
@@ -1418,6 +1424,29 @@ mod tests {
         fn lone_backslash_is_literal() {
             let parser = BBParser::new(test_styles(), TagTransform::Remove);
             assert_eq!(parser.parse("path C:\\foo\\bar"), "path C:\\foo\\bar");
+        }
+
+        #[test]
+        fn unescape_borrows_when_no_bracket_escape_present() {
+            // Backslash-containing inputs without `\[` or `\]` (Windows paths,
+            // `\d+` regex examples) must not allocate — they should round-trip
+            // through `Cow::Borrowed`.
+            assert!(matches!(
+                unescape("plain text"),
+                std::borrow::Cow::Borrowed(_)
+            ));
+            assert!(matches!(
+                unescape("C:\\foo\\bar"),
+                std::borrow::Cow::Borrowed(_)
+            ));
+            assert!(matches!(unescape("\\d+"), std::borrow::Cow::Borrowed(_)));
+            assert!(matches!(
+                unescape("trailing\\"),
+                std::borrow::Cow::Borrowed(_)
+            ));
+            // Actual escape sequences must take the owned path.
+            assert!(matches!(unescape("\\["), std::borrow::Cow::Owned(_)));
+            assert!(matches!(unescape("\\]"), std::borrow::Cow::Owned(_)));
         }
 
         #[test]
