@@ -1,6 +1,6 @@
 [package]
 name = "standout-pipe"
-version = "7.5.1"
+version = "7.5.2"
 edition = "2021"
 description = "Output piping to external commands for CLI applications"
 license = "MIT"
