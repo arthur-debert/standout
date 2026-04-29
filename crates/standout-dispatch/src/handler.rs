@@ -429,22 +429,29 @@ impl<T: Serialize> IntoHandlerResult<T> for HandlerResult<T> {
 
 /// Result of running the CLI dispatcher.
 ///
-/// After processing arguments, the dispatcher either handles a command
-/// or falls through for manual handling.
+/// After processing arguments, the dispatcher either handles a command,
+/// surfaces an error, or falls through for manual handling.
+///
+/// Marked `#[non_exhaustive]` so future variants can be added without
+/// breaking exhaustive matchers.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum RunResult {
-    /// A handler processed the command; contains the rendered output
+    /// A handler processed the command successfully; contains the rendered output
     Handled(String),
     /// A handler produced binary output (bytes, suggested filename)
     Binary(Vec<u8>, String),
     /// Silent output (handler completed but produced no output)
     Silent,
+    /// A handler, hook, or output step failed; contains the formatted error message.
+    /// Consumers should write this to stderr and exit non-zero.
+    Error(String),
     /// No handler matched; contains the ArgMatches for manual handling
     NoMatch(ArgMatches),
 }
 
 impl RunResult {
-    /// Returns true if a handler processed the command (text output).
+    /// Returns true if a handler processed the command successfully (text output).
     pub fn is_handled(&self) -> bool {
         matches!(self, RunResult::Handled(_))
     }
@@ -459,10 +466,23 @@ impl RunResult {
         matches!(self, RunResult::Silent)
     }
 
+    /// Returns true if the result is an error.
+    pub fn is_error(&self) -> bool {
+        matches!(self, RunResult::Error(_))
+    }
+
     /// Returns the output if handled, or None otherwise.
     pub fn output(&self) -> Option<&str> {
         match self {
             RunResult::Handled(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Returns the error message if this is an error, or None otherwise.
+    pub fn error(&self) -> Option<&str> {
+        match self {
+            RunResult::Error(s) => Some(s),
             _ => None,
         }
     }

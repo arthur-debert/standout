@@ -92,6 +92,12 @@
 //!     RunResult::Handled(output) => println!("{}", output),
 //!     RunResult::NoMatch(matches) => legacy_dispatch(matches),
 //!     RunResult::Binary(bytes, filename) => std::fs::write(filename, bytes)?,
+//!     RunResult::Silent => {}
+//!     RunResult::Error(msg) => {
+//!         eprintln!("{}", msg);
+//!         std::process::exit(1);
+//!     }
+//!     _ => {}
 //! }
 //! ```
 //!

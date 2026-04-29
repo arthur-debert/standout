@@ -591,7 +591,7 @@ impl TestResult {
 
     /// Panics unless the run ended in a successful dispatch
     /// (`RunResult::Handled`, `RunResult::Silent`, or `RunResult::Binary`).
-    /// `RunResult::NoMatch` triggers a panic.
+    /// `RunResult::NoMatch` and `RunResult::Error` trigger a panic.
     #[track_caller]
     pub fn assert_success(&self) {
         match &self.outcome {
@@ -599,6 +599,54 @@ impl TestResult {
             RunResult::NoMatch(_) => {
                 panic!("expected successful dispatch but no handler matched; stdout was empty")
             }
+            RunResult::Error(msg) => {
+                panic!("expected successful dispatch, got error: {}", msg)
+            }
+            _ => panic!(
+                "expected successful dispatch, got: {:?}",
+                describe_outcome(&self.outcome)
+            ),
+        }
+    }
+
+    /// Returns `true` if the run produced an error.
+    pub fn is_error(&self) -> bool {
+        matches!(self.outcome, RunResult::Error(_))
+    }
+
+    /// Returns the error message if the run produced one, or `None`.
+    pub fn error(&self) -> Option<&str> {
+        match &self.outcome {
+            RunResult::Error(s) => Some(s.as_str()),
+            _ => None,
+        }
+    }
+
+    /// Panics unless the run ended in `RunResult::Error`.
+    #[track_caller]
+    pub fn assert_error(&self) {
+        if !self.is_error() {
+            panic!(
+                "expected RunResult::Error, got: {:?}",
+                describe_outcome(&self.outcome)
+            );
+        }
+    }
+
+    /// Panics unless the run ended in `RunResult::Error` and the message
+    /// contains `needle`.
+    #[track_caller]
+    pub fn assert_error_contains(&self, needle: &str) {
+        match self.error() {
+            Some(msg) if msg.contains(needle) => {}
+            Some(msg) => panic!(
+                "error did not contain {:?}\n--- error ---\n{}\n-------------",
+                needle, msg
+            ),
+            None => panic!(
+                "expected RunResult::Error, got: {:?}",
+                describe_outcome(&self.outcome)
+            ),
         }
     }
 
@@ -643,6 +691,8 @@ fn describe_outcome(o: &RunResult) -> String {
         RunResult::Handled(s) => format!("Handled({:?})", s),
         RunResult::Silent => "Silent".into(),
         RunResult::Binary(b, f) => format!("Binary(len={}, {:?})", b.len(), f),
+        RunResult::Error(s) => format!("Error({:?})", s),
         RunResult::NoMatch(_) => "NoMatch".into(),
+        _ => "Unknown".into(),
     }
 }

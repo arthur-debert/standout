@@ -9,11 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`RunResult::Error(String)` variant + `is_error()`/`error()` accessors** in `standout-dispatch`. Handler errors, hook errors, and output-write errors that previously surfaced as `RunResult::Handled(...)` (a *success* variant) now surface as `RunResult::Error(...)`. Closes [#141](https://github.com/arthur-debert/standout/issues/141).
+- **`assert_error()` / `assert_error_contains()` / `is_error()` / `error()` on `standout-test::TestRun`** so test code can assert on error outcomes without relying on stdout pattern-matching.
 - **Backslash escape syntax in `standout-bbparser`.** Text now supports `\[` → `[` and `\]` → `]` so user-provided strings (e.g. clap `about` / `help` text rendered through standout's help interception) can contain literal brackets without being mistaken for tag delimiters. A backslash that is not followed by `[` or `]` is left alone, so file paths (`C:\foo\bar`), regex examples (`\d+`), and other content containing `\` pass through unchanged. To emit a literal `\[` write `\\[` (the first `\` is preserved because `\\` is not a recognized escape, then `\[` is consumed and emits `[`). Escapes are honored in all transform modes (`Apply`, `Remove`, `Keep`) and by `strip_tags`; they don't generate validation errors.
 
 ### Fixed
 
+- **CLI `run()` now sets a non-zero exit code when a handler, hook, or output-write step fails.** Previously, errors were routed through `RunResult::Handled(...)` (the *success* variant), printed to stdout, and the process exited 0 — so `tdoo cmd && other-cmd` and `if ! tdoo cmd; then …` saw success. Errors now go to stderr and `run()` calls `std::process::exit(1)`. Callers needing fine-grained exit-code control should use `run_to_string`/`dispatch_from` and match `RunResult` themselves. Closes [#141](https://github.com/arthur-debert/standout/issues/141).
 - **`standout_render::tabular::visible_width` no longer mismeasures strings that contain both BBCode tags and raw ANSI escapes.** Previously the function ran `strip_tags` first, and the `[` / `]` bytes inside CSI sequences (`\x1b[31m...`) confused the tag stripper into treating the surrounding region as one malformed tag, leaving the inner BBCode intact. ANSI codes are now stripped before BBCode, matching the function's documented contract.
+
+### Changed
+
+- **`RunResult` is now `#[non_exhaustive]`.** Consumers matching exhaustively must add a wildcard `_` arm. This pairs with the new `Error` variant and lets future error-handling work add variants without breaking the API. Note: adding `Error` is itself a hard break for exhaustive matchers because the enum was not previously `#[non_exhaustive]`. Migration is a single `RunResult::Error(msg) => { eprintln!("{}", msg); std::process::exit(1); }` arm.
 
 ## [7.5.1] - 2026-04-25
 

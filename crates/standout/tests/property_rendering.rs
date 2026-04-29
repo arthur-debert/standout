@@ -136,8 +136,13 @@ proptest! {
 
         let result = app.dispatch(matches, mode);
 
-        // Invariants
-        assert!(result.is_handled());
+        // Invariants: dispatch must either succeed with output or surface an
+        // error message. It must not silently fall through to NoMatch/Silent.
+        assert!(
+            result.is_handled() || result.is_error(),
+            "expected Handled or Error, got {:?}",
+            result
+        );
         if let Some(output) = result.output() {
             validate_structured_output(output, mode);
         }

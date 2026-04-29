@@ -226,21 +226,19 @@ fn test_pipe_command_failure() {
     let cmd = Command::new("test").subcommand(Command::new("fail"));
     let result = app.run_to_string(cmd, vec!["test", "fail"]);
 
-    // Hook error should produce a Handled result with error message
+    // Hook error should produce RunResult::Error with the failure message
     match result {
-        RunResult::Handled(output) => {
+        RunResult::Error(msg) => {
             // Error message should indicate the pipe command failed.
             // On macOS the error typically mentions "exit 1" or "failed";
             // on Linux it may surface as "Broken pipe" instead.
             assert!(
-                output.contains("exit 1")
-                    || output.contains("failed")
-                    || output.contains("Broken pipe"),
+                msg.contains("exit 1") || msg.contains("failed") || msg.contains("Broken pipe"),
                 "Expected error message about failed command, got: {}",
-                output
+                msg
             );
         }
-        _ => panic!("Expected RunResult::Handled with error, got {:?}", result),
+        _ => panic!("Expected RunResult::Error, got {:?}", result),
     }
 }
 

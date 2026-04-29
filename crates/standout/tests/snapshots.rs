@@ -78,7 +78,13 @@ fn test_snapshots_error_handling() {
 
     let result = app.dispatch(matches, OutputMode::Term);
 
-    // Handler errors are converted to "Error: {message}" in RunResult::Handled
-    let output = result.output().unwrap();
+    // Handler errors surface as RunResult::Error("Error: {message}").
+    // Consumers should write this to stderr and exit non-zero.
+    assert!(
+        result.is_error(),
+        "expected RunResult::Error, got {:?}",
+        result
+    );
+    let output = result.error().unwrap();
     assert_snapshot!("error_output", output);
 }

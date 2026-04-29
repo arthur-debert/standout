@@ -72,9 +72,9 @@ fn add_rejects_empty_title_via_chain_validator() {
             .no_color()
             .run(&app, cli_command(), ["tdoo", "add", "--title", "   "]);
     // The chain validator runs in pre-dispatch and aborts before the
-    // handler. The framework surfaces the hook error in the rendered
-    // output, so we look for the validator message.
-    result.assert_stdout_contains("title cannot be empty");
+    // handler. The framework surfaces this as RunResult::Error which
+    // would be written to stderr and produce a non-zero exit code in `run()`.
+    result.assert_error_contains("title cannot be empty");
 }
 
 #[test]
