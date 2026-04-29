@@ -471,7 +471,12 @@ fn overrides_are_restored_on_drop() {
 fn no_match_reports_cleanly() {
     let app = build_echo_app("{{ msg }}");
     let result = TestHarness::new().run(&app, echo_command(), vec!["app", "unknown"]);
-    // clap will emit an error string via Handled for unknown subcommand
-    // at this level; accept either Handled-with-clap-error or NoMatch.
-    assert!(result.is_handled() || result.is_no_match());
+    // clap rejects unknown subcommands as a parse error; per #141, those
+    // surface as `RunResult::Error`. Older clap behavior could also produce
+    // `NoMatch`, so accept either.
+    assert!(
+        result.is_error() || result.is_no_match(),
+        "expected Error or NoMatch, got: {:?}",
+        result
+    );
 }

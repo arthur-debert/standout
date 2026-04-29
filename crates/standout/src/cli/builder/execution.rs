@@ -99,7 +99,9 @@ impl AppBuilder {
     /// Returns:
     /// - `RunResult::Handled(output)` if a handler was found and executed successfully,
     /// - `RunResult::Binary(bytes, filename)` for binary output,
-    /// - `RunResult::Silent` if the handler completed silently,
+    /// - `RunResult::Handled(String::new())` if the handler completed silently
+    ///   (silent completion is currently mapped onto an empty `Handled`; the
+    ///   8.0 overhaul will return a distinct `RunResult::Silent`),
     /// - `RunResult::Error(msg)` if a handler, hook, or output step failed,
     /// - `RunResult::NoMatch(matches)` if no handler matched.
     ///
@@ -248,11 +250,17 @@ impl AppBuilder {
         // Augment command with --output flag
         let augmented_cmd = self.augment_command_for_dispatch(cmd.clone());
 
-        // Parse arguments
+        // Parse arguments. Clap's "errors" include `--help` and `--version`,
+        // which are successful display paths (stdout, exit 0). Real parse
+        // errors (unknown flag, missing required arg, etc.) get `use_stderr()
+        // == true` and should surface as `RunResult::Error` so they exit
+        // non-zero on stderr.
         let matches = match augmented_cmd.try_get_matches_from(&args) {
             Ok(m) => m,
             Err(e) => {
-                // Return error as handled output
+                if e.use_stderr() {
+                    return RunResult::Error(e.to_string());
+                }
                 return RunResult::Handled(e.to_string());
             }
         };
@@ -268,7 +276,12 @@ impl AppBuilder {
                 let augmented_cmd = self.augment_command_for_dispatch(cmd);
                 match augmented_cmd.try_get_matches_from(&new_args) {
                     Ok(m) => m,
-                    Err(e) => return RunResult::Handled(e.to_string()),
+                    Err(e) => {
+                        if e.use_stderr() {
+                            return RunResult::Error(e.to_string());
+                        }
+                        return RunResult::Handled(e.to_string());
+                    }
                 }
             }
         } else {
@@ -415,13 +428,13 @@ impl AppBuilder {
     /// match result {
     ///     RunResult::Handled(output) => println!("{}", output),
     ///     RunResult::Binary(bytes, filename) => std::fs::write(filename, bytes)?,
-    ///     RunResult::Silent => {}
+    ///     RunResult::Silent => {},
     ///     RunResult::Error(msg) => {
     ///         eprintln!("{}", msg);
     ///         std::process::exit(1);
-    ///     }
-    ///     RunResult::NoMatch(matches) => { /* handle manually */ }
-    ///     _ => {}
+    ///     },
+    ///     RunResult::NoMatch(matches) => { /* handle manually */ },
+    ///     _ => {},
     /// }
     /// ```
     pub fn run_to_string<I, T>(&self, cmd: Command, args: I) -> RunResult
