@@ -409,10 +409,11 @@ impl AppBuilder {
     ///
     /// # Returns
     ///
-    /// - `RunResult::Handled(output)` - Handler executed successfully, output is the rendered string
+    /// - `RunResult::Handled(output)` - Handler executed successfully, output is the rendered string.
+    ///   Note: silent completion currently surfaces as `Handled(String::new())` rather than a
+    ///   distinct `Silent` variant; that distinction returns in the 8.0 error-handling overhaul.
     /// - `RunResult::Binary(bytes, filename)` - Handler produced binary output
-    /// - `RunResult::Silent` - Handler completed silently
-    /// - `RunResult::Error(msg)` - A handler, hook, or output step failed
+    /// - `RunResult::Error(msg)` - A handler, hook, output step, or clap parse failed
     /// - `RunResult::NoMatch(matches)` - No handler matched
     ///
     /// # Example
@@ -428,12 +429,12 @@ impl AppBuilder {
     /// match result {
     ///     RunResult::Handled(output) => println!("{}", output),
     ///     RunResult::Binary(bytes, filename) => std::fs::write(filename, bytes)?,
-    ///     RunResult::Silent => {},
     ///     RunResult::Error(msg) => {
     ///         eprintln!("{}", msg);
     ///         std::process::exit(1);
     ///     },
     ///     RunResult::NoMatch(matches) => { /* handle manually */ },
+    ///     // RunResult is #[non_exhaustive]; cover Silent and any future variants.
     ///     _ => {},
     /// }
     /// ```
