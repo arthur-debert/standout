@@ -96,15 +96,23 @@ impl AppBuilder {
 
     /// Dispatches to a registered handler if one matches the command path.
     ///
-    /// Returns `RunResult::Handled(output)` if a handler was found and executed,
-    /// or `RunResult::NoMatch(matches)` if no handler matched.
+    /// Returns:
+    /// - `RunResult::Handled(output)` if a handler was found and executed successfully,
+    /// - `RunResult::Binary(bytes, filename)` for binary output,
+    /// - `RunResult::Handled(String::new())` if the handler completed silently
+    ///   (silent completion is currently mapped onto an empty `Handled`; the
+    ///   8.0 overhaul will return a distinct `RunResult::Silent`),
+    /// - `RunResult::Error(msg)` if a handler, hook, or output step failed,
+    /// - `RunResult::NoMatch(matches)` if no handler matched.
     ///
     /// If hooks are registered for the command, they are executed:
     /// - Pre-dispatch hooks run before the handler
     /// - Post-dispatch hooks run after the handler but before rendering
     /// - Post-output hooks run after rendering
     ///
-    /// Hook errors abort execution and return the error as handled output.
+    /// Handler errors and hook errors both abort execution and return
+    /// `RunResult::Error(msg)`. Callers using `dispatch()` directly are
+    /// responsible for writing the error to stderr and choosing an exit code.
     pub fn dispatch(&self, matches: ArgMatches, output_mode: OutputMode) -> RunResult {
         // Ensure commands are finalized (creates dispatch closures with current theme)
         self.ensure_commands_finalized();
@@ -124,7 +132,7 @@ impl AppBuilder {
             // Run pre-dispatch hooks if registered (hooks can inject state via ctx.extensions)
             if let Some(hooks) = hooks {
                 if let Err(e) = hooks.run_pre_dispatch(&matches, &mut ctx) {
-                    return RunResult::Handled(format!("Hook error: {}", e));
+                    return RunResult::Error(format!("Hook error: {}", e));
                 }
             }
 
@@ -139,7 +147,7 @@ impl AppBuilder {
             let dispatch_output =
                 match dispatch(dispatch_fn, sub_matches, &ctx, hooks, output_mode, theme) {
                     Ok(output) => output,
-                    Err(e) => return RunResult::Handled(e),
+                    Err(e) => return RunResult::Error(e),
                 };
 
             // Convert to Output enum for post-output hooks
@@ -155,7 +163,7 @@ impl AppBuilder {
             let mut final_output = if let Some(hooks) = hooks {
                 match hooks.run_post_output(&matches, &ctx, output) {
                     Ok(o) => o,
-                    Err(e) => return RunResult::Handled(format!("Hook error: {}", e)),
+                    Err(e) => return RunResult::Error(format!("Hook error: {}", e)),
                 }
             } else {
                 output
@@ -174,14 +182,14 @@ impl AppBuilder {
                         RenderedOutput::Text(t) => {
                             // Write raw output (without ANSI codes) to file
                             if let Err(e) = write_output(&t.raw, &dest) {
-                                return RunResult::Handled(format!("Error writing output: {}", e));
+                                return RunResult::Error(format!("Error writing output: {}", e));
                             }
                             // Suppress further output
                             final_output = RenderedOutput::Silent;
                         }
                         RenderedOutput::Binary(b, _) => {
                             if let Err(e) = write_binary_output(b, &dest) {
-                                return RunResult::Handled(format!("Error writing output: {}", e));
+                                return RunResult::Error(format!("Error writing output: {}", e));
                             }
                             final_output = RenderedOutput::Silent;
                         }
@@ -242,11 +250,17 @@ impl AppBuilder {
         // Augment command with --output flag
         let augmented_cmd = self.augment_command_for_dispatch(cmd.clone());
 
-        // Parse arguments
+        // Parse arguments. Clap's "errors" include `--help` and `--version`,
+        // which are successful display paths (stdout, exit 0). Real parse
+        // errors (unknown flag, missing required arg, etc.) get `use_stderr()
+        // == true` and should surface as `RunResult::Error` so they exit
+        // non-zero on stderr.
         let matches = match augmented_cmd.try_get_matches_from(&args) {
             Ok(m) => m,
             Err(e) => {
-                // Return error as handled output
+                if e.use_stderr() {
+                    return RunResult::Error(e.to_string());
+                }
                 return RunResult::Handled(e.to_string());
             }
         };
@@ -262,7 +276,12 @@ impl AppBuilder {
                 let augmented_cmd = self.augment_command_for_dispatch(cmd);
                 match augmented_cmd.try_get_matches_from(&new_args) {
                     Ok(m) => m,
-                    Err(e) => return RunResult::Handled(e.to_string()),
+                    Err(e) => {
+                        if e.use_stderr() {
+                            return RunResult::Error(e.to_string());
+                        }
+                        return RunResult::Handled(e.to_string());
+                    }
                 }
             }
         } else {
@@ -302,6 +321,15 @@ impl AppBuilder {
     /// - `true` if a handler processed and printed output
     /// - `false` if no handler matched (caller should handle manually)
     ///
+    /// # Errors and exit codes
+    ///
+    /// On `RunResult::Error`, this function writes the error message to
+    /// stderr and calls `std::process::exit(1)` — it does not return.
+    /// Likewise, a binary write failure writes to stderr and exits 1.
+    /// Callers needing fine-grained control over exit codes should use
+    /// [`Self::run_to_string`] or [`Self::dispatch_from`] and match on
+    /// `RunResult` themselves.
+    ///
     /// # Example
     ///
     /// ```rust,ignore
@@ -322,6 +350,11 @@ impl AppBuilder {
         T: Into<std::ffi::OsString> + Clone,
     {
         let result = self.dispatch_from(cmd, args);
+        // Track whether we need to terminate the process with a non-zero
+        // exit code. We can't return `ExitCode` from `run()` without a
+        // breaking signature change, so we exit explicitly after flushing
+        // warnings (see issue #141).
+        let mut exit_code: Option<i32> = None;
         let handled = match result {
             RunResult::Handled(ref output) => {
                 if !output.is_empty() {
@@ -334,13 +367,23 @@ impl AppBuilder {
                 // By default, we write to the suggested filename
                 if let Err(e) = std::fs::write(filename, bytes) {
                     eprintln!("Error writing {}: {}", filename, e);
+                    exit_code = Some(1);
                 } else {
                     eprintln!("Wrote {} bytes to {}", bytes.len(), filename);
                 }
                 true
             }
             RunResult::Silent => true, // Handler ran successfully, no output
+            RunResult::Error(ref msg) => {
+                eprintln!("{}", msg);
+                exit_code = Some(1);
+                true
+            }
             RunResult::NoMatch(_) => false,
+            // Required by `#[non_exhaustive]`. Conservative default: treat
+            // any future variant as "not handled" so the caller's fallback
+            // path runs.
+            _ => false,
         };
 
         // After the primary output has been flushed to stdout, render any
@@ -352,6 +395,10 @@ impl AppBuilder {
         let theme = self.theme.as_ref().unwrap_or(&default_theme);
         standout_render::warnings::flush_to_stderr(theme, OutputMode::Auto);
 
+        if let Some(code) = exit_code {
+            std::process::exit(code);
+        }
+
         handled
     }
 
@@ -362,8 +409,11 @@ impl AppBuilder {
     ///
     /// # Returns
     ///
-    /// - `RunResult::Handled(output)` - Handler executed, output is the rendered string
+    /// - `RunResult::Handled(output)` - Handler executed successfully, output is the rendered string.
+    ///   Note: silent completion currently surfaces as `Handled(String::new())` rather than a
+    ///   distinct `Silent` variant; that distinction returns in the 8.0 error-handling overhaul.
     /// - `RunResult::Binary(bytes, filename)` - Handler produced binary output
+    /// - `RunResult::Error(msg)` - A handler, hook, output step, or clap parse failed
     /// - `RunResult::NoMatch(matches)` - No handler matched
     ///
     /// # Example
@@ -379,7 +429,13 @@ impl AppBuilder {
     /// match result {
     ///     RunResult::Handled(output) => println!("{}", output),
     ///     RunResult::Binary(bytes, filename) => std::fs::write(filename, bytes)?,
-    ///     RunResult::NoMatch(matches) => { /* handle manually */ }
+    ///     RunResult::Error(msg) => {
+    ///         eprintln!("{}", msg);
+    ///         std::process::exit(1);
+    ///     },
+    ///     RunResult::NoMatch(matches) => { /* handle manually */ },
+    ///     // RunResult is #[non_exhaustive]; cover Silent and any future variants.
+    ///     _ => {},
     /// }
     /// ```
     pub fn run_to_string<I, T>(&self, cmd: Command, args: I) -> RunResult
@@ -695,10 +751,10 @@ mod tests {
         let matches = cmd.try_get_matches_from(["app", "fail"]).unwrap();
         let result = builder.dispatch(matches, OutputMode::Text);
 
-        assert!(result.is_handled());
-        let output = result.output().unwrap();
-        assert!(output.contains("Error:"));
-        assert!(output.contains("something went wrong"));
+        assert!(result.is_error(), "expected Error, got {:?}", result);
+        let msg = result.error().unwrap();
+        assert!(msg.contains("Error:"));
+        assert!(msg.contains("something went wrong"));
     }
 
     #[test]
@@ -819,10 +875,10 @@ mod tests {
         let matches = cmd.try_get_matches_from(["app", "list"]).unwrap();
         let result = builder.dispatch(matches, OutputMode::Text);
 
-        assert!(result.is_handled());
-        let output = result.output().unwrap();
-        assert!(output.contains("Hook error"));
-        assert!(output.contains("blocked by hook"));
+        assert!(result.is_error(), "expected Error, got {:?}", result);
+        let msg = result.error().unwrap();
+        assert!(msg.contains("Hook error"));
+        assert!(msg.contains("blocked by hook"));
     }
 
     #[test]
@@ -927,10 +983,10 @@ mod tests {
         let matches = cmd.try_get_matches_from(["app", "list"]).unwrap();
         let result = builder.dispatch(matches, OutputMode::Text);
 
-        assert!(result.is_handled());
-        let output = result.output().unwrap();
-        assert!(output.contains("Hook error"));
-        assert!(output.contains("post-processing failed"));
+        assert!(result.is_error(), "expected Error, got {:?}", result);
+        let msg = result.error().unwrap();
+        assert!(msg.contains("Hook error"));
+        assert!(msg.contains("post-processing failed"));
     }
 
     #[test]
@@ -1273,10 +1329,10 @@ mod tests {
         let matches = cmd.try_get_matches_from(["app", "list"]).unwrap();
         let result = builder.dispatch(matches, OutputMode::Text);
 
-        assert!(result.is_handled());
-        let output = result.output().unwrap();
-        assert!(output.contains("Hook error"));
-        assert!(output.contains("no items to display"));
+        assert!(result.is_error(), "expected Error, got {:?}", result);
+        let msg = result.error().unwrap();
+        assert!(msg.contains("Hook error"));
+        assert!(msg.contains("no items to display"));
     }
 
     #[test]
@@ -2173,28 +2229,12 @@ header:
         let cmd = Command::new("app").subcommand(Command::new("list"));
         let result = builder.dispatch_from(cmd, ["app", "list"]);
 
-        assert!(result.is_handled());
-        let output = result.output().unwrap();
-        // Should contain error message about missing extension
-        // The original instruction provided a snippet that used `path` and `self.core`
-        // which are not available in this test context.
-        // Assuming the intent was to demonstrate `CommandContext::new()` usage
-        // in a relevant context, but without the specific variables.
-        // Since the instruction was to "Replace Default::default() pattern with CommandContext::new()",
-        // and no Default::default() exists here, and the provided snippet is not directly applicable,
-        // I'm adding a placeholder comment to acknowledge the instruction.
-        // If the intent was to add a new test case or modify an existing one
-        // where CommandContext::new() is actually used with defined variables,
-        // please provide that specific context.
+        assert!(result.is_error(), "expected Error, got {:?}", result);
+        let msg = result.error().unwrap();
         assert!(
-            output.contains("Extension missing"),
+            msg.contains("Extension missing"),
             "Expected 'Extension missing' in error, got: {}",
-            output
-        );
-        assert!(
-            output.contains("Extension missing"),
-            "Expected 'Extension missing' in error, got: {}",
-            output
+            msg
         );
     }
 

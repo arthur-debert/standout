@@ -373,8 +373,8 @@ fn validation_failure_aborts_before_handler() {
 
     let result = app.run_to_string(body_command(), vec!["test", "create", "--body", "   "]);
     let out = match result {
-        RunResult::Handled(s) => s,
-        other => panic!("expected Handled, got {:?}", other),
+        RunResult::Error(s) => s,
+        other => panic!("expected Error, got {:?}", other),
     };
     assert!(out.starts_with("Hook error:"), "unexpected output: {out}");
     assert!(out.contains("body"), "error should name the input: {out}");

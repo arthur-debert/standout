@@ -92,6 +92,13 @@
 //!     RunResult::Handled(output) => println!("{}", output),
 //!     RunResult::NoMatch(matches) => legacy_dispatch(matches),
 //!     RunResult::Binary(bytes, filename) => std::fs::write(filename, bytes)?,
+//!     RunResult::Error(msg) => {
+//!         eprintln!("{}", msg);
+//!         std::process::exit(1);
+//!     },
+//!     // RunResult is #[non_exhaustive]; covers Silent (currently mapped to
+//!     // Handled(String::new()) in 7.x) and any future variants.
+//!     _ => {},
 //! }
 //! ```
 //!
