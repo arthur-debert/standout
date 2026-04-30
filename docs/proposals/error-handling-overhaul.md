@@ -2,7 +2,9 @@
 
 ## Status
 
-Draft. Targets standout 8.0. Builds on the 7.7 hotfix in #143 (closes #141), which added `RunResult::Error` and made `run()` exit non-zero on failure. This proposal addresses the underlying design holes that made the bug possible.
+Draft. Targets standout 8.0 (with a clean-up in 9.0). Builds on the 7.6.2 hotfix in #143 (closes #141), which added `RunResult::Error` and made `run()` exit non-zero on failure. This proposal addresses the underlying design holes that made the bug possible.
+
+The guiding principle, set explicitly at the start of this work: **the old non-error-bearing API is deprecated**. Consumers that want to ignore errors must do so by explicit opt-in (`unwrap`, `silence`, drop). The framework will not offer a one-liner that silently throws errors away.
 
 ## Motivation
 
@@ -75,25 +77,63 @@ Why a struct, not just `anyhow::Error`? Because the framework already knows *whe
 
 The `String` form is recoverable via `format!("{}", err.source)` for code that just wants a message. Existing call sites that did `result.error()` keep working with a thin shim that returns `Option<&str>` (formats source on demand), or upgrade to `result.error_source()` for the typed access.
 
-#### `run()` returns `ExitCode`
+#### `run() -> bool` is deprecated; new `run() -> ExitCode` takes its place
+
+The 7.x `run() -> bool` is the canonical *non-error-bearing* surface in the framework: it can't represent failure to the OS, so 7.x patches around that with an internal `process::exit(1)` call. 8.0 deprecates it.
+
+The deprecation policy:
 
 ```rust
-pub fn run<I, T>(&self, cmd: Command, args: I) -> std::process::ExitCode
-where I: IntoIterator<Item = T>, T: Into<OsString> + Clone
+// 8.0 — both methods exist, old one is a soft break.
+#[deprecated(
+    since = "8.0.0",
+    note = "use `run_to_exit()` and propagate from main(); \
+            see docs/proposals/error-handling-overhaul.md"
+)]
+pub fn run<I, T>(&self, cmd: Command, args: I) -> bool { ... }
+
+pub fn run_to_exit<I, T>(&self, cmd: Command, args: I) -> std::process::ExitCode { ... }
 ```
 
-Callers wire it as:
+Callers wire the new method as:
 
 ```rust
 fn main() -> std::process::ExitCode {
     let app = build_app();
-    app.run(cmd, std::env::args())
+    app.run_to_exit(cmd, std::env::args())
 }
 ```
 
-This removes the `process::exit` call from inside `run()`. Library code no longer terminates the process; the application's `main` does. Drop, destructors, and finalizers all run normally.
+This removes the `process::exit` call from inside the new method. Library code no longer terminates the process; the application's `main` does. Drop, destructors, and finalizers all run normally.
 
-For consumers who want the old `bool` semantics ("did anything match"), `run_or_unmatched(cmd, args) -> Result<ExitCode, ArgMatches>` returns the unmatched matches in the `Err` arm.
+**9.0 cleanup**: `run() -> bool` is removed and `run_to_exit()` is renamed to `run()`. Deprecation warnings during 8.x give consumers a window to migrate without taking a build-break.
+
+For consumers who want the old `bool` semantics ("did anything match"), `run_or_unmatched(cmd, args) -> Result<ExitCode, ArgMatches>` returns the unmatched matches in the `Err` arm. This is a third method, not a replacement for `run_to_exit`, since the two needs are distinct.
+
+#### Ignoring errors must be explicit
+
+The point of deprecating the non-error-bearing API is that *swallowing failure should require an act of will*. The 7.x default — quiet `bool` returns, errors disappearing into stdout — is exactly the pattern that produced #141. In 8.0, consumers have three honest options:
+
+1. **Propagate.** `fn main() -> ExitCode { app.run_to_exit(cmd, args) }` — the OS sees the right code. This is the recommended default.
+2. **Panic on error.** `let code = app.run_to_exit(cmd, args); assert!(code == ExitCode::SUCCESS);` — or a convenience `app.run_or_panic(cmd, args)` that panics on `RunResult::Error`. This is "I expect this to never fail; if it does, abort loud."
+3. **Silence.** `let _ = app.run_to_exit(cmd, args);` — explicitly drop the `ExitCode`. The process still exits with the dropped code's value (since `ExitCode` only takes effect when returned from `main`); to truly discard, the user has to set their own exit code. We may add `.silenced()` as a clarity helper.
+
+The framework does *not* offer a one-liner that silently throws errors away. If a user wants "old `run()`-style fire and forget," they call the deprecated method and accept the warning.
+
+#### Same deprecation policy on the `RunResult` accessor
+
+`RunResult::Error(String)` becomes `RunResult::Error(DispatchError)` in 8.0. To smooth that:
+
+```rust
+#[deprecated(since = "8.0.0", note = "use `error_source()` for typed access")]
+pub fn error(&self) -> Option<&str> { ... }   // formats DispatchError.source on demand
+
+pub fn error_source(&self) -> Option<&anyhow::Error> { ... }
+pub fn error_kind(&self) -> Option<&ErrorKind> { ... }
+pub fn exit_code(&self) -> u8 { ... }   // 0 for success, computed via Layer 2 mappers for Error
+```
+
+Tests and callers that only need the message keep working with a deprecation warning. Tests that want typed access opt in to `error_source()`.
 
 #### Errors go to stderr; success to stdout
 
@@ -191,21 +231,25 @@ This lets us write tests that pin shell behavior, not just framework internals.
 
 ## Migration
 
-### Breaking changes (all in 8.0)
+### Soft breaks (`#[deprecated]` in 8.0, removed in 9.0)
 
-1. `RunResult::Error(String)` → `RunResult::Error(DispatchError)`.
-2. `run() -> bool` → `run() -> ExitCode`.
-3. `run_to_string` keeps its signature (consumers who want full control already use it).
+1. `run() -> bool` → use `run_to_exit() -> ExitCode`. Old method still works in 8.x with a deprecation warning; gone in 9.0.
+2. `RunResult::error() -> Option<&str>` → use `error_source() -> Option<&anyhow::Error>` for typed access (or keep the deprecated method for the formatted message).
+
+### Hard breaks (8.0)
+
+3. `RunResult::Error(String)` → `RunResult::Error(DispatchError)`. Variants can't be soft-deprecated; this is a one-shot change at the major boundary, mitigated by the deprecated `error()` accessor that still returns `Option<&str>`.
 4. Internal: `dispatch.rs:98`'s `format!("Error: {}", e)` collapse is removed; the `anyhow::Error` rides through to `RunResult::Error`.
 
 ### Migration paths
 
-- **Apps using `run()`**: change `main()` to return `ExitCode`. One-line change.
-- **Apps matching `RunResult::Error(s)`**: change `s` reads from `s.as_str()` to `format!("{}", err.source)` (or use the shim accessor).
+- **Apps using `run()`**: rename to `run_to_exit()` and have `main()` return `ExitCode`. The deprecation warning lands you in the right place.
+- **Apps that *want* the old "fire and forget" behavior**: the deprecated `run()` still works for one minor cycle. Long-term, the framework will not offer a one-liner that silences errors — silencing must be explicit at the call site (`let _ = app.run_to_exit(...);`).
+- **Apps matching `RunResult::Error(s)`**: the variant payload changes from `String` to `DispatchError`. The deprecated `result.error()` method continues to return `Option<&str>` for code that just wants the message; new code uses `result.error_source()` / `result.error_kind()` / `result.exit_code()`.
 - **Apps that want exit codes**: opt in to Layer 1 (`ExitError::new(code, ...)`) or Layer 2 (`.exit_code_for::<T>(...)`).
-- **Tests using `assert_error_contains`**: keep working unchanged.
+- **Tests using `assert_error_contains`**: keep working unchanged. New helpers (`assert_exit_code`, `assert_error_kind`) are additive.
 
-A migration guide page in the book walks through each diff with examples.
+A migration guide page in the book walks through each diff with examples. The aim is that a typical 7.x app updates with three find/replace edits and a `#[deprecated]` warning to chase.
 
 ## Sample app updates
 
@@ -239,8 +283,9 @@ These come up naturally during discussion but are *not* part of this proposal:
 
 ## Phasing
 
-- **Now (this PR / proposal)**: ratify the design.
-- **Next**: implement Layer 0 (the breaking changes) on a `feat/error-handling-8.0` branch. Keep it open while Layers 1–4 land incrementally.
+- **Now (this PR)**: ratify the design.
+- **Next**: implement Layer 0 on `feat/error-handling-8.0`. The deprecation pieces (`#[deprecated]` attrs, `run_to_exit`, `error_source`) ship in 8.0 alongside the hard breaks (`DispatchError` payload, `dispatch.rs:98` rewrite). Keep the branch open while Layers 1–4 land incrementally.
 - **Then**: 8.0 release once Layer 0 + Layer 1 + book chapter are in. Layers 2/3/4 can ship in 8.x without further breakage.
+- **9.0**: remove the deprecated `run() -> bool` and `error() -> Option<&str>`; rename `run_to_exit` → `run`; drop the message-format shim.
 
-The fact that Layer 1 and Layer 4 are non-breaking means we don't have to ship everything at once.
+The fact that Layer 1 and Layer 4 are non-breaking means we don't have to ship everything at once. The `#[deprecated]` cycle gives consumers time to migrate without a hard build-break in 8.0 itself.
