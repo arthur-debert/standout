@@ -75,9 +75,9 @@ pub enum ErrorKind {
 
 Why a struct, not just `anyhow::Error`? Because the framework already knows *where* the error came from (handler vs. pre-dispatch hook vs. file write), and that information should travel with the error. It's free to compute and lossless to carry.
 
-The `String` form is recoverable via `format!("{}", err.source)` for code that just wants a message. Existing call sites that did `result.error()` keep working with a thin shim that returns `Option<&str>` (formats source on demand), or upgrade to `result.error_source()` for the typed access.
+The `String` form is recoverable via `format!("{}", err.source)` for code that just wants a message. Existing call sites that did `result.error()` keep working with a thin shim — see open question #6 for the implementation choice (the shim cannot return a borrowed slice from a computed `format!`, so either `DispatchError` precomputes and caches the message string at construction, or the shim's return type changes from `Option<&str>` to `Option<Cow<'_, str>>` / `Option<String>`). The leaning is the precomputed-cache option, keeping the shim signature byte-compatible with 7.x.
 
-#### `run() -> bool` is deprecated; new `run() -> ExitCode` takes its place
+#### `run() -> bool` is deprecated; new `run_to_exit() -> ExitCode` takes its place in 8.0
 
 The 7.x `run() -> bool` is the canonical *non-error-bearing* surface in the framework: it can't represent failure to the OS, so 7.x patches around that with an internal `process::exit(1)` call. 8.0 deprecates it.
 
@@ -104,7 +104,7 @@ fn main() -> std::process::ExitCode {
 }
 ```
 
-This removes the `process::exit` call from inside the new method. Library code no longer terminates the process; the application's `main` does. Drop, destructors, and finalizers all run normally.
+This pulls `process::exit` out of the library-level execution path entirely: the new method *returns* an `ExitCode` rather than terminating the process, and `main()` is responsible for propagating it. Drop, destructors, and finalizers all run normally.
 
 **9.0 cleanup**: `run() -> bool` is removed and `run_to_exit()` is renamed to `run()`. Deprecation warnings during 8.x give consumers a window to migrate without taking a build-break.
 
@@ -116,7 +116,7 @@ The point of deprecating the non-error-bearing API is that *swallowing failure s
 
 1. **Propagate.** `fn main() -> ExitCode { app.run_to_exit(cmd, args) }` — the OS sees the right code. This is the recommended default.
 2. **Panic on error.** `let code = app.run_to_exit(cmd, args); assert!(code == ExitCode::SUCCESS);` — or a convenience `app.run_or_panic(cmd, args)` that panics on `RunResult::Error`. This is "I expect this to never fail; if it does, abort loud."
-3. **Silence.** `let _ = app.run_to_exit(cmd, args);` — explicitly drop the `ExitCode`. The process still exits with the dropped code's value (since `ExitCode` only takes effect when returned from `main`); to truly discard, the user has to set their own exit code. We may add `.silenced()` as a clarity helper.
+3. **Silence.** `let _ = app.run_to_exit(cmd, args);` — explicitly drop the `ExitCode`. Discarding the value discards its effect: `ExitCode` only reaches the OS when returned from `main`, so a dropped one is invisible and the process exits with whatever `main` itself returns (typically `0`). If a caller wants a non-zero process exit, they have to set it explicitly (`std::process::exit(...)` or a hand-built `ExitCode`). We may add `.silenced()` as a clarity helper that makes the discard self-documenting.
 
 The framework does *not* offer a one-liner that silently throws errors away. If a user wants "old `run()`-style fire and forget," they call the deprecated method and accept the warning.
 
@@ -238,8 +238,8 @@ This lets us write tests that pin shell behavior, not just framework internals.
 
 ### Hard breaks (8.0)
 
-3. `RunResult::Error(String)` → `RunResult::Error(DispatchError)`. Variants can't be soft-deprecated; this is a one-shot change at the major boundary, mitigated by the deprecated `error()` accessor that still returns `Option<&str>`.
-4. Internal: `dispatch.rs:98`'s `format!("Error: {}", e)` collapse is removed; the `anyhow::Error` rides through to `RunResult::Error`.
+1. `RunResult::Error(String)` → `RunResult::Error(DispatchError)`. Variants can't be soft-deprecated; this is a one-shot change at the major boundary, mitigated by the deprecated `error()` accessor that still returns `Option<&str>` (see open question #6 for the implementation choice — the shim cannot return a borrowed slice from a computed `format!`).
+2. Internal: `dispatch.rs:98`'s `format!("Error: {}", e)` collapse is removed; the `anyhow::Error` rides through to `RunResult::Error`.
 
 ### Migration paths
 
@@ -278,8 +278,14 @@ These come up naturally during discussion but are *not* part of this proposal:
 
 1. **Mapper order: first-match vs. most-specific?** Registering a `Box<dyn Error>` mapper last and `io::Error` first — does first-match-wins make sense, or should we walk registrations in reverse? Most-specific is what Python's exception-hierarchy dispatch does; it requires knowing the type tree, which `anyhow` doesn't expose cleanly.
 2. **Should `DispatchError::kind` be `#[non_exhaustive]`?** Yes, probably. We may want to add `Render`, `Validation`, etc.
-3. **Default exit code for `NoMatch`.** Currently `run()` returns `false`. After this proposal, `run() -> ExitCode` — what code does no-match map to? Convention: `2` (clap's convention for argument errors), but consumers may want override.
+3. **Default exit code for `NoMatch`.** Currently `run()` returns `false`. After this proposal, `run_to_exit() -> ExitCode` — what code does no-match map to? Convention: `2` (clap's convention for argument errors), but consumers may want override.
 4. **Does the error template apply in `--output=json`?** Probably no — JSON consumers want `stderr: <plaintext>, exit nonzero` so they can detect failure cheaply.
+5. **Is `.silenced()` a real method, or do we leave it at `let _ = ...`?** A real method is self-documenting (the name says what's happening) and gives us a place to attach a `#[must_use]` lint exemption. `let _ = ...` is zero API surface but reads as a generic suppression. Lean: real method, in `standout-test` or wherever testing helpers live, not on the main builder.
+6. **Shim signature for the deprecated `error()` accessor.** Returning `Option<&str>` from a `DispatchError` that stores only `anyhow::Error` is not implementable — the formatted message would be a temporary, not borrowable. Three resolutions:
+   - **a)** `DispatchError` stores a precomputed `String` alongside the `anyhow::Error`. Cheap, slight duplication.
+   - **b)** Change the shim's return type to `Option<Cow<'_, str>>`. Caller-visible signature break but preserves zero-allocation for the typed path.
+   - **c)** Change the shim to `Option<String>` (always allocates). Simplest; might produce churn in tests that pattern-match on `Some(s)` shape.
+   Lean: **(a)**. The `String` is computed exactly once when `DispatchError` is constructed; the `&str` borrow comes free thereafter. Cost is negligible (one allocation per failure, which is already the slowest path anyway). Surfaces in #143 fixup-pass conversations as a real implementation question; resolving it lets the deprecated shim's signature stay byte-compatible with 7.x.
 
 ## Phasing
 
