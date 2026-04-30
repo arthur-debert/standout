@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.6.2] - 2026-04-30
+
 ### Added
 
 - **`RunResult::Error(String)` variant + `is_error()`/`error()` accessors** in `standout-dispatch`. Handler errors, hook errors, and output-write errors that previously surfaced as `RunResult::Handled(...)` (a *success* variant) now surface as `RunResult::Error(...)`. Closes [#141](https://github.com/arthur-debert/standout/issues/141).
@@ -1300,7 +1302,8 @@ let output = render_with_output(template, &data, &theme, OutputMode::Term)?;
   - Command handler system with `dispatch_from` convenience method
   - Archive variant support in clap integration
 
-[Unreleased]: https://github.com/arthur-debert/standout/compare/standout-v7.5.1...HEAD
+[Unreleased]: https://github.com/arthur-debert/standout/compare/standout-v7.6.2...HEAD
+[7.6.2]: https://github.com/arthur-debert/standout/compare/standout-v7.6.1...standout-v7.6.2
 [7.5.1]: https://github.com/arthur-debert/standout/compare/standout-v7.5.0...standout-v7.5.1
 [7.5.0]: https://github.com/arthur-debert/standout/compare/standout-v7.4.0...standout-v7.5.0
 [7.4.0]: https://github.com/arthur-debert/standout/compare/standout-v7.3.0...standout-v7.4.0
