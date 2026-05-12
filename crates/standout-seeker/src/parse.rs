@@ -805,6 +805,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::approx_constant)]
     fn test_parse_number_float() {
         let val = parse_value::<TestTask>("3.14", "priority", SeekType::Number, Op::Eq).unwrap();
         if let ClauseValue::Number(Number::F64(n)) = val {

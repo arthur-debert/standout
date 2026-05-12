@@ -13,6 +13,7 @@ struct Empty;
 // =============================================================================
 
 #[handler]
+#[allow(clippy::disallowed_names)] // tests below assert error messages reference the literal arg name "foo"
 fn my_verified_handler(#[arg] foo: String) -> Result<standout::cli::Output<Empty>, anyhow::Error> {
     let _ = foo;
     Ok(Output::Render(Empty))

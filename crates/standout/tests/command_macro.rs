@@ -217,8 +217,10 @@ fn test_ctx_access() {
     let cmd = info_cmd__command();
     let matches = cmd.try_get_matches_from(["info"]).unwrap();
 
-    let mut ctx = CommandContext::default();
-    ctx.command_path = vec!["app".to_string(), "info".to_string()];
+    let ctx = CommandContext {
+        command_path: vec!["app".to_string(), "info".to_string()],
+        ..Default::default()
+    };
 
     let result = info_cmd__handler(&matches, &ctx);
     assert!(result.is_ok());

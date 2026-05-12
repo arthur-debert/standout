@@ -444,7 +444,7 @@ mod tests {
         let _: ClauseValue = String::from("test").into();
         let _: ClauseValue = 42i64.into();
         let _: ClauseValue = 42u32.into();
-        let _: ClauseValue = 3.14f64.into();
+        let _: ClauseValue = 2.5f64.into();
         let _: ClauseValue = true.into();
         let _: ClauseValue = Timestamp(1000).into();
         let _: ClauseValue = vec![1u32, 2, 3].into();
