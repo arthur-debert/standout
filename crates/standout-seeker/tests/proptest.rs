@@ -11,6 +11,9 @@ fn number_accessor<'a>(n: &'a i64, _field: &str) -> Value<'a> {
     Value::Number(Number::I64(*n))
 }
 
+// Signature is constrained by `query.filter(&Vec<String>, fn(&String, ...))` usage below;
+// using &str would force an .iter().map() at every callsite.
+#[allow(clippy::ptr_arg)]
 fn string_accessor<'a>(s: &'a String, _field: &str) -> Value<'a> {
     Value::String(s)
 }
@@ -418,7 +421,7 @@ proptest! {
     fn parse_operator_case_insensitive(
         base_op in prop::sample::select(vec!["eq", "ne", "gt", "gte", "lt", "lte", "contains"])
     ) {
-        let lower = parse_operator(&base_op);
+        let lower = parse_operator(base_op);
         let upper = parse_operator(&base_op.to_uppercase());
 
         prop_assert_eq!(lower, upper);

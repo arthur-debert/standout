@@ -2,7 +2,6 @@ use clap::Command;
 use console::Style;
 use proptest::prelude::*;
 use serde_json::{json, Value};
-use serde_yaml;
 use standout::cli::{App, Output};
 use standout::{OutputMode, Theme};
 

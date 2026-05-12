@@ -907,7 +907,7 @@ mod tests {
     #[test]
     fn test_extensions_clone_behavior() {
         // Verify the documented behavior that Clone drops extensions
-        struct Data(i32);
+        struct Data(#[allow(dead_code)] i32);
 
         let mut original = Extensions::new();
         original.insert(Data(42));

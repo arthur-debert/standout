@@ -90,11 +90,7 @@ mod tests {
 
     #[test]
     fn test_echo() {
-        let cmd = if cfg!(windows) {
-            "echo hello"
-        } else {
-            "echo hello"
-        };
+        let cmd = "echo hello";
         let output = run_piped(cmd, "", None).unwrap();
         assert!(output.trim().contains("hello"));
     }
@@ -126,7 +122,7 @@ mod tests {
 
     #[test]
     fn test_command_failed_includes_command_name() {
-        let cmd = if cfg!(windows) { "exit 1" } else { "exit 1" };
+        let cmd = "exit 1";
         let res = run_piped(cmd, "", None);
         match res {
             Err(ShellError::CommandFailed(cmd_str, _)) => {

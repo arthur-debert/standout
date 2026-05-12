@@ -2469,7 +2469,7 @@ mod tests {
 
         let formatter = TabularFormatter::new(&spec, 60);
 
-        let rows = vec![
+        let rows = [
             vec![
                 CellValue::Single("1."),
                 CellValue::Sub(vec!["GitHub integration", "[feature]"]),

@@ -264,7 +264,7 @@ mod tests {
             }
         }
 
-        let items = vec![
+        let items = [
             Item {
                 name: "a".to_string(),
                 priority: 1,
@@ -279,7 +279,7 @@ mod tests {
             },
         ];
 
-        let orderings = vec![OrderBy::asc("priority"), OrderBy::asc("name")];
+        let orderings = [OrderBy::asc("priority"), OrderBy::asc("name")];
 
         // Same priority, compare by name
         assert_eq!(

@@ -477,6 +477,6 @@ fn no_match_reports_cleanly() {
     assert!(
         result.is_error() || result.is_no_match(),
         "expected Error or NoMatch, got: {:?}",
-        result
+        result.outcome()
     );
 }
