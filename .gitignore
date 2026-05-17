@@ -11,3 +11,6 @@ local
 site/
 book/
 .claude/
+
+# Canonical SessionStart hook is tracked
+!.claude/settings.json
