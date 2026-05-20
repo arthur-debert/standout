@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "Running tests..."
+# --all-features matches the canonical clippy invocation in bin/check-lint
+# (`--workspace --all-targets --all-features`), so the test run exercises
+# every feature-gated path that clippy lints — consistent coverage
+# between lint and test.
+if command -v cargo-nextest &>/dev/null; then
+    cargo nextest run --workspace --all-features
+else
+    cargo test --workspace --all-features
+fi
+echo "Tests OK"
