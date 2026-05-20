@@ -1,0 +1,28 @@
+# Managed by release-sync. Do not edit.
+synced_from: arthur-debert/release
+ref: take-iii
+sha: 198ea2a7fcad5fedf94abf3cee2c9f87bd7293ce
+synced_at: 2026-05-20T18:42:20Z
+stack: rust
+components:
+  - shell-quality
+  - rust-quality
+files:
+  - .claude/settings.json
+  - .editorconfig
+  - .github/CODEOWNERS
+  - .github/copilot-instructions.md
+  - .github/dependabot.yml
+  - .github/pull_request_template.md
+  - .github/workflows/copilot-review.yml
+  - .markdownlint.json
+  - .release-sync-state.yaml
+  - .shellcheckrc
+  - .yamllint
+  - bin/check
+  - bin/check-fmt
+  - bin/check-lint
+  - bin/check-tests
+  - bin/diff-since-release
+  - lefthook.yml
+  - scripts/setup-dev-env.sh
