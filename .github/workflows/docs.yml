@@ -1,5 +1,5 @@
 # Thin caller of arthur-debert/release/.github/workflows/mdbook.yml@v1.
-# Book.toml at repo root, output directory `book/` (mdbook default).
+# book.toml at repo root, output directory `book/` (mdbook default).
 # `cname: standout.magik.works` for the custom-domain deploy.
 
 name: Deploy Documentation
