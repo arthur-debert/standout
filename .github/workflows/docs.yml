@@ -1,9 +1,12 @@
+# Thin caller of arthur-debert/release/.github/workflows/mdbook.yml@v1.
+# Book.toml at repo root, output directory `book/` (mdbook default).
+# `cname: standout.magik.works` for the custom-domain deploy.
+
 name: Deploy Documentation
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
     paths:
       - 'docs/**'
       - 'book.toml'
@@ -15,43 +18,8 @@ permissions:
   pages: write
   id-token: write
 
-concurrency:
-  group: "pages"
-  cancel-in-progress: false
-
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Install mdBook
-        run: |
-          curl -sSL https://github.com/rust-lang/mdBook/releases/download/v0.4.40/mdbook-v0.4.40-x86_64-unknown-linux-gnu.tar.gz | tar -xz
-          chmod +x mdbook
-          sudo mv mdbook /usr/local/bin/
-
-      - name: Build book
-        run: mdbook build
-
-      - name: Add CNAME for custom domain
-        run: cp CNAME book/
-
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
-
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v4
-        with:
-          path: './book'
-
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v5
+  docs:
+    uses: arthur-debert/release/.github/workflows/mdbook.yml@v1
+    with:
+      cname: standout.magik.works
