@@ -7,10 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.6.3] - 2026-05-23
+
+
 ### Changed
 
 - First release through the canonical `arthur-debert/release/.github/workflows/rust-lib.yml@v1` reusable workflow (replacing the hand-rolled `publish.yml` tag-push trigger). No source changes; this dispatch validates the canonical rust-lib pipeline end-to-end for the standout workspace's 8 published crates.
-
 ## [7.6.2] - 2026-04-30
 
 ### Added
