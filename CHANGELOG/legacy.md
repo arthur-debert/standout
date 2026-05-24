@@ -1,11 +1,3 @@
-<!-- generated - do not edit. See CHANGELOG/README.txt -->
-
-# Changelog
-
-## Unreleased
-
-Migrated changelog to fragment-directory system from arthur-debert/release.
-
 ## [7.6.3] - 2026-05-23
 
 
