@@ -1,14 +1,10 @@
 # Crate-specific release configuration for standout
 # CHANGELOG.md management - only run once (from this crate, not others)
+#
+# CHANGELOG.md is now managed by the fragment-directory system from
+# arthur-debert/release (bin/changelog). Replacements are cleared and
+# the pre-release-hook drives `bin/changelog new-version <version>`
+# (cut + render).
 
-[[pre-release-replacements]]
-file = "../../CHANGELOG.md"
-search = "## \\[Unreleased\\]"
-replace = "## [Unreleased]\n\n## [{{version}}] - {{date}}"
-exactly = 1
-
-[[pre-release-replacements]]
-file = "../../CHANGELOG.md"
-search = "\\[Unreleased\\]: https://github.com/arthur-debert/standout/compare/standout-v[0-9.]+\\.\\.\\.HEAD"
-replace = "[Unreleased]: https://github.com/arthur-debert/standout/compare/standout-v{{version}}...HEAD\n[{{version}}]: https://github.com/arthur-debert/standout/compare/standout-v{{prev_version}}...standout-v{{version}}"
-exactly = 1
+pre-release-replacements = []
+pre-release-hook = ["bin/changelog", "new-version", "{{version}}"]
