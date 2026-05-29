@@ -213,6 +213,7 @@ This is useful for transformations that don't need a shell command.
 **Piped content is always plain text.** This matches standard shell behavior where `command | other_command` receives unformatted output because stdout is not a TTY.
 
 When you pipe output:
+
 - The piped content has all ANSI escape codes stripped automatically
 - Terminal display still shows rich formatting (colors, bold, etc.)
 - Clipboard operations receive clean, pasteable text
@@ -227,6 +228,7 @@ cfg.template("[bold]{{ title }}[/bold]: [green]{{ count }}[/green]")
 ```
 
 This is implemented using the framework's two-pass rendering:
+
 1. Template engine produces output with `[style]...[/style]` tags
 2. `apply_style_tags` is called twice: once with ANSI codes for terminal, once stripped for piping
 

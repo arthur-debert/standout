@@ -46,6 +46,7 @@ fn get_message(matches: &ArgMatches) -> Result<String, Error> {
 ```
 
 Problems:
+
 - Imperative logic obscures the intended priority
 - Hard to test (stdin, environment, terminal detection)
 - Duplicated across commands
@@ -71,6 +72,7 @@ let message = InputChain::<String>::new()
 The chain tries each source in order. The first source that provides input wins. If all sources return `None`, the chain returns `InputError::NoInput`.
 
 Benefits:
+
 - **Declarative** — Priority is explicit and readable
 - **Testable** — All sources accept mocks for deterministic testing
 - **Composable** — Build chains for different commands with shared sources
@@ -107,6 +109,7 @@ let message = InputChain::<String>::new()
 ```
 
 This chain:
+
 1. Checks if `--message` was provided
 2. If not, reads from stdin (only if piped, not interactive)
 3. Falls back to the default value

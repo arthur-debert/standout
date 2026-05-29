@@ -5,6 +5,7 @@
 ## 1. Motivation: The Complexity Trap
 
 Standout is designed to be flexible. It supports:
+
 - **8 Output Modes** (Auto, Term, Text, TermDebug, Json, Yaml, Xml, Csv)
 - **3 Template Sources** (Embedded, File, None)
 - **4 Style Sources** (Embedded, File, Programmatic, None)
@@ -27,8 +28,8 @@ To manage this complexity, we adhere to three core pillars:
 - **Rule**: No `unwrap()` or `expect()` on user configuration. All builder methods must return `Result<Self, SetupError>`.
 - **Rule**: No silent fallbacks for optional fields. If a template is required but missing, fail safely, do not silently output nothing.
 - **Rule**: Use "Type Detection" not "Option checking".
-    - *Bad*: `if let Some(t) = self.templates { ... }`
-    - *Good*: `AppBuilder<HasTemplates>` vs `AppBuilder<NoTemplates>` (Typestate pattern where applicable).
+  - *Bad*: `if let Some(t) = self.templates { ... }`
+  - *Good*: `AppBuilder<HasTemplates>` vs `AppBuilder<NoTemplates>` (Typestate pattern where applicable).
 
 ### II. Structural Unification
 
@@ -64,25 +65,25 @@ pub struct App {
 ### Error Handling
 
 - **Setup Phase** (`App::builder()`): Returns `Result<Self, SetupError>`.
-    - Errors: `Io`, `Template`, `DuplicateCommand`.
+  - Errors: `Io`, `Template`, `DuplicateCommand`.
 - **Runtime Phase** (`dispatch()`): Returns `RunResult`.
-    - Errors from handlers are propagated via `HandlerResult` (`anyhow::Error` or similar).
+  - Errors from handlers are propagated via `HandlerResult` (`anyhow::Error` or similar).
 
 ## 4. PR Evaluation Checklist
 
 When proposing changes, evaluate against this checklist:
 
 - [ ] **Complexity**: Does this add a new configuration dimension?
-    - If yes: Have you added it to the `proptest` strategy?
+  - If yes: Have you added it to the `proptest` strategy?
 - [ ] **Safety**: Does this introduce any `unwrap()` or `expect()`?
-    - If yes: Can it be replaced by `Result` propagation?
+  - If yes: Can it be replaced by `Result` propagation?
 - [ ] **Duplication**: Did you copy logic unnecessarily?
-    - If yes: Stop. Refactor to a shared implementation.
+  - If yes: Stop. Refactor to a shared implementation.
 - [ ] **Verification**: Did you include a snapshot test for the UI output?
 
 ## 5. Development Workflow
 
-1.  **Plan**: Draft an `implementation_plan.md` using the Design Guidelines.
-2.  **Safety First**: Implement types and builders before logic.
-3.  **Test**: Add property tests if changing core dispatch.
-4.  **Verify**: Run `cargo test` and check snapshots.
+1. **Plan**: Draft an `implementation_plan.md` using the Design Guidelines.
+2. **Safety First**: Implement types and builders before logic.
+3. **Test**: Add property tests if changing core dispatch.
+4. **Verify**: Run `cargo test` and check snapshots.

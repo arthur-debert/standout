@@ -362,6 +362,7 @@ mod handlers {
 ```
 
 The `#[handler]` macro:
+
 - Extracts CLI arguments automatically from `ArgMatches`
 - Converts `#[flag]` to `bool` flags, `#[arg]` to required/optional args
 - Auto-wraps `Result<T, E>` in `Output::Render` for you
@@ -673,6 +674,7 @@ let app = App::builder()
 ```
 
 Three piping modes:
+
 - `pipe_through("cmd")`: Use command's stdout as new output (filters like jq, sort)
 - `pipe_to("cmd")`: Run command but keep original output (side effects like tee)
 - `pipe_to_clipboard()`: Send to system clipboard (pbcopy on macOS, xclip on Linux)
@@ -707,6 +709,7 @@ fn create(_m: &ArgMatches, ctx: &CommandContext) -> HandlerResult<Value> {
 ```
 
 Features:
+
 - **Declarative priority**: Source order is explicit in the chain
 - **Framework-integrated**: `.input(name, chain)` registers the chain alongside `template`, `hooks`, and `pipe_*`; resolution happens in pre-dispatch
 - **Testable**: All sources accept mocks for CI-safe testing (the `TestHarness` from `standout-test` wires them automatically)

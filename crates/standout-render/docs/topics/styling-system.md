@@ -153,6 +153,7 @@ Instead of defining separate "light theme" and "dark theme" files, you define mo
 ```
 
 When resolving `panel` in dark mode:
+
 1. Start with base attributes (`bold`, `gray`)
 2. Merge dark overrides (`white` replaces `gray`)
 3. Result: bold white text
@@ -284,6 +285,7 @@ All odd-row styles are adaptive: they resolve to a dark variant when the termina
 Organize your styles in three conceptual layers:
 
 **1. Visual primitives** (low-level appearance):
+
 ```css
 ._cyan-bold { color: cyan; font-weight: bold; }
 ._dim { opacity: 0.5; }
@@ -291,6 +293,7 @@ Organize your styles in three conceptual layers:
 ```
 
 **2. Presentation roles** (UI concepts — use aliases in code):
+
 ```rust
 theme.add("heading", "_cyan-bold")
      .add("secondary", "_dim")
@@ -298,6 +301,7 @@ theme.add("heading", "_cyan-bold")
 ```
 
 **3. Semantic names** (domain concepts — aliases to presentation):
+
 ```rust
 // In templates, use these
 theme.add("task-title", "heading")
@@ -309,6 +313,7 @@ theme.add("task-title", "heading")
 Templates use semantic names (`task-title`), which resolve to presentation roles (`heading`), which resolve to visual primitives (`_cyan-bold`).
 
 This layering lets you:
+
 - Refactor visuals without touching templates
 - Maintain consistency across domains
 - Document the purpose of each style

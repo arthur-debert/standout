@@ -55,6 +55,7 @@ let source = ArgSource::new("message");  // Reads --message or -m
 ```
 
 **Behavior:**
+
 - `is_available()`: Returns `true` if the argument was provided
 - `collect()`: Returns `Some(value)` if present, `None` otherwise
 - Type: `String`
@@ -71,6 +72,7 @@ let source = FlagSource::new("no-color").inverted();  // --no-color → false
 ```
 
 **Behavior:**
+
 - `is_available()`: Returns `true` if the flag was provided (set to true)
 - `collect()`: Returns `Some(true)` if set, `None` otherwise
 - `inverted()`: Inverts the logic (flag set → `false`)
@@ -88,12 +90,14 @@ let source = StdinSource::new().trim(false);  // Don't trim whitespace
 ```
 
 **Behavior:**
+
 - `is_available()`: Returns `true` if stdin is piped (not a terminal)
 - `collect()`: Reads all stdin content, returns `None` if empty
 - `trim`: Whether to trim leading/trailing whitespace (default: `true`)
 - Type: `String`
 
 **Testing:**
+
 ```rust
 use standout_input::{StdinSource, MockStdin};
 
@@ -113,11 +117,13 @@ let source = EnvSource::new("GITHUB_TOKEN");
 ```
 
 **Behavior:**
+
 - `is_available()`: Returns `true` if the variable is set and non-empty
 - `collect()`: Returns `Some(value)` if set, `None` otherwise
 - Type: `String`
 
 **Testing:**
+
 ```rust
 use standout_input::{EnvSource, MockEnv};
 
@@ -139,12 +145,14 @@ let source = ClipboardSource::new();
 ```
 
 **Behavior:**
+
 - `is_available()`: Returns `true` if clipboard has non-empty text content
 - `collect()`: Returns clipboard text, `None` if empty
 - Platform: Uses `pbpaste` (macOS), `xclip` (Linux)
 - Type: `String`
 
 **Testing:**
+
 ```rust
 use standout_input::{ClipboardSource, MockClipboard};
 
@@ -193,6 +201,7 @@ let source = EditorSource::new()
 ### Editor Detection
 
 Editors are detected in this order:
+
 1. `$VISUAL` environment variable (supports GUI editors like VS Code)
 2. `$EDITOR` environment variable
 3. Platform fallbacks: `vim`, `vi`, `nano` on Unix; `notepad` on Windows
@@ -257,12 +266,14 @@ let source = TextPromptSource::new("Email: ").trim(false);
 ```
 
 **Behavior:**
+
 - `is_available()`: Returns `true` if stdin is a terminal
 - `collect()`: Prints prompt, reads line, returns `None` if empty
 - `can_retry()`: Returns `true`
 - Type: `String`
 
 **Testing:**
+
 ```rust
 use standout_input::{TextPromptSource, MockTerminal};
 
@@ -288,6 +299,7 @@ let source = ConfirmPromptSource::new("Delete all?").default(false);
 ```
 
 **Behavior:**
+
 - `is_available()`: Returns `true` if stdin is a terminal
 - `collect()`: Prints prompt with `[y/n]`, `[Y/n]`, or `[y/N]` suffix based on default
 - Accepts: `y`, `yes`, `Y`, `YES` → `true`; `n`, `no`, `N`, `NO` → `false`
@@ -297,6 +309,7 @@ let source = ConfirmPromptSource::new("Delete all?").default(false);
 - Type: `bool`
 
 **Testing:**
+
 ```rust
 use standout_input::{ConfirmPromptSource, MockTerminal};
 
@@ -568,6 +581,7 @@ fn test_config_source() {
 | Inquire | `inquire` | inquire | InquireText, InquireConfirm, InquireSelect, InquireMultiSelect, InquirePassword, InquireEditor |
 
 All sources follow the same pattern:
+
 1. Implement `InputCollector<T>`
 2. Accept a mock via `with_reader()` or `with_runner()`
 3. Return `Ok(None)` to pass to the next source in the chain

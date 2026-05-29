@@ -6,7 +6,7 @@
 
 This is the symmetric counterpart to `standout-pipe`:
 
-```
+```text
 standout-pipe:   Handler → Render → [jq/tee/clipboard]   (output flows OUT)
 standout-input:  [arg/stdin/editor/prompt] → Handler     (input flows IN)
 ```
@@ -22,7 +22,7 @@ standout-input:  [arg/stdin/editor/prompt] → Handler     (input flows IN)
 
 ## Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────┐
 │                    standout-input (core)                         │
 │                                                                  │
@@ -221,6 +221,7 @@ impl EditorCollector {
 ```
 
 Editor detection follows conventions:
+
 1. Check env vars in order (default: `VISUAL`, then `EDITOR`)
 2. Fall back to platform defaults (`vim` on Unix, `notepad` on Windows)
 3. Search PATH for common editors
@@ -462,6 +463,7 @@ pub fn create(
 ## Implementation Phases
 
 ### Phase 1: Core Structure
+
 - `InputCollector<T>` trait
 - `InputChain<T>` builder
 - `InputError` type
@@ -469,16 +471,19 @@ pub fn create(
 - Basic tests
 
 ### Phase 2: Backends
+
 - `feature = "editor"`: `EditorCollector` with tempfile + which
 - `feature = "simple-prompts"`: `SimpleText`, `SimpleConfirm`
 - `feature = "inquire"`: Full inquire adapter suite
 
 ### Phase 3: Standout Integration
+
 - Builder API support (`.input()` method)
 - Pre-dispatch resolution hook
 - Documentation and examples
 
 ### Future Considerations
+
 - `feature = "dialoguer"`: Dialoguer adapter (shares console with standout-render)
 - `feature = "validify"`: Deep validation integration
 - `#[input]` attribute for handler macro

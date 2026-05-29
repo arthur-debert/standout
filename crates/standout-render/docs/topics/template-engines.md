@@ -43,6 +43,7 @@ Full-featured Jinja2-compatible engine. This is what you get by default.
 ```
 
 **Supports:**
+
 - Variable substitution with filters: `{{ name | upper }}`
 - Control flow: `{% if %}`, `{% for %}`, `{% macro %}`
 - Template includes: `{% include "partial.jinja" %}`
@@ -61,12 +62,14 @@ Contact: {user.profile.email}
 ```
 
 **Supports:**
+
 - Simple variable substitution: `{name}`
 - Nested property access: `{user.profile.email}`
 - Array index access: `{items.0}`
 - Escaped braces: `{{` renders as `{`
 
 **Does NOT support:**
+
 - Loops (`{% for %}`)
 - Conditionals (`{% if %}`)
 - Filters (`| upper`)
@@ -78,14 +81,14 @@ Contact: {user.profile.email}
 
 ## Choosing an Engine
 
-### Use MiniJinjaEngine (default) when:
+### Use MiniJinjaEngine (default) when
 
 - Templates need loops or conditionals
 - You use filters for formatting
 - Templates include other templates
 - You're not concerned about binary size
 
-### Use SimpleEngine when:
+### Use SimpleEngine when
 
 - Templates only substitute variables
 - Binary size is critical

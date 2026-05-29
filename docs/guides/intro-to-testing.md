@@ -159,7 +159,7 @@ fn list_runs() {
 That's it. `run()` drives the same dispatch path as production — same clap parsing, same handler lookup, same render pipeline — and returns the rendered text. No subprocess, no stdout capture gymnastics.
 
 > **Why `#[serial]`?** The harness mutates process-global state (env vars, cwd, terminal detectors, default input readers). Tests that use `TestHarness` must run serially. The `serial_test::serial` attribute is re-exported from `standout_test` for convenience: `use standout_test::serial;`.
-
+>
 > **Verify:** Add a `TestHarness::new().run(...)` test to your app. It should run in under 10ms, not 100ms.
 
 ### 4.1 Env vars

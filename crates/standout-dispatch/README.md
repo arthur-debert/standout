@@ -21,7 +21,7 @@ CLI commands typically mix business logic with output formatting: database queri
 
 **standout-dispatch** enforces a clean separation:
 
-```
+```text
 CLI args → Handler (logic) → Data → Renderer (presentation) → Output
 ```
 
@@ -213,14 +213,17 @@ fn main() -> anyhow::Result<()> {
 ## Documentation
 
 ### Guides
+
 - [Introduction to Dispatch](docs/guides/intro-to-dispatch.md) — Complete dispatch tutorial
 
 ### Topics
+
 - [Handler Contract](docs/topics/handler-contract.md) — Handler types, Output enum, testing
 - [Execution Model](docs/topics/execution-model.md) — Pipeline, hooks, command routing
 - [Partial Adoption](docs/topics/partial-adoption.md) — Incremental migration strategies
 
 ### Reference
+
 - [API Documentation](https://docs.rs/standout-dispatch) — Full API reference
 
 ## Used By

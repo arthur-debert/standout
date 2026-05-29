@@ -20,7 +20,7 @@ PR #44 extracted `standout-render` as a standalone crate. This proposal continue
 
 ## New Architecture
 
-```
+```text
 standout-bbparser     (BBCode parser - standalone)
 standout-macros       (embed macros - standalone)
 standout-render       (rendering engine - standalone)
@@ -35,6 +35,7 @@ Each library crate is independently useful. The `standout` crate becomes the int
 ### standout-dispatch
 
 **Owns:**
+
 - Command routing (name → handler mapping)
 - Handler traits (`Handler`, `FnHandler`)
 - Handler result types (`Output<T>`, `HandlerResult<T>`, `RunResult`)
@@ -51,6 +52,7 @@ Each library crate is independently useful. The `standout` crate becomes the int
 - Command path extraction from ArgMatches
 
 **Does NOT own:**
+
 - Templates or template registries
 - Themes or style processing
 - BBCode/style tag parsing
@@ -58,6 +60,7 @@ Each library crate is independently useful. The `standout` crate becomes the int
 - Help topics system (stays in standout)
 
 **Dependencies:**
+
 - `clap` (argument parsing)
 - `serde`, `serde_json`, `serde_yaml`, `csv`, `quick-xml` (serialization)
 - `atty` or equivalent (TTY detection)
@@ -66,6 +69,7 @@ Each library crate is independently useful. The `standout` crate becomes the int
 ### standout-render
 
 **Owns:**
+
 - Template rendering (MiniJinja integration)
 - Style tag processing (BBCode-like syntax via standout-bbparser)
 - Theme system (CSS/YAML stylesheets)
@@ -76,6 +80,7 @@ Each library crate is independently useful. The `standout` crate becomes the int
 - The two-phase render pass (MiniJinja → BBParser)
 
 **Does NOT own:**
+
 - Command routing or dispatch
 - Argument parsing
 - Output mode selection
@@ -85,6 +90,7 @@ Each library crate is independently useful. The `standout` crate becomes the int
 ### standout (glue crate)
 
 **Owns:**
+
 - Integration of standout-dispatch with standout-render
 - `App` type alias with standout rendering
 - Builder conveniences that wire templates/themes to dispatch
@@ -158,12 +164,14 @@ pub type RenderFn = Arc<
 ```
 
 For dispatch-only users (no standout-render):
+
 ```rust
 // TextMode is ignored since there are no styles to process
 |data, _mode| Ok(format_my_output(data))
 ```
 
 For standout users:
+
 ```rust
 // standout constructs closures that call standout-render
 // TextMode maps to how style tags are processed
@@ -213,6 +221,7 @@ fn main() -> anyhow::Result<()> {
 ```
 
 **What dispatch-only users get:**
+
 - Command routing
 - Handler execution with `CommandContext`
 - Pre/post dispatch hooks
@@ -239,6 +248,7 @@ fn main() -> anyhow::Result<()> {
 ```
 
 **What full standout users get:**
+
 - Everything from dispatch
 - Template-based rendering with MiniJinja
 - Style tags with BBCode syntax
@@ -271,6 +281,7 @@ println!("{}", output);
 ## Help Topics System
 
 The help topics system (`TopicRegistry`, help rendering) remains in `standout` because:
+
 - It requires both dispatch (command handling) and render (styled output)
 - It's a high-level feature, not a primitive
 - Moving it to dispatch would re-introduce render coupling
@@ -286,6 +297,7 @@ The help topics system (`TopicRegistry`, help rendering) remains in `standout` b
 | `standout` | Full framework | dispatch + render |
 
 This architecture enables:
+
 - Dispatch-only adoption (simple, no templates)
 - Render-only adoption (servers, TUIs)
 - Full framework adoption (CLI apps with rich output)

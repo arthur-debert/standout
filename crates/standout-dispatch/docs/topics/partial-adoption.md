@@ -22,6 +22,7 @@ Many CLI frameworks require a complete rewrite:
 ### Step 1: Identify a Good Starting Command
 
 Pick a command that:
+
 - Is self-contained (few dependencies on other commands)
 - Has clear inputs and outputs
 - Would benefit from structured output (JSON, etc.)
@@ -82,6 +83,7 @@ fn main() {
 ### Step 4: Repeat
 
 Migrate one command at a time. Each migration:
+
 - Is a small, reviewable change
 - Can be tested independently
 - Doesn't affect other commands

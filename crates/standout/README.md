@@ -92,14 +92,17 @@ myapp list --output json    # JSON for scripting
 - **Book**: [standout.magik.works](https://standout.magik.works/)
 
 ### Framework Topics
+
 - [App Configuration](https://standout.magik.works/topics/app-configuration.html) — AppBuilder API
 - [Output Modes](https://standout.magik.works/topics/output-modes.html) — --output flag and format handling
 
 ### Crate Documentation
+
 - [standout-render](https://standout.magik.works/crates/render/guides/intro-to-rendering.html) — Templates, themes, tabular layouts
 - [standout-dispatch](https://standout.magik.works/crates/dispatch/guides/intro-to-dispatch.html) — Handlers, hooks, command routing
 
 ### API Reference
+
 - [API Documentation](https://docs.rs/standout) — Full API reference
 
 ## Standalone Crates

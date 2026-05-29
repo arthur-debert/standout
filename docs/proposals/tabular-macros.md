@@ -29,7 +29,7 @@ The `row_from<T: Serialize>()` method works by serializing to JSON and extractin
 
 **Purpose:** Generate a `TabularSpec` from struct field annotations.
 
-### Usage
+### Tabular Usage
 
 ```rust
 use standout::tabular::{Tabular, TabularSpec};
@@ -98,7 +98,7 @@ impl Tabular for Task {
 
 **Purpose:** Generate optimized row extraction without runtime JSON serialization.
 
-### Usage
+### TabularRow Usage
 
 ```rust
 use standout::tabular::TabularRow;
@@ -163,6 +163,7 @@ Create the macro module structure and attribute parsing utilities.
 3. Error reporting with `syn::Error`
 
 **Files:**
+
 - `crates/standout-macros/src/tabular/mod.rs`
 - `crates/standout-macros/src/tabular/attrs.rs`
 
@@ -184,11 +185,13 @@ Implement the spec generation macro.
 4. Handle container `#[tabular(...)]` attributes
 
 **Files:**
+
 - `crates/standout-macros/src/tabular/derive_tabular.rs`
 - `crates/standout-macros/src/lib.rs` (register macro)
 - `crates/standout/src/rendering/tabular/traits.rs` (Tabular trait)
 
 **Tests:**
+
 - Simple struct with fixed widths
 - All width variants (fixed, fill, fraction, bounded)
 - All attribute combinations
@@ -212,10 +215,12 @@ Implement the row extraction macro.
 4. Handle `#[col(skip)]` attribute
 
 **Files:**
+
 - `crates/standout/src/rendering/tabular/traits.rs` (TabularRow trait)
 - `crates/standout-macros/src/tabular/derive_row.rs`
 
 **Tests:**
+
 - String fields
 - Numeric fields (i32, u64, f64)
 - Option fields
@@ -238,10 +243,12 @@ Integrate macros with existing formatter.
 4. Benchmark trait-based vs serde-based extraction
 
 **Files:**
+
 - `crates/standout/src/rendering/tabular/formatter.rs`
 - `crates/standout/src/rendering/tabular/decorator.rs`
 
 **Tests:**
+
 - End-to-end: derive → format → output
 - Equivalence: trait output matches serde output
 - Performance comparison
@@ -261,6 +268,7 @@ Enable macro-derived specs in templates.
 3. Example templates
 
 **Files:**
+
 - `crates/standout/src/rendering/tabular/filters.rs`
 - Examples in `examples/`
 
@@ -282,7 +290,7 @@ Complete documentation and examples.
 
 ## Phase Dependencies
 
-```
+```text
 Phase 1 (Infrastructure)
     │
     ├──→ Phase 2 (Tabular derive)
@@ -312,6 +320,7 @@ Phases 2 and 3 can be developed in parallel after Phase 1.
 2. **`TabularRow`** generates row extraction (field → string conversion)
 
 They serve different purposes and can be used independently:
+
 - Use only `Tabular` with `row_from<T: Serialize>()` for flexibility
 - Use only `TabularRow` with manually-built specs for control
 - Use both for maximum type safety and performance
@@ -319,6 +328,7 @@ They serve different purposes and can be used independently:
 ### Why Not Combine Them?
 
 Separation allows:
+
 - Using `Tabular` without `TabularRow` (keep serde flexibility)
 - Using `TabularRow` with different specs (same data, different views)
 - Clearer error messages and simpler macro logic
@@ -326,6 +336,7 @@ Separation allows:
 ### Field Ordering
 
 Both macros preserve struct field order. This ensures:
+
 - `tabular_spec()` columns match `to_row()` values
 - Predictable output without explicit ordering attributes
 - Simple mental model for users

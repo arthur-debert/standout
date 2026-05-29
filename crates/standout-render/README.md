@@ -35,7 +35,7 @@ The result: output that's easy to write, easy to change, and looks polished.
 
 ### Two-Pass Rendering Pipeline
 
-```
+```text
 Template + Data → MiniJinja → Text with style tags → BBParser → ANSI output
 ```
 
@@ -175,15 +175,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ## Documentation
 
 ### Guides
+
 - [Introduction to Rendering](docs/guides/intro-to-rendering.md) — Complete rendering tutorial
 - [Introduction to Tabular](docs/guides/intro-to-tabular.md) — Column layouts and tables
 
 ### Topics
+
 - [Styling System](docs/topics/styling-system.md) — Themes, adaptive styles, CSS syntax
 - [Templating](docs/topics/templating.md) — MiniJinja, style tags, processing modes
 - [File System Resources](docs/topics/file-system-resources.md) — Hot reload, registries, embedding
 
 ### Reference
+
 - [API Documentation](https://docs.rs/standout-render) — Full API reference
 
 ## Used By
