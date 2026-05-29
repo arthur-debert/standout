@@ -14,11 +14,11 @@ The framework's fragility stems from **five fundamental design issues**:
 
 ## Issue 1: The App/LocalApp Split (Critical)
 
-### Current State
+### Current State (Issue 1)
 
 The codebase has two parallel hierarchies that duplicate ~80% of their logic:
 
-```
+```text
 App (671 lines)           ←→  LocalApp (410 lines)
 AppBuilder (295 lines)    ←→  LocalAppBuilder (617 lines)
 ClosureRecipe             ←→  LocalClosureRecipe
@@ -43,6 +43,7 @@ The same dispatch logic is repeated **6+ times** across these files:
 | `local_builder.rs:181-232` | `LocalStructRecipe::create_dispatch` | Local struct |
 
 Each implementation has the same pattern:
+
 ```rust
 match result {
     Ok(HandlerOutput::Render(data)) => {
@@ -74,9 +75,10 @@ The split exists because of a **type-level constraint mismatch**:
 
 The framework chose to duplicate everything rather than abstract over this difference.
 
-### Recommended Fix
+### Recommended Fix (Issue 1)
 
 Create a shared `AppCore<M: HandlerMode>` that contains:
+
 - All rendering logic
 - Output mode handling
 - Hook execution
@@ -112,7 +114,7 @@ struct AppCore<M: HandlerMode> {
 
 ## Issue 2: Optional Fields with Silent Fallbacks (High)
 
-### Current State
+### Current State (Issue 2)
 
 Multiple critical fields are `Option<T>` with inconsistent fallback behavior:
 
@@ -123,7 +125,7 @@ pub(crate) stylesheet_registry: Option<StylesheetRegistry>,
 pub(crate) theme: Option<Theme>,
 ```
 
-### The Problem
+### The Problem (Issue 2)
 
 When these are `None`, methods behave silently:
 
@@ -142,15 +144,16 @@ let theme = self.theme.clone().unwrap_or_default();
 ```
 
 **The caller cannot distinguish:**
+
 - "No templates configured" (misconfiguration) vs
 - "Templates configured but empty" (valid state) vs
 - "Templates not needed for this use case" (intentional)
 
-### Manifestation
+### Manifestation (Issue 2)
 
 User configures templates incorrectly → `template_names()` returns empty → no error → rendering fails later with confusing message about template not found.
 
-### Recommended Fix
+### Recommended Fix (Issue 2)
 
 **Option A: Null Object Pattern** (for optional features)
 
@@ -200,7 +203,7 @@ fn build_minimal(self) -> App<Minimal>                    // No templates needed
 
 ## Issue 3: Panic-Based Invariant Enforcement (High)
 
-### Current State
+### Current State (Issue 3)
 
 Multiple places use `panic!` or `.expect()` for configuration errors:
 
@@ -225,7 +228,7 @@ opt.as_ref()
     .expect("finalized_commands should be Some after ensure_commands_finalized")
 ```
 
-### The Problem
+### The Problem (Issue 3)
 
 These are **build-time configuration errors** that manifest as **runtime panics**:
 
@@ -249,7 +252,7 @@ fn create_dispatch(&self, ...) -> DispatchFn {
 
 This encodes a **runtime invariant** ("this function must only be called once") that should be a **compile-time guarantee**.
 
-### Recommended Fix
+### Recommended Fix (Issue 3)
 
 **For configuration errors:** Return `Result` from builder methods:
 
@@ -284,14 +287,15 @@ impl ErasedConfigRecipe {
 
 ## Issue 4: Missing Defensive Defaults (Medium)
 
-### Current State
+### Current State (Issue 4)
 
 When optional features aren't configured, code either:
+
 1. Silently returns empty results (templates, themes)
 2. Uses hardcoded defaults (OutputMode::Auto)
 3. Panics (missing required state)
 
-### Manifestation
+### Manifestation (Issue 4)
 
 Example: User forgets to configure templates but uses render():
 
@@ -305,11 +309,12 @@ app.render("list", &data, OutputMode::Term)?;
 ```
 
 The error is confusing because:
+
 1. It happens at render time, not build time
 2. "registry" is internal jargon
 3. No hint about how to fix it
 
-### Recommended Fix
+### Recommended Fix (Issue 4)
 
 **Fail fast at configuration time:**
 
@@ -347,7 +352,7 @@ impl NullTemplateRegistry {
 
 ## Issue 5: Untested Configuration Combinatorics (Medium)
 
-### Current State
+### Current State (Issue 5)
 
 The framework has multiple orthogonal configuration dimensions:
 
@@ -360,26 +365,28 @@ The framework has multiple orthogonal configuration dimensions:
 | Help system | Enabled, Disabled | 2 |
 | Output flag | Enabled, Custom name, Disabled | 3 |
 
-**Total combinations: 8 × 2 × 3 × 4 × 2 × 3 = 1,152**
+**Total combinations:** 8 × 2 × 3 × 4 × 2 × 3 = 1,152
 
 ### Current Test Coverage
 
 From the exploration, integration tests cover:
+
 - OutputMode::Term: 2 tests
 - OutputMode::Json: 3 tests
 - OutputMode::Text: 1 test
 - Other modes: 0 tests
 
-**Coverage: <1% of configuration space**
+**Coverage:** <1% of configuration space
 
-### Manifestation
+### Manifestation (Issue 5)
 
 Real-world user reports bugs like:
+
 - "JSON output doesn't respect theme" (works in Term, not in Json)
 - "LocalApp doesn't render templates correctly" (works in App)
 - "Embedded templates work but file-based don't" (different code paths)
 
-### Recommended Fix
+### Recommended Fix (Issue 5)
 
 **Property-based testing with configuration generators:**
 
@@ -431,7 +438,7 @@ fn output_mode_with_theme_matrix(mode: OutputMode, with_theme: bool) {
 
 ## Issue 6: Feature Flag Complexity (Low-Medium)
 
-### Current State
+### Current State (Issue 6)
 
 The `clap` feature gates significant functionality:
 
@@ -447,23 +454,25 @@ pub use dispatch::*;
 // ... etc
 ```
 
-### The Problem
+### The Problem (Issue 6)
 
 1. **Without `clap`**: Only rendering functions available, no App/LocalApp
 2. **With `clap`**: Full CLI framework
 
 This is a reasonable split, BUT:
+
 - The rendering core (`render_auto`, `Theme`, `TemplateRegistry`) works without `clap`
 - But they're not well-tested independently
 - Some code assumes clap is always available (uses `clap::ArgMatches` in signatures)
 
-### Manifestation
+### Manifestation (Issue 6)
 
 Users who want just the rendering engine (without CLI) may find:
+
 - Missing functionality that's gated behind `clap`
 - Confusing imports that don't work without the feature
 
-### Recommended Fix
+### Recommended Fix (Issue 6)
 
 **Clear feature boundaries with separate test suites:**
 
@@ -477,6 +486,7 @@ full = ["cli", "macros"]
 ```
 
 **Test each feature level:**
+
 ```rust
 // tests/rendering_only.rs
 #![cfg(not(feature = "cli"))]
@@ -492,7 +502,8 @@ full = ["cli", "macros"]
 ## Prioritized Remediation Plan
 
 ### Phase 1: Stop the Bleeding (1-2 weeks)
-**Goal: Prevent new breakage, improve error messages**
+
+**Goal:** Prevent new breakage, improve error messages
 
 1. **Replace panics with Results in builder methods**
    - `default_command()` → returns `Result<Self, BuilderError>`
@@ -507,9 +518,10 @@ full = ["cli", "macros"]
    - Test each OutputMode with and without theme
 
 ### Phase 2: Unify App/LocalApp (2-4 weeks)
-**Goal: Eliminate code duplication, ensure feature parity**
 
-*Note: You mentioned this is in progress*
+**Goal:** Eliminate code duplication, ensure feature parity
+
+*Note:* You mentioned this is in progress
 
 1. **Extract `AppCore<M>` with shared logic**
    - Rendering, output mode handling, hook execution
@@ -528,9 +540,11 @@ full = ["cli", "macros"]
    - LocalApp gets help interception
 
 ### Phase 3: Configuration Safety (2-3 weeks)
-**Goal: Make misconfiguration impossible or obvious**
+
+**Goal:** Make misconfiguration impossible or obvious
 
 1. **Type-state builders**
+
    ```rust
    AppBuilder<NoTemplates>  →  .templates()  →  AppBuilder<HasTemplates>
    AppBuilder<HasTemplates> →  .build()      →  RenderableApp
@@ -542,6 +556,7 @@ full = ["cli", "macros"]
    - Warn on unused configuration
 
 3. **Configuration diagnostics**
+
    ```rust
    let app = App::builder()
        // ...
@@ -549,7 +564,8 @@ full = ["cli", "macros"]
    ```
 
 ### Phase 4: Comprehensive Testing (Ongoing)
-**Goal: Prevent regression, cover configuration space**
+
+**Goal:** Prevent regression, cover configuration space
 
 1. **Property-based tests** for rendering invariants
 2. **Snapshot tests** for all output modes
@@ -576,7 +592,7 @@ full = ["cli", "macros"]
 The framework's fragility is not from any single issue but from the **accumulation of design decisions that optimized for initial development speed over long-term maintainability**:
 
 1. **Copy-paste vs abstraction**: Duplication was faster than designing proper abstractions
-2. **Option<T> vs explicit states**: Options are easier to add than modeling configuration states
+2. **`Option<T>` vs explicit states**: Options are easier to add than modeling configuration states
 3. **panic! vs Result**: Panics are shorter to write than proper error handling
 4. **Happy path vs defensive**: Testing the happy path is faster than testing edge cases
 

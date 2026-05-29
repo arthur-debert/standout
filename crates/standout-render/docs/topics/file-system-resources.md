@@ -7,11 +7,13 @@
 ## The Development Workflow
 
 During development, you want to:
+
 1. Edit a template or stylesheet
 2. Re-run your program
 3. See changes immediately
 
 During release, you want:
+
 1. A single binary with no external dependencies
 2. No file paths to manage
 3. No risk of missing assets
@@ -42,6 +44,7 @@ let output = renderer.render("report", &data)?;
 ### How It Works
 
 The `Renderer` tracks the source of each template:
+
 - **Inline**: Content provided as a string (always cached)
 - **File-based**: Path recorded, content read on demand
 

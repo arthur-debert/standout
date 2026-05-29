@@ -297,6 +297,7 @@ let output = render_with_output(template, &data, &theme, OutputMode::Auto)?;
 ```
 
 In auto mode:
+
 - TTY with color support → rich output
 - Pipe or redirect → plain text
 

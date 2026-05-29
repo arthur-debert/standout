@@ -52,7 +52,7 @@ The chain runs in the **pre-dispatch** phase — before the handler is called �
 
 `standout`'s execution pipeline runs hooks in three phases:
 
-```
+```text
 parsed CLI args → PRE-DISPATCH → handler → POST-DISPATCH → render → POST-OUTPUT
 ```
 
@@ -146,7 +146,7 @@ Chain-level validation runs as part of `resolve_with_source`. If validation fail
 
 If the user runs `mycli create --body "   "`, the framework reports:
 
-```
+```text
 Hook error: input `body`: validation failed: body must not be empty
 ```
 

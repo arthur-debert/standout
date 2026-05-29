@@ -9,6 +9,7 @@
 ListView provides a standardized pattern for displaying collections in CLI applications. It is the first building block toward a Django-style CRUD system where common operations are generated from annotated structs.
 
 **Goals:**
+
 1. Minimal boilerplate for common list displays
 2. Consistent structure: intro → items → ending → messages
 3. First-class tabular integration (zero-template lists)
@@ -51,6 +52,7 @@ Three tiers of complexity:
 ### Composition Over Inheritance
 
 ListView is a configuration pattern, not a base class. It composes:
+
 - **Tabular** for layout (optional)
 - **Seeker** for filtering (optional)
 - **Templates** for custom rendering (optional)
@@ -141,7 +143,7 @@ pub struct Task {
 
 Renders as:
 
-```
+```text
 Your tasks:
 
    1  Implement authentication          pending
@@ -214,6 +216,7 @@ fn list_tasks(args: &ArgMatches, query: Query) -> HandlerResult<ListViewResult<T
 ### CLI Arguments (Phase 4 Integration)
 
 When using `#[derive(FilterArgs)]` from Seeker Phase 4, the dispatch automatically:
+
 1. Generates filter arguments (`--name-contains`, `--status-eq`, etc.)
 2. Parses them into a `Query`
 3. Passes the query to the handler
@@ -232,12 +235,12 @@ enum Commands {
 The user runs:
 
 ```bash
-$ myapp list --status-eq=pending --name-contains=auth --limit=10
+myapp list --status-eq=pending --name-contains=auth --limit=10
 ```
 
 And gets filtered results with a summary:
 
-```
+```text
 Showing 2 of 15 tasks (filtered by: status=pending, name contains "auth")
 
    5  Implement authentication          pending
@@ -270,7 +273,7 @@ pub struct Task { /* ... */ }
 
 Generates:
 
-```
+```text
 myapp task list [--filters...]
 myapp task view <id>
 myapp task delete <id>
@@ -296,6 +299,7 @@ enum Commands {
 ```
 
 The `list_view` marker tells dispatch to:
+
 1. Use `list-view.jinja` template
 2. Expect `ListViewResult<Task>` from handler
 3. Use `Task`'s `Tabular` impl for item rendering
@@ -447,6 +451,7 @@ As standout develops higher-level features (list views, detail views, CRUD), it 
 ### The Problem
 
 If the framework provides `list-view.jinja` and a user's project also has `list-view.jinja`, behavior is ambiguous:
+
 - Which takes precedence?
 - How does the user intentionally override vs accidentally collide?
 - How does the user reference the framework version explicitly?
@@ -455,7 +460,7 @@ If the framework provides `list-view.jinja` and a user's project also has `list-
 
 **Templates:** Framework templates live in the `standout/` namespace.
 
-```
+```text
 Framework provides:     standout/list-view.jinja
 User creates:           list-view.jinja (no collision)
 User overrides:         standout/list-view.jinja (intentional)
@@ -500,6 +505,7 @@ let app = App::builder()
 ```
 
 Default is `true` for both. Disabling is useful when:
+
 - Building a completely custom UI system
 - Avoiding any implicit behavior
 - Debugging template resolution
@@ -607,6 +613,7 @@ $ $EDITOR ui/templates/standout/list-view.jinja
 [1] **ListViewResult serialization**: The struct serializes cleanly to JSON for structured output modes. When `--output=json`, the framework bypasses templating and serializes directly.
 
 [2] **Builder pattern**: The `list_view()` helper is a convenience. Direct struct construction works fine for complex cases:
+
 ```rust
 ListViewResult {
     items,
@@ -621,6 +628,7 @@ ListViewResult {
 [3] **Tabular detection**: The template checks if `tabular_spec` is present (set by framework when `T: Tabular`). If not present, it falls back to item templates or basic iteration.
 
 [4] **Handler injection**: The `filterable` attribute causes the dispatch system to:
+
 1. Generate Seeker CLI args via `#[derive(FilterArgs)]`
 2. Parse args into a `Query` before handler invocation
 3. Pass `Query` as second parameter to handler (after `&ArgMatches`)
@@ -628,6 +636,7 @@ ListViewResult {
 This follows the same pattern as other dispatch injections (format, theme).
 
 [5] **Tabular + Seeker synergy**: When both are derived on the same struct, you get:
+
 - Automatic column layout from `#[tabular(...)]`
 - Automatic filter args from `#[seek(...)]`
 - Zero templates needed for a fully-featured filterable list

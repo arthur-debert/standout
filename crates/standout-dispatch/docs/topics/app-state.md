@@ -37,7 +37,7 @@ let app = App::builder()
     .build()?;
 ```
 
-### Access in Handlers
+### Accessing App State in Handlers
 
 ```rust
 fn list_handler(matches: &ArgMatches, ctx: &CommandContext) -> HandlerResult<Vec<Item>> {
@@ -107,7 +107,7 @@ let hooks = Hooks::new()
     });
 ```
 
-### Access in Handlers
+### Accessing Extensions in Handlers
 
 ```rust
 fn list_handler(matches: &ArgMatches, ctx: &CommandContext) -> HandlerResult<Vec<Item>> {
@@ -127,7 +127,7 @@ fn list_handler(matches: &ArgMatches, ctx: &CommandContext) -> HandlerResult<Vec
 
 ## When to Use Which
 
-### Use App State For:
+### Use App State For
 
 - **Database connections** - Expensive to create, should be pooled
 - **Configuration** - Loaded once at startup
@@ -135,7 +135,7 @@ fn list_handler(matches: &ArgMatches, ctx: &CommandContext) -> HandlerResult<Vec
 - **Caches** - Shared lookup tables or memoization
 - **Feature flags** - Global toggles loaded at startup
 
-### Use Extensions For:
+### Use Extensions For
 
 - **User context** - Current user, session, permissions
 - **Request metadata** - Request ID, timing, correlation ID
@@ -212,7 +212,7 @@ if let Some(cache) = ctx.app_state.get::<Cache>() {
 
 `get_required` produces descriptive errors:
 
-```
+```text
 Extension missing: type myapp::Database not found in context
 ```
 

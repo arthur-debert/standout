@@ -165,7 +165,7 @@ fn list(#[flag] all: bool) -> Result<Vec<Item>, Error> {
 }
 ```
 
-### Auto-wrap Result<T> (v3.6.1)
+### Auto-wrap `Result<T>` (v3.6.1)
 
 Handlers can return `Result<T, E>` directly instead of `Ok(Output::Render(...))`:
 

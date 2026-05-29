@@ -18,7 +18,7 @@ Template + Data → [Pass 1: MiniJinja] → Text with style tags → [Pass 2: BB
 
 **Pass 2 - BBParser**: Style tag processing. Bracket-notation tags are converted to ANSI escape codes (or stripped, depending on output mode).
 
-### Example
+### Pipeline Example
 
 ```text
 Template:     [title]{{ name }}[/title] has {{ count }} items
@@ -144,7 +144,7 @@ Pass 2 (BBParser) processes style tags differently based on the output mode:
 | `Text` | Strip tags completely | Plain text, pipes, files |
 | `TermDebug` | Keep tags as literal text | Debugging, testing |
 
-### Example
+### Processing Modes Example
 
 Template: `[title]Hello[/title]`
 
@@ -260,6 +260,7 @@ let output = renderer.render("greeting", &data)?;
 Supported extensions (in priority order): `.jinja`, `.jinja2`, `.j2`, `.stpl`, `.txt`
 
 When you request `"report"`, the registry checks:
+
 - Inline template named `"report"`
 - `report.jinja` in registered directories
 - `report.jinja2`, `report.j2`, `report.stpl`, `report.txt` (lower priority)
@@ -368,6 +369,7 @@ if !errors.is_empty() {
 ```
 
 Validation catches:
+
 - Misspelled style names
 - References to undefined styles
 - Mismatched opening/closing tags

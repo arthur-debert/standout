@@ -11,6 +11,7 @@ The `standout-clap` crate will be folded into `standout` core, with clap-specifi
 functionality behind a `clap` feature flag.
 
 **Rationale:**
+
 - Users almost always need both crates together
 - Documentation is awkwardly split between crates
 - Re-exports create circular-feeling dependencies
@@ -18,7 +19,8 @@ functionality behind a `clap` feature flag.
 - Simplifies dependency management for users
 
 **New structure:**
-```
+
+```text
 standout/
 ├── src/
 │   ├── lib.rs           # Core exports
@@ -43,6 +45,7 @@ standout/
 **Problem:** `run()` doesn't run anything - it just parses arguments.
 
 **Current (confusing):**
+
 ```rust
 Standout::run(cmd)           // Returns ArgMatches, doesn't execute
 builder.run_and_print(cmd, args) // Actually runs and prints
@@ -50,6 +53,7 @@ builder.dispatch_from(cmd, args) // Runs, returns result
 ```
 
 **Proposed (intuitive):**
+
 ```rust
 // Primary API - matches user expectation
 app.run(cmd, args)              // Execute handlers, print output, exit on error
@@ -97,6 +101,7 @@ let app = Standout::builder()
 **Problem:** Too many render variants with unclear distinctions.
 
 **Current (7 functions):**
+
 ```rust
 render()
 render_with_output()
@@ -108,6 +113,7 @@ render_or_serialize_with_spec()
 ```
 
 **Proposed (3 functions + builder for advanced):**
+
 ```rust
 // Simple rendering
 render(template, data, theme) -> String
@@ -143,6 +149,7 @@ Renderer::new(theme)
 **Problem:** `CommandResult` mixes success/error with output type.
 
 **Current:**
+
 ```rust
 pub enum CommandResult<T: Serialize> {
     Ok(T),
@@ -153,6 +160,7 @@ pub enum CommandResult<T: Serialize> {
 ```
 
 **Proposed:**
+
 ```rust
 pub enum Output<T: Serialize> {
     Render(T),                    // Render with template
@@ -210,6 +218,7 @@ match app.dispatch(matches) {
 ### 7. Remove Deprecated Items
 
 Per project guidelines (no backwards compatibility), remove:
+
 - `TopicHelper` type alias
 - `TopicHelperBuilder` type alias
 - `TopicHelpResult` type alias
@@ -219,7 +228,7 @@ Per project guidelines (no backwards compatibility), remove:
 
 ## Module Structure After Merge
 
-```
+```text
 standout/
 ├── Cargo.toml
 └── src/
@@ -304,6 +313,7 @@ pub use standout_macros::{embed_templates, embed_styles, Dispatch};
 ## Migration Examples
 
 ### Before (current API)
+
 ```rust
 use standout::{render_or_serialize, Theme, OutputMode};
 use standout_clap::{Standout, CommandResult, CommandContext};
@@ -317,6 +327,7 @@ let matches = Standout::builder()
 ```
 
 ### After (new API)
+
 ```rust
 use standout::{App, Theme, OutputMode, HandlerResult, Output};
 
@@ -340,18 +351,21 @@ the codebase in a working state with passing tests.
 
 ### Phase 1: Preparation (Non-Breaking)
 
-**1.1 Remove deprecated type aliases**
+#### 1.1 Remove deprecated type aliases
+
 - Delete `TopicHelper`, `TopicHelperBuilder`, `TopicHelpResult`, `Config` aliases
 - Update any internal usage
 - ~30 min
 
-**1.2 Consolidate duplicate render functions**
+#### 1.2 Consolidate duplicate render functions
+
 - `render_with_output()` and `render_with_mode()` have overlapping purposes
 - Audit and document the actual difference (output mode vs color mode)
 - Add deprecation notes in code comments for functions to be merged later
 - ~1 hr
 
-**1.3 Add feature flag structure to standout**
+#### 1.3 Add feature flag structure to standout
+
 - Add `[features]` section to `standout/Cargo.toml`
 - Create empty `src/cli/mod.rs` behind `clap` feature
 - Ensure existing API unchanged
@@ -361,29 +375,34 @@ the codebase in a working state with passing tests.
 
 ### Phase 2: Crate Merge (Structural)
 
-**2.1 Copy standout-clap source into standout/src/cli/**
+#### 2.1 Copy standout-clap source into standout/src/cli/
+
 - Move all source files
 - Update internal `use` statements to reference sibling modules
 - Keep `standout-clap` crate temporarily (will delete later)
 - ~2 hr
 
-**2.2 Update standout/Cargo.toml dependencies**
+#### 2.2 Update standout/Cargo.toml dependencies
+
 - Add clap dependency behind feature flag
 - Add other standout-clap dependencies (anyhow, etc.)
 - ~30 min
 
-**2.3 Wire up cli module exports**
+#### 2.3 Wire up cli module exports
+
 - Add `pub mod cli` behind `#[cfg(feature = "clap")]`
 - Export types from `lib.rs`
 - ~1 hr
 
-**2.4 Create standout-clap as thin re-export crate**
+#### 2.4 Create standout-clap as thin re-export crate
+
 - Replace standout-clap/src/lib.rs with `pub use standout::cli::*;`
 - Add deprecation notice to crate docs
 - Ensures existing users still compile
 - ~30 min
 
-**2.5 Delete standout-clap crate**
+#### 2.5 Delete standout-clap crate
+
 - Remove from workspace
 - Delete crate directory
 - Update workspace Cargo.toml
@@ -393,18 +412,21 @@ the codebase in a working state with passing tests.
 
 ### Phase 3: Builder Unification
 
-**3.1 Add `.templates()` method to AppBuilder**
+#### 3.1 Add `.templates()` method to AppBuilder
+
 - Accept `EmbeddedTemplates` (like RenderSetup does)
 - Store alongside existing `template_dir`
 - ~1 hr
 
-**3.2 Unify RenderSetup into AppBuilder**
+#### 3.2 Unify RenderSetup into AppBuilder
+
 - Move RenderSetup's build logic into AppBuilder
 - AppBuilder now handles both embedded resources AND command dispatch
 - RenderSetup becomes type alias (temporarily) or internal
 - ~2 hr
 
-**3.3 Make builder.build() return Result**
+#### 3.3 Make builder.build() return Result
+
 - Change signature from `fn build(self) -> Standout` to `fn build(self) -> Result<App, SetupError>`
 - Update all call sites
 - ~1 hr
@@ -413,23 +435,27 @@ the codebase in a working state with passing tests.
 
 ### Phase 4: Run Semantics Fix
 
-**4.1 Rename current run methods (preparation)**
+#### 4.1 Rename current run methods (preparation)
+
 - `Standout::run()` → `Standout::parse()` (internal rename, keep old as deprecated alias)
 - `Standout::run_with()` → `Standout::parse_with()`
 - `Standout::run_from()` → `Standout::parse_from()`
 - ~1 hr
 
-**4.2 Implement new run() that executes and prints**
+#### 4.2 Implement new run() that executes and prints
+
 - New `fn run(self, cmd, args) -> !` that calls dispatch + prints + exits
 - This is what users expect
 - ~1 hr
 
-**4.3 Implement run_to_string()**
+#### 4.3 Implement run_to_string()
+
 - New `fn run_to_string(&self, cmd, args) -> Result<String, Error>`
 - For testing and composition
 - ~1 hr
 
-**4.4 Remove deprecated parse aliases**
+#### 4.4 Remove deprecated parse aliases
+
 - Delete the old `run()` → `parse()` aliases
 - Final cleanup
 - ~30 min
@@ -438,22 +464,26 @@ the codebase in a working state with passing tests.
 
 ### Phase 5: Type Renames
 
-**5.1 Rename Standout → App**
+#### 5.1 Rename Standout → App
+
 - Rename struct and impl blocks
 - Update all references
 - ~1 hr
 
-**5.2 Rename StandoutBuilder → AppBuilder**
+#### 5.2 Rename StandoutBuilder → AppBuilder
+
 - Rename struct
 - Update builder() method
 - ~30 min
 
-**5.3 Rename StandoutApp → RenderEngine**
+#### 5.3 Rename StandoutApp → RenderEngine
+
 - Or merge into Renderer
 - Evaluate if this type is still needed
 - ~1 hr
 
-**5.4 Rename RunResult::Unhandled → RunResult::NoMatch**
+#### 5.4 Rename RunResult::Unhandled → RunResult::NoMatch
+
 - Simple enum variant rename
 - ~15 min
 
@@ -461,20 +491,24 @@ the codebase in a working state with passing tests.
 
 ### Phase 6: Handler Result Refactor
 
-**6.1 Create new Output<T> enum**
+#### 6.1 Create new `Output<T>` enum
+
 - Define new enum alongside CommandResult
 - ~30 min
 
-**6.2 Create HandlerResult type alias**
+#### 6.2 Create HandlerResult type alias
+
 - `type HandlerResult<T> = Result<Output<T>, anyhow::Error>`
 - ~15 min
 
-**6.3 Update Handler trait to use new types**
+#### 6.3 Update Handler trait to use new types
+
 - Change return type from `CommandResult<T>` to `HandlerResult<T>`
 - Update all handler implementations
 - ~2 hr
 
-**6.4 Remove old CommandResult enum**
+#### 6.4 Remove old CommandResult enum
+
 - Delete after all usages migrated
 - ~30 min
 
@@ -482,15 +516,18 @@ the codebase in a working state with passing tests.
 
 ### Phase 7: Render Function Cleanup
 
-**7.1 Implement render_auto()**
+#### 7.1 Implement render_auto()
+
 - New function that chooses template vs serialize based on OutputMode
 - ~1 hr
 
-**7.2 Deprecate redundant render functions**
+#### 7.2 Deprecate redundant render functions
+
 - Mark render_or_serialize* as deprecated in favor of render_auto
 - ~30 min
 
-**7.3 Remove deprecated render functions**
+#### 7.3 Remove deprecated render functions
+
 - Delete after deprecation period (or immediately per project guidelines)
 - ~30 min
 
@@ -498,16 +535,19 @@ the codebase in a working state with passing tests.
 
 ### Phase 8: Documentation and Polish
 
-**8.1 Update lib.rs documentation**
+#### 8.1 Update lib.rs documentation
+
 - Rewrite module docs to reflect new API
 - Add migration guide
 - ~2 hr
 
-**8.2 Update intro.lex examples**
+#### 8.2 Update intro.lex examples
+
 - Ensure all code examples work with new API
 - ~1 hr
 
-**8.3 Update README and other docs**
+#### 8.3 Update README and other docs
+
 - Sync all documentation
 - ~1 hr
 
@@ -516,12 +556,14 @@ the codebase in a working state with passing tests.
 ## Commit Strategy
 
 Each numbered item (1.1, 1.2, etc.) should be a single commit with:
+
 - Descriptive commit message referencing this proposal
 - All tests passing
 - No breaking changes to external API until Phase 4+
 
 Example commit messages:
-```
+
+```text
 refactor: remove deprecated type aliases (Phase 1.1)
 
 Remove TopicHelper, TopicHelperBuilder, TopicHelpResult, and Config
@@ -530,7 +572,7 @@ type aliases per API unification proposal.
 Ref: docs/proposals/new-api.md
 ```
 
-```
+```text
 feat: merge standout-clap into standout core (Phase 2.1-2.3)
 
 Move CLI integration code into standout crate behind "clap" feature.
@@ -544,16 +586,19 @@ Ref: docs/proposals/new-api.md
 ## Risk Mitigation
 
 **Testing strategy:**
+
 - Run full test suite after each commit
 - Phase 2 (crate merge) is highest risk - take extra care
 - Consider temporary CI job that tests both old and new import paths
 
 **Rollback points:**
+
 - After Phase 2.4, old standout-clap still works (re-exports)
 - After Phase 3, builder unification complete but types unchanged
 - After Phase 4, run semantics fixed but types unchanged
 
 **Dependencies:**
+
 - Phase 1 has no dependencies
 - Phase 2 depends on Phase 1.3
 - Phase 3 depends on Phase 2
@@ -575,6 +620,6 @@ Ref: docs/proposals/new-api.md
 | 7. Render Cleanup | 2 hr | 3 |
 | 8. Documentation | 4 hr | All |
 
-**Total: ~27 hours of focused work**
+**Total:** ~27 hours of focused work.
 
 Phases 4-7 can be parallelized if multiple contributors, reducing wall-clock time.

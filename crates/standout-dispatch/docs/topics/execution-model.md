@@ -264,6 +264,7 @@ fn(&serde_json::Value, &str) -> Result<String, RenderError>
 ```
 
 Parameters:
+
 - `data`: The serialized handler output
 - `view`: A view/template name hint (can be ignored)
 

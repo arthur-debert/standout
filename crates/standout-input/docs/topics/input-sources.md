@@ -41,7 +41,7 @@ Standout's input system integrates as a pre-handler phase, running *before* your
 
 Input sources fall into two categories:
 
-### Non-Interactive Sources
+### Non-Interactive Sources at a Glance
 
 These work in scripts and CI pipelines:
 
@@ -53,7 +53,7 @@ These work in scripts and CI pipelines:
 | **Env** | Environment variable |
 | **Default** | Hardcoded fallback |
 
-### Interactive Sources
+### Interactive Sources at a Glance
 
 These require a TTY and user interaction:
 
@@ -448,7 +448,7 @@ Input sources and output piping are symmetric but opposite:
 | Interactive | Can be (editor) | Never |
 | Purpose | Acquire content | Transform/route output |
 
-```
+```text
               INPUT SOURCES                    OUTPUT PIPING
               ↓                                ↓
 [Arg/Stdin/Editor] → Handler → Render → [jq/tee/clipboard]

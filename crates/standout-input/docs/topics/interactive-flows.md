@@ -106,6 +106,7 @@ let proceed = InquireConfirm::new("Continue?")
 ```
 
 Behavior:
+
 - Stdin not a TTY *or* empty submission → `InputError::NoInput`
 - Otherwise → the typed value
 - User cancellation is **backend-specific**:

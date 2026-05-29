@@ -1,4 +1,4 @@
-## Create Oustanding Shell Applications for free
+# Create Outstanding Shell Applications for free
 
 Standout is a rust library for building finely crafted non-interactive command line applications.
 

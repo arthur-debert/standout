@@ -202,6 +202,7 @@ A **clause** is a single filter predicate consisting of:
 - A comparison value
 
 Examples:
+
 - `name Eq "index.html"` — name equals "index.html"
 - `size Lt 1024` — size less than 1024
 - `status In [Active, Pending]` — status is Active or Pending
@@ -220,7 +221,7 @@ A **clause group** is a set of clauses sharing a logical role. There are three g
 
 A **query** combines clause groups using fixed semantics:
 
-```
+```text
 match = (all AND clauses match)
       ∧ (at least one OR clause matches, OR no OR clauses exist)
       ∧ (no NOT clause matches)
@@ -280,7 +281,7 @@ A query may specify:
 
 ### Crate Structure
 
-```
+```text
 crates/standout-seeker/
 ├── Cargo.toml
 ├── src/
@@ -674,7 +675,7 @@ proptest! {
 
 ## Phase 2: Derive Macros
 
-**Status: Implemented**
+**Status:** Implemented
 
 The `#[derive(Seekable)]` macro generates accessor functions and field constants.
 
@@ -759,13 +760,14 @@ Built-in `SeekerTimestamp` implementations exist for `i64` and `u64`.
 
 ## Phase 3: String Parsing
 
-**Status: In Progress**
+**Status:** In Progress
 
 A shell-agnostic layer that parses key-value string pairs into typed `Query` objects. This layer is reusable across different interfaces (CLI, web APIs, configuration files).
 
-### Motivation
+### String Parsing Motivation
 
 The string format `field-operator=value` appears in multiple contexts:
+
 - CLI arguments: `--name-contains=foo`
 - URL query params: `?name-contains=foo`
 - Configuration: `name-contains = foo`
@@ -775,6 +777,7 @@ By separating string parsing from CLI specifics, we get a reusable layer.
 ### SeekerSchema Trait
 
 The parser needs field metadata to:
+
 1. Validate field names exist
 2. Determine field types for value parsing
 3. Validate operators are appropriate for the field type
@@ -810,6 +813,7 @@ The derive macro generates `SeekerSchema` alongside `Seekable` by default. Users
 **Key format:** `field-name-operator`
 
 Rules:
+
 1. Split on `-` (dash)
 2. Operators cannot contain dashes
 3. Last segment is the operator (if it's a valid operator name)
@@ -817,6 +821,7 @@ Rules:
 5. If no operator segment, use the type's default operator
 
 **Examples:**
+
 - `name-contains` → field: `name`, operator: `contains`
 - `created-at-before` → field: `created-at`, operator: `before`
 - `modified-by-eq` → field: `modified-by`, operator: `eq`
@@ -870,7 +875,7 @@ Values are parsed based on field type:
 
 For `In` operator, values are comma-separated: `--status-in=active,pending,done`
 
-### Clause Groups
+### String Parsing Clause Groups
 
 Group markers change which group subsequent clauses are added to:
 
@@ -952,6 +957,7 @@ pub fn parse_value(
 ### Enum Value Resolution
 
 For enum fields, values can be either:
+
 1. **Numeric discriminant:** `0`, `1`, `2`
 2. **Variant name:** `pending`, `active`, `completed`
 
@@ -1004,7 +1010,7 @@ let results = query.filter(&tasks, Task::accessor);
 
 ### Crate Structure Addition
 
-```
+```text
 crates/standout-seeker/
 ├── src/
 │   ├── ...existing files...
@@ -1024,9 +1030,10 @@ crates/standout-seeker/
 
 Clap integration for automatic CLI argument generation.
 
-### Overview
+### CLI Bridge Overview
 
 Phase 4 builds on Phase 3's string parsing to provide seamless clap integration:
+
 - Auto-generated `--field-op=value` arguments from `SeekerSchema`
 - `--AND`, `--OR`, `--NOT` flags for group markers
 - `--order-by`, `--limit`, `--offset` standard arguments
@@ -1051,7 +1058,7 @@ struct ListArgs {
 
 For a `Task` with fields `name: String`, `priority: Number`, `done: Bool`:
 
-```
+```text
 OPTIONS:
     --name <VALUE>              Filter by name (equals)
     --name-eq <VALUE>           Filter by name equals
@@ -1121,7 +1128,7 @@ Or implement `SeekerSchema` manually to control exposure.
 
 Integrates with standout's help topics system to provide detailed filter documentation:
 
-```
+```text
 $ myapp help filters
 
 QUERY FILTERS

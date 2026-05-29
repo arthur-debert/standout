@@ -77,6 +77,7 @@ fn list_handler(matches: &ArgMatches, _ctx: &CommandContext) -> HandlerResult<Li
 ```
 
 The handler:
+
 - Receives parsed arguments (`&ArgMatches`) and execution context
 - Returns a `Result` with serializable data
 - Contains zero presentation logic

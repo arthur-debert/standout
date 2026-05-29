@@ -50,6 +50,6 @@ fn dispatch(&self, ...) {
 
 ## Benefits
 
-1.  **Order Independence**: `commands()` and `theme()` can be called in any order.
-2.  **Single Source of Truth**: The theme used is always the one present in the `App` at runtime, not a stale copy.
-3.  **Compile-Time Guarantee**: It is impossible to call a handler without providing a theme, eliminating "forgotten theme" bugs.
+1. **Order Independence**: `commands()` and `theme()` can be called in any order.
+2. **Single Source of Truth**: The theme used is always the one present in the `App` at runtime, not a stale copy.
+3. **Compile-Time Guarantee**: It is impossible to call a handler without providing a theme, eliminating "forgotten theme" bugs.
