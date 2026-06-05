@@ -1,11 +1,31 @@
-"""cli — the shared CLI harness that collapses the 23 hand-rolled arg loops.
+"""``release_core.cli`` — two things under one name, by design:
 
-A verb declares its options declaratively as a list of :class:`Opt`; the
-harness handles ``-h``/``--help`` (printing the module docstring — the single
-source of help text, no separate ``show_help()``), a uniform usage-error exit
-code (64), and ``--json``-style boolean flags.
+1. The **shared CLI harness** (``Opt`` / :func:`parse` / ``EXIT_OK`` /
+   ``EXIT_USAGE``) that the verb modules use for their own ``--help`` and
+   uniform usage-error exit codes. This was historically ``cli.py``; it is
+   folded in here verbatim so ``from ..cli import EXIT_OK, Opt, parse`` keeps
+   working byte-for-byte for every verb that imports it.
 
-Verb modules call :func:`parse` at the top of ``main()``.
+2. The **hierarchical click command tree** (``release-core <group> <command>``),
+   one module per top-level group, assembled in :mod:`release_core.cli_entry`:
+
+   - :mod:`._helpers`   — the two wrapping patterns (``wrap_verb`` /
+                          ``wrap_script``) + the ``run_root`` click→int bridge.
+   - :mod:`.toplevel`   — per-project flat commands + small per-project groups
+                          (``changelog`` / ``semver`` / ``sync`` / ``issue`` …).
+   - :mod:`.pr`         — the ``pr`` group (PR-loop helpers; EXEMPLAR).
+   - :mod:`.ci`         — the ``ci`` group (fetch-deps / fetch-artifact; stub).
+   - :mod:`.admin`      — the ``admin`` subpackage (fleet/meta-release), itself
+                          split into ``repos`` / ``release_cmds`` / ``policy`` /
+                          ``secrets`` / ``inbox``.
+
+   See ``docs/dev/release-core-cli-pattern.md`` for the authoring rules.
+
+A verb declares its options declaratively as a list of :class:`Opt`; the harness
+handles ``-h``/``--help`` (printing the module docstring — the single source of
+help text, no separate ``show_help()``), a uniform usage-error exit code (64),
+and ``--json``-style boolean flags. Verb modules call :func:`parse` at the top
+of ``main()``.
 """
 
 from __future__ import annotations

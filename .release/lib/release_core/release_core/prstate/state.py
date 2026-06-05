@@ -5,7 +5,7 @@
 (it *reports* READY; the caller does the draft->ready flip) and never branches
 on a reviewer's name — it consumes the adapter interface only.
 
-Two definitions anchor it (see docs/proposals/dev-workflow-state-engine.lex):
+Two definitions anchor it:
   Reviewed = every required reviewer done + every thread resolved.
   Ready    = Reviewed + CI green + mergeable.
 
@@ -117,13 +117,10 @@ def evaluate(
     )
 
     # 1. Required reviewers must all be done. Best-effort ones never gate.
-    pending_required = [r.name for r in registry if r.required and lifecycles[r.name] not in _DONE]
+    pending_required = [r for r in registry if r.required and lifecycles[r.name] not in _DONE]
     if pending_required:
         status.state = TaskState.REVIEWS_PENDING
-        status.next_action = (
-            f"waiting on required review(s): {', '.join(pending_required)} — "
-            "request if not yet requested, else wait"
-        )
+        status.next_action = _reviews_pending_action(ctx, pending_required, lifecycles)
         return status
 
     # 2. Required reviews in; any open thread (from any reviewer) must be addressed
@@ -171,6 +168,61 @@ def evaluate(
     status.state = TaskState.REVIEWED
     status.next_action = "reviews done; mergeability not yet determined — re-check shortly"
     return status
+
+
+def _reviews_pending_action(
+    ctx: PullContext,
+    pending: list[ReviewerAdapter],
+    lifecycles: dict[str, ReviewLifecycle],
+) -> str:
+    """Build the REVIEWS_PENDING next-action, distinguishing the two cases a
+    bare "request if not yet requested, else wait" conflates:
+
+      • never-requested — no review by this reviewer has ever landed → request.
+      • stale-after-push — a review landed on an EARLIER commit but the current
+        head is `not_requested` (a fixup push resets Copilot's request) → the
+        action is to *re-request* the reviewer for the new head, not to wait.
+
+    The distinction is cheap: a review on a non-head commit means a prior cycle
+    existed. A reviewer already REQUESTED / IN_PROGRESS on the head is simply
+    pending — wait.
+    """
+    request_names: list[str] = []  # never reviewed → request
+    rerequest_names: list[str] = []  # reviewed an earlier head → re-request
+    waiting_names: list[str] = []  # already requested/in-progress on head → wait
+
+    for adapter in pending:
+        lc = lifecycles[adapter.name]
+        if lc in (ReviewLifecycle.REQUESTED, ReviewLifecycle.IN_PROGRESS):
+            waiting_names.append(adapter.name)
+        elif _has_stale_review(ctx, adapter):
+            rerequest_names.append(adapter.name)
+        else:
+            request_names.append(adapter.name)
+
+    clauses: list[str] = []
+    if request_names:
+        clauses.append(f"request for the current head: {', '.join(request_names)}")
+    if rerequest_names:
+        clauses.append(
+            "RE-REQUEST for the current head (a prior review is stale after a push): "
+            f"{', '.join(rerequest_names)}"
+        )
+    if waiting_names:
+        clauses.append(f"wait (already requested on the current head): {', '.join(waiting_names)}")
+
+    all_names = [a.name for a in pending]
+    return f"waiting on required review(s): {', '.join(all_names)} — " + "; ".join(clauses)
+
+
+def _has_stale_review(ctx: PullContext, adapter: ReviewerAdapter) -> bool:
+    """True iff this reviewer has a review on some commit OTHER than the current
+    head — i.e. it reviewed an earlier commit and a push has since moved the head
+    (the request reset to not_requested). DISMISSED reviews don't count."""
+    return any(
+        adapter.matches(r.author) and r.state != "DISMISSED" and r.commit_id != ctx.head_sha
+        for r in ctx.reviews
+    )
 
 
 def classify_checks(rollup: list[dict]) -> ChecksState:
