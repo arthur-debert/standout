@@ -1,6 +1,6 @@
 """Circuit breakers — detect a diverging review loop and STOP before iterating.
 
-Heuristics from docs/proposals/pr-review-loop-circuit-breakers.md. A *cycle* is
+Heuristics for the review-loop circuit breakers. A *cycle* is
 one Copilot review; its findings are the inline comments attached to that
 review. All inputs derive from gh review history, except diff sizes, which come
 from git and are injected via `diff_sizer` — omitted in pure evaluation, in
