@@ -1,4 +1,9 @@
-# Skill: Standout Documentation
+---
+name: standout-docs
+description: Write and review documentation for the Standout CLI framework — guides, topics, canonical forms, and the shared `tdoo` example domain. Use when authoring or reviewing docs in a Standout-based project, or deciding whether content belongs in a guide vs a topic.
+---
+
+# Standout Documentation
 
 Write and review documentation for the Standout CLI framework.
 
