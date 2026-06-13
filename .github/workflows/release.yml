@@ -35,7 +35,7 @@ permissions:
 
 jobs:
   release:
-    uses: arthur-debert/release/.github/workflows/rust-lib.yml@v2
+    uses: arthur-debert/release/.github/workflows/rust-lib.yml@v3
     with:
       version: ${{ inputs.version }}
       # Topological order (deps before dependents). standout-test and
