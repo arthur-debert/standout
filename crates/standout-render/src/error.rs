@@ -122,13 +122,89 @@ impl From<minijinja::Error> for RenderError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::error::Error as _;
+
+    // --- Display ---
 
     #[test]
-    fn test_error_display() {
+    fn test_display_template_not_found() {
         let err = RenderError::TemplateNotFound("foo".to_string());
-        assert!(err.to_string().contains("template not found"));
-        assert!(err.to_string().contains("foo"));
+        assert_eq!(err.to_string(), "template not found: foo");
     }
+
+    #[test]
+    fn test_display_template_error() {
+        let err = RenderError::TemplateError("bad tag".to_string());
+        assert_eq!(err.to_string(), "template error: bad tag");
+    }
+
+    #[test]
+    fn test_display_serialization_error() {
+        let err = RenderError::SerializationError("oops".to_string());
+        assert_eq!(err.to_string(), "serialization error: oops");
+    }
+
+    #[test]
+    fn test_display_style_error() {
+        let err = RenderError::StyleError("alias cycle".to_string());
+        assert_eq!(err.to_string(), "style error: alias cycle");
+    }
+
+    #[test]
+    fn test_display_io_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "nope");
+        let err = RenderError::IoError(io_err);
+        let s = err.to_string();
+        assert!(s.starts_with("I/O error: "), "got: {}", s);
+        assert!(s.contains("nope"));
+    }
+
+    #[test]
+    fn test_display_operation_error_has_no_prefix() {
+        // OperationError intentionally emits the bare message (no prefix).
+        // Other variants prefix with "<kind>: " — this is the documented exception.
+        let err = RenderError::OperationError("something operational".to_string());
+        assert_eq!(err.to_string(), "something operational");
+    }
+
+    #[test]
+    fn test_display_context_error() {
+        let err = RenderError::ContextError("missing field".to_string());
+        assert_eq!(err.to_string(), "context error: missing field");
+    }
+
+    // --- std::error::Error::source() ---
+
+    #[test]
+    fn test_source_returns_io_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "missing");
+        let err = RenderError::IoError(io_err);
+        let src = err.source();
+        assert!(src.is_some(), "IoError should expose its source");
+        // Round-trip: the source should downcast to std::io::Error.
+        assert!(src.unwrap().downcast_ref::<std::io::Error>().is_some());
+    }
+
+    #[test]
+    fn test_source_is_none_for_string_variants() {
+        // None of the String-backed variants carry a chained source.
+        for err in [
+            RenderError::TemplateError("x".into()),
+            RenderError::TemplateNotFound("x".into()),
+            RenderError::SerializationError("x".into()),
+            RenderError::StyleError("x".into()),
+            RenderError::OperationError("x".into()),
+            RenderError::ContextError("x".into()),
+        ] {
+            assert!(
+                err.source().is_none(),
+                "variant unexpectedly had a source: {:?}",
+                err
+            );
+        }
+    }
+
+    // --- From impls ---
 
     #[test]
     fn test_from_io_error() {
@@ -138,12 +214,118 @@ mod tests {
     }
 
     #[test]
+    fn test_from_serde_json_error() {
+        // Invalid JSON triggers serde_json::Error.
+        let parse_err = serde_json::from_str::<serde_json::Value>("{not json").unwrap_err();
+        let render_err: RenderError = parse_err.into();
+        match render_err {
+            RenderError::SerializationError(msg) => assert!(!msg.is_empty()),
+            other => panic!("expected SerializationError, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_from_serde_yaml_error() {
+        // YAML with tab indentation in a mapping is invalid.
+        let parse_err = serde_yaml::from_str::<serde_yaml::Value>("a:\n\tb: 1").unwrap_err();
+        let render_err: RenderError = parse_err.into();
+        assert!(matches!(render_err, RenderError::SerializationError(_)));
+    }
+
+    #[test]
+    fn test_from_quick_xml_de_error() {
+        // Malformed XML triggers quick_xml::DeError.
+        let parse_err = quick_xml::de::from_str::<serde_json::Value>("<unclosed").unwrap_err();
+        let render_err: RenderError = parse_err.into();
+        assert!(matches!(render_err, RenderError::SerializationError(_)));
+    }
+
+    #[test]
+    fn test_from_csv_error() {
+        // Mismatched record lengths in strict mode produce a csv::Error.
+        let mut rdr = csv::ReaderBuilder::new()
+            .has_headers(true)
+            .flexible(false)
+            .from_reader("a,b\n1,2,3\n".as_bytes());
+        let parse_err = rdr
+            .records()
+            .find_map(|r| r.err())
+            .expect("expected a csv::Error from mismatched row length");
+        let render_err: RenderError = parse_err.into();
+        assert!(matches!(render_err, RenderError::SerializationError(_)));
+    }
+
+    #[test]
+    fn test_from_from_utf8_error() {
+        // 0x80 alone is not valid UTF-8.
+        let utf8_err = String::from_utf8(vec![0x80]).unwrap_err();
+        let render_err: RenderError = utf8_err.into();
+        assert!(matches!(render_err, RenderError::SerializationError(_)));
+    }
+
+    // --- From<minijinja::Error> branch table ---
+
+    fn classify(kind: minijinja::ErrorKind) -> RenderError {
+        let mj_err = minijinja::Error::new(kind, "x");
+        mj_err.into()
+    }
+
+    #[test]
     fn test_from_minijinja_template_not_found() {
-        let mj_err = minijinja::Error::new(
-            minijinja::ErrorKind::TemplateNotFound,
-            "template 'foo' not found",
-        );
+        assert!(matches!(
+            classify(minijinja::ErrorKind::TemplateNotFound),
+            RenderError::TemplateNotFound(_)
+        ));
+    }
+
+    #[test]
+    fn test_from_minijinja_template_kinds_map_to_template_error() {
+        // Every kind in this list must map to TemplateError. If a new kind
+        // is added to that arm, extend this list to lock it in.
+        for kind in [
+            minijinja::ErrorKind::SyntaxError,
+            minijinja::ErrorKind::BadEscape,
+            minijinja::ErrorKind::UndefinedError,
+            minijinja::ErrorKind::UnknownTest,
+            minijinja::ErrorKind::UnknownFunction,
+            minijinja::ErrorKind::UnknownFilter,
+            minijinja::ErrorKind::UnknownMethod,
+        ] {
+            assert!(
+                matches!(classify(kind), RenderError::TemplateError(_)),
+                "kind {:?} should map to TemplateError",
+                kind,
+            );
+        }
+    }
+
+    #[test]
+    fn test_from_minijinja_bad_serialization() {
+        assert!(matches!(
+            classify(minijinja::ErrorKind::BadSerialization),
+            RenderError::SerializationError(_)
+        ));
+    }
+
+    #[test]
+    fn test_from_minijinja_default_arm_is_operation_error() {
+        // An ErrorKind not enumerated above must fall through to OperationError.
+        // InvalidOperation is a stable kind that is NOT in the template/serialization arms.
+        assert!(matches!(
+            classify(minijinja::ErrorKind::InvalidOperation),
+            RenderError::OperationError(_)
+        ));
+    }
+
+    #[test]
+    fn test_from_minijinja_preserves_message() {
+        let mj_err =
+            minijinja::Error::new(minijinja::ErrorKind::SyntaxError, "specific marker xyzzy");
         let render_err: RenderError = mj_err.into();
-        assert!(matches!(render_err, RenderError::TemplateNotFound(_)));
+        assert!(
+            render_err.to_string().contains("xyzzy"),
+            "message should be preserved through conversion: got {}",
+            render_err,
+        );
     }
 }
