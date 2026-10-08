@@ -67,6 +67,9 @@ printf 'Checking Rust formatting\n'
 cargo fmt --all -- --check
 printf 'Checking Rust with Clippy\n'
 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+printf 'Checking Rust builds without test-support\n'
+cargo check --locked -p standout --no-default-features --features macros
+cargo check --locked -p standout-render --no-default-features
 printf 'Running Rust tests\n'
 cargo test --locked --workspace --all-features
 printf 'Checking Rust documentation\n'
