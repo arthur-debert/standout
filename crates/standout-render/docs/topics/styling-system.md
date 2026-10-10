@@ -187,7 +187,13 @@ let theme = Theme::new()
 
 ### Color Mode Detection
 
-`standout-render` auto-detects the OS color scheme when the caller probes the process:
+The default-enabled `os-theme` feature lets `standout-render` detect the OS
+color scheme when the caller probes the process. With this feature disabled,
+`TargetProperties::detect()` uses `ColorMode::Light`; an explicitly supplied
+`TargetProperties.color_scheme` still selects the light or dark styles. Standout
+forwards the feature as `standout/os-theme`.
+
+Detection runs when the caller probes the process:
 
 ```rust
 use standout_render::{ColorMode, TargetProperties};

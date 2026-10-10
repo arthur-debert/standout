@@ -13,10 +13,10 @@ pub enum StyleDefinition {
 }
 
 impl StyleDefinition {
-    pub fn parse(value: &serde_yaml::Value, style_name: &str) -> Result<Self, StylesheetError> {
+    pub fn parse(value: &yaml_serde::Value, style_name: &str) -> Result<Self, StylesheetError> {
         match value {
-            serde_yaml::Value::String(s) => Self::parse_string(s, style_name),
-            serde_yaml::Value::Mapping(map) => Self::parse_mapping(map, style_name),
+            yaml_serde::Value::String(s) => Self::parse_string(s, style_name),
+            yaml_serde::Value::Mapping(map) => Self::parse_mapping(map, style_name),
             _ => Err(StylesheetError::InvalidDefinition {
                 style: style_name.to_string(),
                 message: format!("Expected string or mapping, got {:?}", value),
@@ -61,10 +61,10 @@ impl StyleDefinition {
         }
     }
 
-    fn parse_mapping(map: &serde_yaml::Mapping, style_name: &str) -> Result<Self, StylesheetError> {
+    fn parse_mapping(map: &yaml_serde::Mapping, style_name: &str) -> Result<Self, StylesheetError> {
         let base = StyleAttributes::parse_mapping(map, style_name)?;
 
-        let light = if let Some(light_val) = map.get(serde_yaml::Value::String("light".into())) {
+        let light = if let Some(light_val) = map.get(yaml_serde::Value::String("light".into())) {
             let light_map =
                 light_val
                     .as_mapping()
@@ -78,7 +78,7 @@ impl StyleDefinition {
             None
         };
 
-        let dark = if let Some(dark_val) = map.get(serde_yaml::Value::String("dark".into())) {
+        let dark = if let Some(dark_val) = map.get(yaml_serde::Value::String("dark".into())) {
             let dark_map =
                 dark_val
                     .as_mapping()
@@ -152,28 +152,28 @@ mod tests {
 
     #[test]
     fn test_parse_alias() {
-        let value = serde_yaml::Value::String("muted".into());
+        let value = yaml_serde::Value::String("muted".into());
         let def = StyleDefinition::parse(&value, "test").unwrap();
         assert!(matches!(def, StyleDefinition::Alias(s) if s == "muted"));
     }
 
     #[test]
     fn test_parse_alias_with_underscore() {
-        let value = serde_yaml::Value::String("my_style".into());
+        let value = yaml_serde::Value::String("my_style".into());
         let def = StyleDefinition::parse(&value, "test").unwrap();
         assert!(matches!(def, StyleDefinition::Alias(s) if s == "my_style"));
     }
 
     #[test]
     fn test_parse_alias_with_hyphen() {
-        let value = serde_yaml::Value::String("my-style".into());
+        let value = yaml_serde::Value::String("my-style".into());
         let def = StyleDefinition::parse(&value, "test").unwrap();
         assert!(matches!(def, StyleDefinition::Alias(s) if s == "my-style"));
     }
 
     #[test]
     fn test_parse_shorthand_single_attribute() {
-        let value = serde_yaml::Value::String("bold".into());
+        let value = yaml_serde::Value::String("bold".into());
         let def = StyleDefinition::parse(&value, "test").unwrap();
         match def {
             StyleDefinition::Attributes { base, light, dark } => {
@@ -187,7 +187,7 @@ mod tests {
 
     #[test]
     fn test_parse_shorthand_single_color() {
-        let value = serde_yaml::Value::String("cyan".into());
+        let value = yaml_serde::Value::String("cyan".into());
         let def = StyleDefinition::parse(&value, "test").unwrap();
         match def {
             StyleDefinition::Attributes { base, .. } => {
@@ -199,7 +199,7 @@ mod tests {
 
     #[test]
     fn test_parse_shorthand_multiple() {
-        let value = serde_yaml::Value::String("yellow bold italic".into());
+        let value = yaml_serde::Value::String("yellow bold italic".into());
         let def = StyleDefinition::parse(&value, "test").unwrap();
         match def {
             StyleDefinition::Attributes { base, .. } => {
@@ -217,7 +217,7 @@ mod tests {
             fg: cyan
             bold: true
         "#;
-        let value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        let value: yaml_serde::Value = yaml_serde::from_str(yaml).unwrap();
         let def = StyleDefinition::parse(&value, "test").unwrap();
 
         match def {
@@ -241,7 +241,7 @@ mod tests {
             dark:
                 fg: white
         "#;
-        let value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        let value: yaml_serde::Value = yaml_serde::from_str(yaml).unwrap();
         let def = StyleDefinition::parse(&value, "test").unwrap();
 
         match def {
@@ -268,7 +268,7 @@ mod tests {
             light:
                 fg: black
         "#;
-        let value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        let value: yaml_serde::Value = yaml_serde::from_str(yaml).unwrap();
         let def = StyleDefinition::parse(&value, "test").unwrap();
 
         match def {
@@ -287,7 +287,7 @@ mod tests {
             dark:
                 fg: white
         "#;
-        let value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        let value: yaml_serde::Value = yaml_serde::from_str(yaml).unwrap();
         let def = StyleDefinition::parse(&value, "test").unwrap();
 
         match def {
@@ -301,21 +301,21 @@ mod tests {
 
     #[test]
     fn test_parse_empty_string_error() {
-        let value = serde_yaml::Value::String("".into());
+        let value = yaml_serde::Value::String("".into());
         let result = StyleDefinition::parse(&value, "test");
         assert!(result.is_err());
     }
 
     #[test]
     fn test_parse_whitespace_only_error() {
-        let value = serde_yaml::Value::String("   ".into());
+        let value = yaml_serde::Value::String("   ".into());
         let result = StyleDefinition::parse(&value, "test");
         assert!(result.is_err());
     }
 
     #[test]
     fn test_parse_invalid_type_error() {
-        let value = serde_yaml::Value::Number(42.into());
+        let value = yaml_serde::Value::Number(42.into());
         let result = StyleDefinition::parse(&value, "test");
         assert!(result.is_err());
     }
@@ -326,7 +326,7 @@ mod tests {
             fg: cyan
             light: invalid
         "#;
-        let value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        let value: yaml_serde::Value = yaml_serde::from_str(yaml).unwrap();
         let result = StyleDefinition::parse(&value, "test");
         assert!(matches!(
             result,

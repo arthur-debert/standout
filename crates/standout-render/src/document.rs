@@ -37,14 +37,14 @@ pub fn serialize_document<T: Serialize>(
 
 fn serialize_yaml<T: Serialize>(data: &T) -> Result<String, RenderError> {
     let json = serde_json::to_value(data)?;
-    let yaml: serde_yaml::Value = serde_yaml::from_str(&serde_json::to_string(&json)?)?;
+    let yaml: yaml_serde::Value = yaml_serde::from_str(&serde_json::to_string(&json)?)?;
     let projected = serde_json::to_value(&yaml)?;
     if !equivalent_json(&json, &projected) {
         return Err(RenderError::OperationError(
             "YAML cannot represent this JSON number without losing precision".into(),
         ));
     }
-    Ok(serde_yaml::to_string(&yaml)?)
+    Ok(yaml_serde::to_string(&yaml)?)
 }
 
 fn equivalent_json(left: &serde_json::Value, right: &serde_json::Value) -> bool {
@@ -146,7 +146,7 @@ pub fn deserialize_document<T: DeserializeOwned>(
 ) -> Result<T, RenderError> {
     match representation {
         Representation::Json | Representation::Ndjson => Ok(serde_json::from_str(text)?),
-        Representation::Yaml => Ok(serde_yaml::from_str(text)?),
+        Representation::Yaml => Ok(yaml_serde::from_str(text)?),
         Representation::Csv => {
             let mut reader = csv::Reader::from_reader(text.as_bytes());
             let mut rows = reader.deserialize::<T>();
@@ -259,7 +259,7 @@ mod json_feature_tests {
         let yaml = serialize_document(&raw, Representation::Yaml).unwrap();
         assert!(!yaml.contains("$serde_json"));
         let expected: serde_json::Value = serde_json::from_str(raw.get()).unwrap();
-        let actual: serde_json::Value = serde_yaml::from_str(&yaml).unwrap();
+        let actual: serde_json::Value = yaml_serde::from_str(&yaml).unwrap();
         assert!(equivalent_json(&expected, &actual));
         for number in [
             "123456789012345678901234567890",

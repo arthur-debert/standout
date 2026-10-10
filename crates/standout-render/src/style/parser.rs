@@ -83,8 +83,8 @@ pub fn parse_stylesheet(
     yaml: &str,
     palette: Option<&ThemePalette>,
 ) -> Result<ThemeVariants, StylesheetError> {
-    let root: serde_yaml::Value =
-        serde_yaml::from_str(yaml).map_err(|e| StylesheetError::Parse {
+    let root: yaml_serde::Value =
+        yaml_serde::from_str(yaml).map_err(|e| StylesheetError::Parse {
             path: None,
             message: e.to_string(),
         })?;

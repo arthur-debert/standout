@@ -409,8 +409,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 [[package]]
 name = "clapfig"
 version = "0.26.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b95ff918fcca4aac6bf4bccf3548658558b372de2ef716b5eb6aa55f71dc661a"
+source = "git+https://github.com/arthur-debert/clapfig?rev=cc8c971d83dfde3a35602d86b80d878ae846a64a#cc8c971d83dfde3a35602d86b80d878ae846a64a"
 dependencies = [
  "clap",
  "clapfig-derive",
@@ -431,8 +430,7 @@ dependencies = [
 [[package]]
 name = "clapfig-derive"
 version = "0.26.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85750201971499a4c26433a385e86c41b37e4940456b320a93e1c516d87b195e"
+source = "git+https://github.com/arthur-debert/clapfig?rev=cc8c971d83dfde3a35602d86b80d878ae846a64a#cc8c971d83dfde3a35602d86b80d878ae846a64a"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2118,7 +2116,6 @@ dependencies = [
  "proptest",
  "serde",
  "serde_json",
- "serde_yaml",
  "serial_test",
  "standout-bbparser",
  "standout-types",
@@ -2126,6 +2123,7 @@ dependencies = [
  "terminal_size",
  "thiserror 2.0.20",
  "unicode-width 0.2.2",
+ "yaml_serde",
 ]
 
 [[package]]

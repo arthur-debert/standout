@@ -11,7 +11,7 @@ readme = "README.md"
 
 [dependencies]
 # Core rendering (re-exported from standout-render)
-standout-render = { version = "14.0.0", path = "../standout-render" }
+standout-render = { version = "14.0.0", path = "../standout-render", default-features = false }
 standout-pipe = { path = "../standout-pipe", version = "14.0.0" }
 standout-bbparser = { version = "14.0.0", path = "../standout-bbparser" }
 standout-macros = { version = "14.0.0", path = "../standout-macros" }
@@ -37,10 +37,12 @@ unicode-width = "0.2"
 clap = { version = "4", features = ["derive", "help", "string"] }
 anyhow = "1"
 thiserror = "2"
-clapfig = "0.26"
+clapfig = { version = "0.26", git = "https://github.com/arthur-debert/clapfig", rev = "cc8c971d83dfde3a35602d86b80d878ae846a64a", default-features = false, features = ["clap", "derive"] }
 
 [features]
-default = []
+default = ["yaml", "os-theme"]
+yaml = ["clapfig/yaml"]
+os-theme = ["standout-render/os-theme"]
 macros = []
 test-support = ["standout-render/test-support"]
 
