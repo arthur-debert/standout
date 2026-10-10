@@ -26,3 +26,6 @@ consolidate-commits = true
 tag-name = "v{{version}}"
 tag-prefix = ""
 pre-release-commit-message = "Release {{version}}"
+
+[patch.crates-io]
+clapfig = { git = "https://github.com/arthur-debert/clapfig", rev = "cc8c971d83dfde3a35602d86b80d878ae846a64a" }

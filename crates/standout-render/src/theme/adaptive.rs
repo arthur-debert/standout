@@ -1,3 +1,4 @@
+#[cfg(feature = "os-theme")]
 use dark_light::{detect as detect_os_theme, Mode as OsThemeMode};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -6,6 +7,7 @@ pub enum ColorMode {
     Dark,
 }
 
+#[cfg(feature = "os-theme")]
 pub(crate) fn probe_color_mode() -> ColorMode {
     #[cfg(target_os = "macos")]
     let mode = detect_os_theme().unwrap_or(OsThemeMode::Light);
@@ -15,6 +17,11 @@ pub(crate) fn probe_color_mode() -> ColorMode {
         OsThemeMode::Dark => ColorMode::Dark,
         _ => ColorMode::Light,
     }
+}
+
+#[cfg(not(feature = "os-theme"))]
+pub(crate) fn probe_color_mode() -> ColorMode {
+    ColorMode::Light
 }
 
 #[cfg(test)]
@@ -96,6 +103,12 @@ mod tests {
             light_output.contains("\x1b[32"),
             "Expected green color in light mode, got: {light_output}"
         );
+    }
+
+    #[cfg(not(feature = "os-theme"))]
+    #[test]
+    fn probe_defaults_to_light_without_os_detection() {
+        assert_eq!(probe_color_mode(), ColorMode::Light);
     }
 
     #[test]

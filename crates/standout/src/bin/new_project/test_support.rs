@@ -214,6 +214,20 @@ pub(super) fn path_first_spec(root: &Path) -> ProjectSpec {
 }
 
 pub(super) fn run_cargo<const N: usize>(cwd: &Path, args: [&str; N]) {
+    let manifest: toml::Value =
+        toml::from_str(&std::fs::read_to_string(workspace_root().join("Cargo.toml")).unwrap())
+            .unwrap();
+    if let Some(patch) = manifest.get("patch") {
+        let mut config = toml::map::Map::new();
+        config.insert("patch".into(), patch.clone());
+        let directory = cwd.join(".cargo");
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(
+            directory.join("config.toml"),
+            toml::to_string(&config).unwrap(),
+        )
+        .unwrap();
+    }
     let output = std::process::Command::new("cargo")
         .current_dir(cwd)
         .args(args)

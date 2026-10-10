@@ -1,0 +1,1 @@
+- Add default-enabled `os-theme` and `yaml` features. Disabling them removes OS appearance detection and YAML configuration editing; YAML output remains available through `yaml_serde`.

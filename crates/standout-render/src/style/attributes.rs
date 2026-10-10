@@ -25,7 +25,7 @@ impl StyleAttributes {
     }
 
     pub fn parse_mapping(
-        map: &serde_yaml::Mapping,
+        map: &yaml_serde::Mapping,
         style_name: &str,
     ) -> Result<Self, StylesheetError> {
         let mut attrs = StyleAttributes::new();
@@ -52,7 +52,7 @@ impl StyleAttributes {
     fn set_attribute(
         &mut self,
         name: &str,
-        value: &serde_yaml::Value,
+        value: &yaml_serde::Value,
         style_name: &str,
     ) -> Result<(), StylesheetError> {
         match name {
@@ -177,7 +177,7 @@ impl StyleAttributes {
 }
 
 fn parse_bool(
-    value: &serde_yaml::Value,
+    value: &yaml_serde::Value,
     attr: &str,
     style_name: &str,
 ) -> Result<bool, StylesheetError> {
@@ -245,7 +245,7 @@ pub fn parse_shorthand(s: &str, style_name: &str) -> Result<StyleAttributes, Sty
 mod tests {
     use super::*;
     use console::Color;
-    use serde_yaml::{Mapping, Value};
+    use yaml_serde::{Mapping, Value};
 
     #[test]
     fn test_parse_mapping_fg_only() {

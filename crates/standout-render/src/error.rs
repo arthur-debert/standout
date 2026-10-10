@@ -46,8 +46,8 @@ impl From<serde_json::Error> for RenderError {
     }
 }
 
-impl From<serde_yaml::Error> for RenderError {
-    fn from(err: serde_yaml::Error) -> Self {
+impl From<yaml_serde::Error> for RenderError {
+    fn from(err: yaml_serde::Error) -> Self {
         RenderError::SerializationError(err.to_string())
     }
 }
@@ -211,8 +211,8 @@ mod tests {
     }
 
     #[test]
-    fn test_from_serde_yaml_error() {
-        let parse_err = serde_yaml::from_str::<serde_yaml::Value>("a:\n\tb: 1").unwrap_err();
+    fn test_from_yaml_serde_error() {
+        let parse_err = yaml_serde::from_str::<yaml_serde::Value>("a:\n\tb: 1").unwrap_err();
         let render_err: RenderError = parse_err.into();
         assert!(matches!(render_err, RenderError::SerializationError(_)));
     }

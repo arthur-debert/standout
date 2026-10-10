@@ -248,8 +248,8 @@ impl Default for Theme {
 }
 
 fn parse_icons_from_yaml_str(yaml: &str) -> Result<IconSet, StylesheetError> {
-    let root: serde_yaml::Value =
-        serde_yaml::from_str(yaml).map_err(|e| StylesheetError::Parse {
+    let root: yaml_serde::Value =
+        yaml_serde::from_str(yaml).map_err(|e| StylesheetError::Parse {
             path: None,
             message: e.to_string(),
         })?;
@@ -257,7 +257,7 @@ fn parse_icons_from_yaml_str(yaml: &str) -> Result<IconSet, StylesheetError> {
     parse_icons_from_yaml(&root)
 }
 
-fn parse_icons_from_yaml(root: &serde_yaml::Value) -> Result<IconSet, StylesheetError> {
+fn parse_icons_from_yaml(root: &yaml_serde::Value) -> Result<IconSet, StylesheetError> {
     let mut icon_set = IconSet::new();
 
     let mapping = match root.as_mapping() {
@@ -265,7 +265,7 @@ fn parse_icons_from_yaml(root: &serde_yaml::Value) -> Result<IconSet, Stylesheet
         None => return Ok(icon_set),
     };
 
-    let icons_value = match mapping.get(serde_yaml::Value::String("icons".into())) {
+    let icons_value = match mapping.get(yaml_serde::Value::String("icons".into())) {
         Some(v) => v,
         None => return Ok(icon_set),
     };
@@ -284,10 +284,10 @@ fn parse_icons_from_yaml(root: &serde_yaml::Value) -> Result<IconSet, Stylesheet
         })?;
 
         let def = match value {
-            serde_yaml::Value::String(s) => IconDefinition::new(s.clone()),
-            serde_yaml::Value::Mapping(map) => {
+            yaml_serde::Value::String(s) => IconDefinition::new(s.clone()),
+            yaml_serde::Value::Mapping(map) => {
                 let classic = map
-                    .get(serde_yaml::Value::String("classic".into()))
+                    .get(yaml_serde::Value::String("classic".into()))
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| StylesheetError::InvalidDefinition {
                         style: name.to_string(),
@@ -295,7 +295,7 @@ fn parse_icons_from_yaml(root: &serde_yaml::Value) -> Result<IconSet, Stylesheet
                         path: None,
                     })?;
                 let nerdfont = map
-                    .get(serde_yaml::Value::String("nerdfont".into()))
+                    .get(yaml_serde::Value::String("nerdfont".into()))
                     .and_then(|v| v.as_str());
                 let mut def = IconDefinition::new(classic);
                 if let Some(nf) = nerdfont {

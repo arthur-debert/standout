@@ -11,10 +11,10 @@ pub enum ColorDef {
 }
 
 impl ColorDef {
-    pub fn parse_value(value: &serde_yaml::Value) -> Result<Self, String> {
+    pub fn parse_value(value: &yaml_serde::Value) -> Result<Self, String> {
         match value {
-            serde_yaml::Value::String(s) => Self::parse_string(s),
-            serde_yaml::Value::Number(n) => {
+            yaml_serde::Value::String(s) => Self::parse_string(s),
+            yaml_serde::Value::Number(n) => {
                 let index = n
                     .as_u64()
                     .ok_or_else(|| format!("Invalid color palette index: {}", n))?;
@@ -26,7 +26,7 @@ impl ColorDef {
                 }
                 Ok(ColorDef::Color256(index as u8))
             }
-            serde_yaml::Value::Sequence(seq) => Self::parse_rgb_tuple(seq),
+            yaml_serde::Value::Sequence(seq) => Self::parse_rgb_tuple(seq),
             _ => Err(format!("Invalid color value: {:?}", value)),
         }
     }
@@ -136,7 +136,7 @@ impl ColorDef {
         Ok(ColorDef::Color256(index))
     }
 
-    fn parse_rgb_tuple(seq: &[serde_yaml::Value]) -> Result<Self, String> {
+    fn parse_rgb_tuple(seq: &[yaml_serde::Value]) -> Result<Self, String> {
         if seq.len() != 3 {
             return Err(format!(
                 "RGB tuple must have exactly 3 values, got {}",
@@ -182,7 +182,7 @@ impl ColorDef {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_yaml::Value;
+    use yaml_serde::Value;
 
     #[test]
     fn test_parse_named_colors() {

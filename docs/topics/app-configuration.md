@@ -11,6 +11,11 @@ See also:
 - [Templating](../crates/render/topics/templating.md) and [Styling System](../crates/render/topics/styling-system.md) for templates and styles.
 - [Topics System](topics-system.md) for help topics.
 
+Standout enables its `yaml` Cargo feature by default and forwards it to
+Clapfig for YAML configuration files. With `default-features = false`, TOML and
+JSON settings remain available. YAML output still uses `yaml_serde` regardless
+of this configuration feature.
+
 ## Basic Setup
 
 ```rust
