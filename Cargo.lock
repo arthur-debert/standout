@@ -1555,7 +1555,7 @@ checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
 
 [[package]]
 name = "standout"
-version = "14.0.0"
+version = "14.0.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -1588,7 +1588,7 @@ dependencies = [
 
 [[package]]
 name = "standout-bbparser"
-version = "14.0.0"
+version = "14.0.1"
 dependencies = [
  "console",
  "proptest",
@@ -1596,7 +1596,7 @@ dependencies = [
 
 [[package]]
 name = "standout-dispatch"
-version = "14.0.0"
+version = "14.0.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -1609,7 +1609,7 @@ dependencies = [
 
 [[package]]
 name = "standout-docs"
-version = "14.0.0"
+version = "14.0.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -1620,7 +1620,7 @@ dependencies = [
 
 [[package]]
 name = "standout-fixtures"
-version = "14.0.0"
+version = "14.0.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -1632,7 +1632,7 @@ dependencies = [
 
 [[package]]
 name = "standout-input"
-version = "14.0.0"
+version = "14.0.1"
 dependencies = [
  "clap",
  "inquire",
@@ -1646,7 +1646,7 @@ dependencies = [
 
 [[package]]
 name = "standout-macros"
-version = "14.0.0"
+version = "14.0.1"
 dependencies = [
  "heck",
  "proc-macro-crate",
@@ -1664,7 +1664,7 @@ dependencies = [
 
 [[package]]
 name = "standout-pipe"
-version = "14.0.0"
+version = "14.0.1"
 dependencies = [
  "tempfile",
  "thiserror",
@@ -1673,7 +1673,7 @@ dependencies = [
 
 [[package]]
 name = "standout-render"
-version = "14.0.0"
+version = "14.0.1"
 dependencies = [
  "console",
  "cssparser",
@@ -1698,7 +1698,7 @@ dependencies = [
 
 [[package]]
 name = "standout-seeker"
-version = "14.0.0"
+version = "14.0.1"
 dependencies = [
  "proptest",
  "regex",
@@ -1707,7 +1707,7 @@ dependencies = [
 
 [[package]]
 name = "standout-test"
-version = "14.0.0"
+version = "14.0.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -1727,7 +1727,7 @@ dependencies = [
 
 [[package]]
 name = "standout-types"
-version = "14.0.0"
+version = "14.0.1"
 dependencies = [
  "indexmap",
  "minijinja",
@@ -1788,7 +1788,7 @@ checksum = "c3a6bfce3d99adfa72d24750a61f782f3036a81e7f86d8841ee1326deaebd171"
 
 [[package]]
 name = "tdoo"
-version = "14.0.0"
+version = "14.0.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -1871,7 +1871,7 @@ dependencies = [
 
 [[package]]
 name = "todo-core"
-version = "14.0.0"
+version = "14.0.1"
 dependencies = [
  "anyhow",
  "serde",
